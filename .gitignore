@@ -3,3 +3,5 @@
 __pycache__/
 *.pyc
 data/pending.json
+data/watchlist.json
+data/executions.json
