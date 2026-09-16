@@ -11,6 +11,7 @@ from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from threading import Lock
 from typing import Literal
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -84,7 +85,8 @@ def _parse_time(value: str) -> datetime:
 
 class TradeIntent(BaseModel):
     market_url: HttpUrl
-    outcome: Literal["YES", "NO"]
+    outcome: str = Field(min_length=1, max_length=160)
+    market_type: str = Field(default="moneyline", min_length=1, max_length=120)
     max_price: Decimal = Field(gt=0, lt=1)
     budget_usdc: Decimal = Field(gt=0)
     note: str = ""
@@ -112,12 +114,105 @@ def _check_geoblock() -> dict:
     return geo
 
 
-def _resolve_asset(market, outcome: str) -> str:
-    selected = market.outcomes.yes if outcome == "YES" else market.outcomes.no
+def _norm(value: str) -> str:
+    return " ".join(value.casefold().strip().split())
+
+
+def _sports_event_slug(raw_url: str) -> str | None:
+    parsed = urlparse(raw_url)
+    if parsed.scheme != "https" or parsed.netloc not in {"polymarket.com", "www.polymarket.com"}:
+        return None
+    parts = [p for p in parsed.path.split("/") if p]
+    if len(parts) >= 3 and parts[0] == "sports":
+        return parts[-1]
+    return None
+
+
+def _market_type(market) -> str:
+    sports = getattr(market, "sports", None)
+    return str(getattr(sports, "sports_market_type", "") or "")
+
+
+def _outcome_matches_market(market, outcome: str) -> bool:
+    target = _norm(outcome)
+    if target in {"yes", "no"}:
+        return True
+    yes_label = _norm(str(getattr(market.outcomes.yes, "label", "")))
+    no_label = _norm(str(getattr(market.outcomes.no, "label", "")))
+    return target in {yes_label, no_label}
+
+
+def _select_market(client: PublicClient, intent: TradeIntent):
+    raw_url = str(intent.market_url)
+    event_slug = _sports_event_slug(raw_url)
+
+    if event_slug is None:
+        try:
+            return client.get_market(url=raw_url)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Market lookup failed: {exc}") from exc
+
+    try:
+        event = client.get_event(slug=event_slug)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Sports event lookup failed: {exc}") from exc
+
+    wanted_type = _norm(intent.market_type)
+    candidates = [
+        market
+        for market in event.markets
+        if _norm(_market_type(market)) == wanted_type and _outcome_matches_market(market, intent.outcome)
+    ]
+
+    if not candidates:
+        available_types = sorted({_market_type(m) for m in event.markets if _market_type(m)})
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"No '{intent.market_type}' market matched outcome '{intent.outcome}' in event "
+                f"'{getattr(event, 'title', event_slug)}'. Available market types include: "
+                + ", ".join(available_types[:20])
+            ),
+        )
+
+    accepting = [m for m in candidates if getattr(getattr(m, "state", None), "accepting_orders", None)]
+    if len(accepting) == 1:
+        return accepting[0]
+    if len(candidates) == 1:
+        return candidates[0]
+
+    active = [m for m in candidates if getattr(getattr(m, "state", None), "active", None)]
+    if len(active) == 1:
+        return active[0]
+
+    names = [getattr(m, "question", None) or getattr(m, "slug", None) or str(getattr(m, "id", "")) for m in candidates]
+    raise HTTPException(
+        status_code=400,
+        detail=f"Multiple '{intent.market_type}' markets matched. Be more specific. Matches: {names[:8]}",
+    )
+
+
+def _resolve_asset(market, outcome: str) -> tuple[str, str, str]:
+    target = _norm(outcome)
+    yes = market.outcomes.yes
+    no = market.outcomes.no
+    yes_label = str(getattr(yes, "label", "Yes"))
+    no_label = str(getattr(no, "label", "No"))
+
+    if target in {"yes", _norm(yes_label)}:
+        selected, side, label = yes, "YES", yes_label
+    elif target in {"no", _norm(no_label)}:
+        selected, side, label = no, "NO", no_label
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Outcome '{outcome}' does not match this market. Valid outcomes: '{yes_label}' or '{no_label}'.",
+        )
+
     asset_id = getattr(selected, "token_id", None) or getattr(selected, "position_id", None)
     if not asset_id:
-        raise HTTPException(status_code=400, detail=f"No tradable {outcome} asset found for this market.")
-    return str(asset_id)
+        raise HTTPException(status_code=400, detail=f"No tradable asset found for outcome '{label}'.")
+    return str(asset_id), side, label
 
 
 def _decimal(value) -> Decimal:
@@ -139,9 +234,10 @@ def _risk_checks(intent: TradeIntent, spread: Decimal | None, *, auto: bool = Fa
 
 def _quote(intent: TradeIntent, *, auto: bool = False) -> dict:
     geo = _check_geoblock()
+
     with PublicClient() as client:
-        market = client.get_market(url=str(intent.market_url))
-        asset_id = _resolve_asset(market, intent.outcome)
+        market = _select_market(client, intent)
+        asset_id, outcome_side, outcome_label = _resolve_asset(market, intent.outcome)
         book = client.get_order_book(asset_id=asset_id)
         buy_price = _decimal(client.get_price(asset_id=asset_id, side="BUY"))
         midpoint = _decimal(client.get_midpoint(asset_id=asset_id))
@@ -156,7 +252,7 @@ def _quote(intent: TradeIntent, *, auto: bool = False) -> dict:
         for level in book.asks:
             price = _decimal(level.price)
             size = _decimal(level.size)
-            if best_ask is None:
+            if best_ask is None or price < best_ask:
                 best_ask = price
                 ask_size = size
             if price <= intent.max_price:
@@ -167,8 +263,11 @@ def _quote(intent: TradeIntent, *, auto: bool = False) -> dict:
 
     return {
         "market": question,
+        "market_type": _market_type(market),
         "market_url": str(intent.market_url),
-        "outcome": intent.outcome,
+        "requested_outcome": intent.outcome,
+        "resolved_outcome": outcome_label,
+        "outcome_side": outcome_side,
         "asset_id": asset_id,
         "limit_price": str(intent.max_price),
         "budget_usdc": str(intent.budget_usdc),
@@ -177,7 +276,7 @@ def _quote(intent: TradeIntent, *, auto: bool = False) -> dict:
         "midpoint": str(midpoint),
         "spread": str(spread),
         "best_ask": str(best_ask) if best_ask is not None else None,
-        "best_ask_size": str(ask_size) if ask_size is not None else None,
+        "best_ask_size": str(ask_size) if best_ask is not None else None,
         "shares_available_at_limit": str(shares_available_at_limit),
         "would_cross_now": bool(best_ask is not None and best_ask <= intent.max_price),
         "geo_country": geo.get("country"),
@@ -240,6 +339,7 @@ def _execute_limit(intent: TradeIntent, quote: dict, *, auto: bool, signal_id: s
                     "side": "BUY",
                     "price": quote["limit_price"],
                     "size": quote["shares"],
+                    "outcome": quote["resolved_outcome"],
                 },
             },
         })
@@ -323,7 +423,7 @@ def _process_watchlist_once() -> None:
                 rec["status"] = "WATCHING"
             rec["updated_at"] = _now().isoformat()
             changed = True
-        except Exception as exc:  # keep watcher alive; expose error in status endpoint
+        except Exception as exc:
             rec["status"] = "ERROR"
             rec["last_error"] = str(exc)
             rec["updated_at"] = _now().isoformat()
@@ -351,13 +451,14 @@ async def lifespan(_: FastAPI):
             pass
 
 
-app = FastAPI(title="Polymarket Auto Bot", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Polymarket Auto Bot", version="0.3.0", lifespan=lifespan)
 
 
 @app.get("/health")
 def health():
     return {
         "ok": True,
+        "version": "0.3.0",
         "live_trading": LIVE_TRADING,
         "auto_trading": AUTO_TRADING,
         "poll_seconds": AUTO_POLL_SECONDS,
@@ -434,7 +535,6 @@ def auto_watch(signal: AutoSignal, x_signal_secret: str | None = Header(default=
     watch[signal.signal_id] = rec
     _save(WATCH_FILE, watch)
 
-    # Check immediately rather than waiting for the first poll interval.
     try:
         result = _try_execute_signal(signal)
         rec["last_check_at"] = _now().isoformat()
@@ -481,7 +581,7 @@ def index():
 <body>
   <h1>Polymarket Auto Bot</h1>
   <p><span class='pill'>Trading: {mode}</span><span class='pill'>Automation: {auto}</span></p>
-  <p>This version accepts authenticated signals and can watch a maximum price until expiry.</p>
+  <p>v0.3 accepts normal Polymarket sports event URLs and named outcomes such as a player or team.</p>
   <p>Open <a href='/docs'>/docs</a> for the API. Keep <code>LIVE_TRADING=false</code> and <code>AUTO_TRADING=false</code> until dry-run tests pass.</p>
   <p>Auto cap: ${MAX_AUTO_TRADE_USDC} per signal; daily cap: ${MAX_DAILY_BUDGET_USDC}; max spread: {MAX_SPREAD}.</p>
 </body>
