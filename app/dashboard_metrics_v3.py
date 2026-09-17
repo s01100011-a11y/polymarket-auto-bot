@@ -54,6 +54,25 @@ def _full_wallet_positions(wallet: str) -> dict[str, Any]:
     return positions
 
 
+def _executor_confirmed_closed_trade_ids() -> set[str]:
+    """Return trades for which Termux already confirmed the tracked wallet shares are zero."""
+    marker = "Wallet no longer holds the tracked test shares"
+    try:
+        queue = remote._queue_load()
+    except Exception:
+        return set()
+    closed: set[str] = set()
+    for item in queue.values():
+        if item.get("action") != "SELL" or item.get("status") != "FAILED":
+            continue
+        if marker not in str(item.get("error") or ""):
+            continue
+        trade_id = str((item.get("payload") or {}).get("trade_id") or "")
+        if trade_id:
+            closed.add(trade_id)
+    return closed
+
+
 def _reconcile_live_positions(force: bool = False) -> dict[str, Any]:
     global _RECONCILE_LAST
     now = time.time()
@@ -81,15 +100,38 @@ def _reconcile_live_positions(force: bool = False) -> dict[str, Any]:
             _RECONCILE_LAST = now
             return {"ok": True, "checked": 0, "changed": 0}
 
-        try:
-            positions = _full_wallet_positions(wallet)
-        except Exception as exc:
-            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
-
         changed = 0
         checked = 0
         stamp = _now_iso()
+        executor_confirmed_closed = _executor_confirmed_closed_trade_ids()
+        unresolved: list[dict[str, Any]] = []
         for rec in active:
+            if str(rec.get("id") or "") not in executor_confirmed_closed:
+                unresolved.append(rec)
+                continue
+            rec["status"] = "CLOSED_RECONCILED"
+            rec["remaining_shares"] = "0"
+            rec["closed_at"] = rec.get("closed_at") or stamp
+            rec["wallet_reconciled_at"] = stamp
+            rec["wallet_position_size"] = "0"
+            rec["reconciliation_note"] = (
+                "Termux checked the Polymarket wallet before SELL and found zero tracked shares. "
+                "The position was already closed outside this SELL request; exit price and realized P/L remain unknown."
+            )
+            changed += 1
+
+        if changed:
+            core._save(core.EXECUTIONS_FILE, executions)
+        if not unresolved:
+            _RECONCILE_LAST = now
+            return {"ok": True, "checked": len(active), "changed": changed}
+
+        try:
+            positions = _full_wallet_positions(wallet)
+        except Exception as exc:
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}", "changed": changed}
+
+        for rec in unresolved:
             q = rec.get("quote") or {}
             asset_id = str(q.get("asset_id") or "")
             if not asset_id or asset_id not in positions:
