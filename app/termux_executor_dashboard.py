@@ -423,6 +423,39 @@ def _record_sell_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> No
     core._save(core.EXECUTIONS_FILE, executions)
 
 
+def _record_already_closed_sell(queue_rec: dict[str, Any], error: str) -> bool:
+    """Reconcile a tracked trade when Termux confirms the wallet already has zero shares."""
+    marker = "Wallet no longer holds the tracked test shares"
+    if marker not in str(error or ""):
+        return False
+    payload = queue_rec.get("payload") or {}
+    trade_id = str(payload.get("trade_id") or "")
+    if not trade_id:
+        return False
+    executions = core._load(core.EXECUTIONS_FILE)
+    rec = executions.get(trade_id)
+    if not rec or rec.get("status") not in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}:
+        return False
+    now = _now_iso()
+    rec["status"] = "CLOSED_RECONCILED"
+    rec["remaining_shares"] = "0"
+    rec["closed_at"] = rec.get("closed_at") or now
+    rec["wallet_reconciled_at"] = now
+    rec["wallet_position_size"] = "0"
+    rec["reconciliation_note"] = (
+        "Termux checked the Polymarket wallet before SELL and found zero tracked shares. "
+        "The position was already closed outside this SELL request; exit price and realized P/L remain unknown."
+    )
+    rec.setdefault("execution", {})["close_reconciliation"] = {
+        "at": now,
+        "executor": "termux",
+        "reason": marker,
+    }
+    executions[trade_id] = rec
+    core._save(core.EXECUTIONS_FILE, executions)
+    return True
+
+
 @app.post("/api/executor/result/{request_id}")
 def executor_result(request_id: str, body: ExecutorResult, _: dict[str, Any] = Depends(_executor_auth)):
     with _QUEUE_LOCK:
@@ -433,9 +466,27 @@ def executor_result(request_id: str, body: ExecutorResult, _: dict[str, Any] = D
         if rec.get("status") in {"DONE", "FAILED"}:
             return {"ok": True, "duplicate": True}
         result = body.result or {}
-        rec["status"] = "DONE" if body.ok else "FAILED"
-        rec["result"] = result
-        rec["error"] = body.error
+        already_closed = bool(
+            not body.ok
+            and rec.get("action") == "SELL"
+            and "Wallet no longer holds the tracked test shares" in str(body.error or "")
+        )
+        if already_closed:
+            payload = rec.get("payload") or {}
+            result = {
+                "ok": True,
+                "status": "CLOSED_RECONCILED",
+                "already_closed": True,
+                "trade_id": payload.get("trade_id"),
+                "message": "Wallet already has zero tracked shares; dashboard position reconciled closed.",
+            }
+            rec["status"] = "DONE"
+            rec["result"] = result
+            rec["error"] = None
+        else:
+            rec["status"] = "DONE" if body.ok else "FAILED"
+            rec["result"] = result
+            rec["error"] = body.error
         rec["updated_at"] = _now_iso()
         data[request_id] = rec
         _queue_save(data)
@@ -443,6 +494,8 @@ def executor_result(request_id: str, body: ExecutorResult, _: dict[str, Any] = D
         _record_buy_result(rec, result)
     elif body.ok and rec.get("action") == "SELL":
         _record_sell_result(rec, result)
+    elif already_closed:
+        _record_already_closed_sell(rec, str(body.error or ""))
     return {"ok": True}
 
 
