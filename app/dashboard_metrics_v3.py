@@ -319,8 +319,8 @@ def _install_performance_and_paper_ui() -> None:
 '''
     html = html.replace("</style>", css + "</style>", 1)
 
-    live_only = "${(!x.paper&&x.source===\'termux_executor\')?`<button class=\\\"live-sell-btn\\\" data-live-sell=\\\"${esc(x.id||\'\')}\\\">SELL</button>`:\'—\'}"
-    with_paper = "${x.paper?`<button class=\\\"paper-close-btn\\\" data-paper-close=\\\"${esc(x.id||\'\')}\\\">CLOSE</button>`:((x.source===\'termux_executor\')?`<button class=\\\"live-sell-btn\\\" data-live-sell=\\\"${esc(x.id||\'\')}\\\">SELL</button>`:\'—\')}"
+    live_only = """${(!x.paper&&x.source==='termux_executor')?\`<button class="live-sell-btn" data-live-sell="${esc(x.id||'')}">SELL</button>\`:'—'}"""
+    with_paper = """${x.paper?\`<button class="paper-close-btn" data-paper-close="${esc(x.id||'')}">CLOSE</button>\`:((x.source==='termux_executor')?\`<button class="live-sell-btn" data-live-sell="${esc(x.id||'')}">SELL</button>\`:'—')}"""
     html = html.replace(live_only, with_paper)
     metric_anchor = "document.getElementById('budget').textContent=money(s.daily_budget_used)+' / '+money(s.max_daily_budget_usdc);"
     metric_js = """document.getElementById('budget').textContent=money(s.daily_budget_used)+' / '+money(s.max_daily_budget_usdc);
