@@ -319,15 +319,9 @@ def _install_performance_and_paper_ui() -> None:
 '''
     html = html.replace("</style>", css + "</style>", 1)
 
-    live_only = "${(!x.paper&&x.source==='termux_executor')?\`<button class=\"live-sell-btn\" data-live-sell=\"${esc(x.id||'')}\">SELL</button>\`:'—'}"
-    with_paper = "${x.paper?\`<button class=\"paper-close-btn\" data-paper-close=\"${esc(x.id||'')}\">CLOSE</button>\`:\`\${x.source==='termux_executor'?\`<button class=\\\"live-sell-btn\\\" data-live-sell=\\\"${esc(x.id||'')}\\\">SELL</button>\`:'—'}\`}"
-    # Use a direct final-string replacement; fallback below covers formatting changes.
+    live_only = "${(!x.paper&&x.source===\'termux_executor\')?`<button class=\\\"live-sell-btn\\\" data-live-sell=\\\"${esc(x.id||\'\')}\\\">SELL</button>`:\'—\'}"
+    with_paper = "${x.paper?`<button class=\\\"paper-close-btn\\\" data-paper-close=\\\"${esc(x.id||\'\')}\\\">CLOSE</button>`:((x.source===\'termux_executor\')?`<button class=\\\"live-sell-btn\\\" data-live-sell=\\\"${esc(x.id||\'\')}\\\">SELL</button>`:\'—\')}"
     html = html.replace(live_only, with_paper)
-    if "data-paper-close" not in html:
-        old = "(!x.paper&&x.source==='termux_executor')?\`<button class=\"live-sell-btn\" data-live-sell=\"${esc(x.id||'')}\">SELL</button>\`:'—'"
-        new = "x.paper?\`<button class=\"paper-close-btn\" data-paper-close=\"${esc(x.id||'')}\">CLOSE</button>\`:((x.source==='termux_executor')?\`<button class=\"live-sell-btn\" data-live-sell=\"${esc(x.id||'')}\">SELL</button>\`:'—')"
-        html = html.replace(old, new)
-
     metric_anchor = "document.getElementById('budget').textContent=money(s.daily_budget_used)+' / '+money(s.max_daily_budget_usdc);"
     metric_js = """document.getElementById('budget').textContent=money(s.daily_budget_used)+' / '+money(s.max_daily_budget_usdc);
   const roi=document.getElementById('performanceRoi'),wl=document.getElementById('performanceWL'),acc=document.getElementById('performanceAccuracy'),push=document.getElementById('performancePushes'),graded=document.getElementById('performanceGraded');
