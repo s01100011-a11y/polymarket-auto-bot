@@ -84,10 +84,6 @@ def _reconcile_live_positions(force: bool = False) -> dict[str, Any]:
         if not force and now - _RECONCILE_LAST < _RECONCILE_MIN_SECONDS:
             return {"ok": True, "skipped": "recent"}
 
-        wallet = _wallet_for_reconciliation()
-        if not wallet:
-            return {"ok": False, "reason": "Termux wallet is not known yet"}
-
         executions = core._load(core.EXECUTIONS_FILE)
         active = [
             rec
@@ -125,6 +121,17 @@ def _reconcile_live_positions(force: bool = False) -> dict[str, Any]:
         if not unresolved:
             _RECONCILE_LAST = now
             return {"ok": True, "checked": len(active), "changed": changed}
+
+        wallet = _wallet_for_reconciliation()
+        if not wallet:
+            if changed:
+                _RECONCILE_LAST = now
+            return {
+                "ok": bool(changed),
+                "reason": "Termux wallet is not known yet",
+                "checked": len(active) - len(unresolved),
+                "changed": changed,
+            }
 
         try:
             positions = _full_wallet_positions(wallet)
