@@ -7,7 +7,7 @@ from decimal import Decimal, ROUND_DOWN
 from typing import Any
 
 from polymarket import PublicClient
-from scripts import termux_executor as base
+import termux_executor as base
 
 # A SELL uses immediate FAK market execution, but never below this bounded floor.
 # Defaults allow at most 3 cents adverse movement from the best bid observed when
@@ -58,8 +58,6 @@ def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, A
 
     initial_best_bid = _best_bid(asset_id)
     hard_floor = max(SELL_MIN_PRICE, initial_best_bid - SELL_MAX_SLIPPAGE)
-    # Keep floor on a conservative cent grid. Lower rounding makes the FAK more
-    # likely to cross while preserving the configured worst-price boundary.
     hard_floor = hard_floor.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
     if hard_floor <= 0:
         hard_floor = SELL_MIN_PRICE
@@ -76,8 +74,6 @@ def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, A
             break
 
         best_bid = _best_bid(asset_id)
-        # Cross one cent below the current best bid, but never through the hard
-        # floor established at the start of the exit.
         min_price = max(hard_floor, best_bid - SELL_STEP)
         min_price = min_price.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
         if min_price <= 0:
@@ -157,8 +153,6 @@ def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, A
     }
 
 
-# main() resolves _sell from the base module at runtime, so replacing it here
-# upgrades SELL behavior while keeping the proven pairing/queue/heartbeat code.
 base._sell = _sell
 
 
