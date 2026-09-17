@@ -7,6 +7,9 @@ from decimal import Decimal, ROUND_DOWN
 from typing import Any
 
 from polymarket import PublicClient
+from polymarket._internal.actions import account as _account_actions
+from polymarket._internal.actions.orders.allowance import resolve_order_balance_allowance_target
+from polymarket._internal.wallet import signature_type_for
 import termux_executor as base
 
 # A SELL uses immediate FAK market execution, but never below this bounded floor.
@@ -17,6 +20,7 @@ SELL_STEP = max(Decimal("0.001"), min(Decimal("0.03"), Decimal(os.getenv("EXECUT
 SELL_MIN_PRICE = max(Decimal("0.001"), min(Decimal("0.50"), Decimal(os.getenv("EXECUTOR_SELL_MIN_PRICE", "0.01"))))
 SELL_RETRIES = max(1, min(5, int(os.getenv("EXECUTOR_SELL_RETRIES", "3"))))
 SELL_POSITION_WAIT_SECONDS = max(1, min(8, int(os.getenv("EXECUTOR_SELL_POSITION_WAIT_SECONDS", "4"))))
+BASE_UNITS = Decimal("1000000")
 
 
 def _best_bid(asset_id: str) -> Decimal:
@@ -43,18 +47,55 @@ def _response_price(response: Any, fallback: Decimal) -> Decimal:
     return fallback
 
 
+def _refresh_sell_balance(client: Any, asset_id: str) -> tuple[str, Decimal, dict[str, int]]:
+    """Refresh Polymarket's CLOB cache for this outcome token before a SELL."""
+    asset_type, resolved_asset_id = resolve_order_balance_allowance_target(
+        side="SELL", asset_id=asset_id
+    )
+    signature_type = signature_type_for(client.wallet_type)
+    update_path, update_params = _account_actions.build_update_balance_allowance_request(
+        asset_type=asset_type,
+        asset_id=str(resolved_asset_id) if resolved_asset_id is not None else None,
+        signature_type=signature_type,
+    )
+    # The SDK currently only auto-recovers one specific allowance rejection string.
+    # Explicitly refreshing here also handles the "balance is not enough" stale-cache case.
+    client._ctx.secure_clob.get_bytes(update_path, params=update_params)  # pyright: ignore[reportPrivateUsage]
+    time.sleep(0.15)
+    balance_allowance = client.get_balance_allowance(
+        asset_type=asset_type,
+        asset_id=str(resolved_asset_id) if resolved_asset_id is not None else None,
+    )
+    shares = Decimal(balance_allowance.balance) / BASE_UNITS
+    return str(asset_type), shares, dict(balance_allowance.allowances)
+
+
 def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, Any]:
     base._geo()
     asset_id = str(payload.get("asset_id") or "")
-    target = Decimal(str(payload.get("shares") or "0"))
+    requested_target = Decimal(str(payload.get("shares") or "0"))
     entry = Decimal(str(payload.get("entry_price") or "0"))
-    if not asset_id or target <= 0:
+    if not asset_id or requested_target <= 0:
         raise RuntimeError("SELL request has no tracked asset/shares")
 
     position_before = base._position_size(wallet, asset_id)
-    target = min(position_before, target)
+    target = min(position_before, requested_target)
     if target <= 0:
         raise RuntimeError("Wallet no longer holds the tracked test shares")
+
+    # Public position data can update before the CLOB balance cache. Refresh it explicitly.
+    with base._secure(private_key, wallet) as client:
+        asset_type, clob_sellable, allowances = _refresh_sell_balance(client, asset_id)
+    if clob_sellable <= 0:
+        raise RuntimeError(
+            f"CLOB still reports 0 sellable outcome shares after balance refresh "
+            f"({asset_type}); public position shows {position_before}. Wait for settlement and retry."
+        )
+    target = min(target, clob_sellable)
+    print(
+        f"SELL balance refreshed: public={position_before} CLOB={clob_sellable} "
+        f"target={target} asset_type={asset_type} allowances={len(allowances)}"
+    )
 
     initial_best_bid = _best_bid(asset_id)
     hard_floor = max(SELL_MIN_PRICE, initial_best_bid - SELL_MAX_SLIPPAGE)
@@ -82,10 +123,17 @@ def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, A
         response = None
         response_error = None
         with base._secure(private_key, wallet) as client:
+            _, clob_available_now, _ = _refresh_sell_balance(client, asset_id)
+            order_size = min(remaining, clob_available_now)
+            if order_size <= Decimal("0.0001"):
+                raise RuntimeError(
+                    "CLOB outcome-token balance became zero before SELL. "
+                    "No order was submitted; refresh/settlement is still pending."
+                )
             response = client.place_market_order(
                 token_id=asset_id,
                 side="SELL",
-                shares=str(remaining),
+                shares=str(order_size),
                 min_price=str(min_price),
                 order_type="FAK",
             )
@@ -95,7 +143,11 @@ def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, A
         if order_id:
             order_ids.append(order_id)
         if not accepted:
-            response_error = str(getattr(response, "message", None) or getattr(response, "code", None) or "FAK rejected")
+            response_error = str(
+                getattr(response, "message", None)
+                or getattr(response, "code", None)
+                or "FAK rejected"
+            )
 
         after = current_position
         if accepted:
@@ -117,6 +169,7 @@ def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, A
             "attempt": str(attempt),
             "best_bid": str(best_bid),
             "min_price": str(min_price),
+            "clob_available": str(clob_available_now),
             "sold_shares": str(sold_now),
             "order_id": order_id,
             "response": "accepted" if accepted else response_error or "rejected",
@@ -147,12 +200,32 @@ def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, A
         "realized_pnl": str(realized),
         "initial_best_bid": str(initial_best_bid),
         "min_sell_price": str(hard_floor),
+        "clob_sellable_before": str(clob_sellable),
         "attempts": attempts,
         "executor": base.WORKER_NAME,
         "execution_type": "FAK_MARKET_SELL",
     }
 
 
+# Also warm the CLOB balance cache after a successful BUY so future exits are ready.
+_original_buy = base._buy
+
+
+def _buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, Any]:
+    result = _original_buy(payload, private_key, wallet)
+    asset_id = str(result.get("asset_id") or "")
+    if result.get("ok") and asset_id:
+        try:
+            with base._secure(private_key, wallet) as client:
+                asset_type, clob_shares, _ = _refresh_sell_balance(client, asset_id)
+            result["clob_balance_after_buy"] = str(clob_shares)
+            result["clob_asset_type"] = asset_type
+        except Exception as exc:
+            result["clob_balance_refresh_warning"] = f"{type(exc).__name__}: {exc}"
+    return result
+
+
+base._buy = _buy
 base._sell = _sell
 
 
