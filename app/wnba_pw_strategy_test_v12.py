@@ -399,9 +399,7 @@ def _bot_test_stats_all(strategy_ids: list[str]) -> dict[str, dict[str, Any]]:
             for rec in open_rows:
                 open_values[str(rec.get("id") or "")] = None
 
-    result: dict[str, dict[str, Any]] = {}
-    for strategy_id in strategy_ids:
-        matched = [r for r in rows if strategy_id in (r.get("pw_strategies") or [])]
+    def summarize(matched: list[dict[str, Any]]) -> dict[str, Any]:
         wins = losses = pushes = 0
         closed = 0
         ungraded_closed = 0
@@ -447,7 +445,7 @@ def _bot_test_stats_all(strategy_ids: list[str]) -> dict[str, dict[str, Any]]:
 
         total_pnl = realized + open_pnl
         decided = wins + losses
-        result[strategy_id] = {
+        return {
             "entries": len(matched),
             "games": len(games),
             "open": open_count,
@@ -464,6 +462,20 @@ def _bot_test_stats_all(strategy_ids: list[str]) -> dict[str, dict[str, Any]]:
             "roi_pct": round(float(total_pnl / roi_stake * Decimal("100")), 1) if roi_stake > 0 else None,
             "roi_basis_stake_usdc": round(float(roi_stake), 2),
         }
+
+    result: dict[str, dict[str, Any]] = {}
+    for strategy_id in strategy_ids:
+        result[strategy_id] = summarize(
+            [r for r in rows if strategy_id in (r.get("pw_strategies") or [])]
+        )
+
+    # TOTAL is the union of all qualifying filter trades. Each physical PW
+    # alert/trade appears once here no matter how many strategies matched it.
+    total = summarize(rows)
+    filter_entry_credits = sum(int(result[sid].get("entries") or 0) for sid in strategy_ids)
+    total["filter_entry_credits"] = filter_entry_credits
+    total["duplicate_entry_credits_removed"] = max(0, filter_entry_credits - int(total.get("entries") or 0))
+    result["__total__"] = total
     return result
 
 
@@ -473,7 +485,8 @@ def wnba_pw_strategies():
     timestamps = [str(r.get("event_ts") or "") for r in rows if r.get("event_ts")]
     split = timestamps[len(timestamps) // 2] if timestamps else ""
     specs = _enabled_strategies()
-    bot_stats = _bot_test_stats_all([spec["id"] for spec in specs])
+    enabled_ids = [spec["id"] for spec in specs if spec.get("enabled")]
+    bot_stats = _bot_test_stats_all(enabled_ids)
 
     strategies = []
     for spec in specs:
@@ -490,16 +503,48 @@ def wnba_pw_strategies():
             }
         )
 
+    # Deduped portfolio total: each historical PW alert is counted once if it
+    # matches ANY enabled filter, even when it matches multiple filters.
+    total_hist_rows = [
+        r for r in rows
+        if any(_hist_match(strategy_id, r) for strategy_id in enabled_ids)
+    ]
+    total_early_rows = [
+        r for r in total_hist_rows
+        if not split or str(r.get("event_ts") or "") < split
+    ]
+    total_late_rows = [
+        r for r in total_hist_rows
+        if split and str(r.get("event_ts") or "") >= split
+    ]
+    total_historical = _stats(total_hist_rows)
+    historical_filter_credits = sum(
+        int((s.get("historical") or {}).get("alerts") or 0)
+        for s in strategies if s.get("enabled")
+    )
+    total_historical["filter_entry_credits"] = historical_filter_credits
+    total_historical["duplicate_entry_credits_removed"] = max(
+        0, historical_filter_credits - int(total_historical.get("alerts") or 0)
+    )
+
     return {
         "enabled": PW_STRATEGY_TEST_ENABLED,
         "mode": "independent_or",
         "paper_only": True,
         "repeated_alerts_count_as_entries": True,
-        "overlap_behavior": "One paper trade per Slack PW alert; every matched strategy receives attribution. No duplicate physical trade for strategy overlap.",
-        "historical_stake_model": "Flat $100 per PW alert at posted BK moneyline.",
+        "overlap_behavior": "One paper trade per Slack PW alert; every matched strategy receives attribution. TOTAL counts each PW alert/trade once across all enabled filters.",
+        "historical_stake_model": "Flat $100 per unique qualifying PW alert at posted BK moneyline.",
         "bot_pnl_model": "Actual paper stake. P/L includes realized closed P/L plus current midpoint P/L for open paper positions when priceable.",
         "split_ts": split,
         "strategies": strategies,
+        "total": {
+            "label": "TOTAL · ALL ENABLED FILTERS",
+            "rule": "Union of all enabled filters; crossover alerts are counted once.",
+            "historical": total_historical,
+            "early": _stats(total_early_rows),
+            "late": _stats(total_late_rows),
+            "bot_test": bot_stats.get("__total__", {}),
+        },
     }
 
 def _install_strategy_ui() -> None:
@@ -522,6 +567,9 @@ def _install_strategy_ui() -> None:
         </div>
         <div class="slack-mode-state" id="pwStrategyMode">PAPER ONLY · repeated PW alerts count</div>
       </div>
+      <div id="pwStrategyTotal" class="pw-strategy-total">
+        <div class="pw-strategy-loading">Loading deduped total stats…</div>
+      </div>
       <div class="pw-strategy-cards" id="pwStrategyCards">
         <div class="pw-strategy-loading">Loading bot and historical stats…</div>
       </div>
@@ -536,7 +584,10 @@ def _install_strategy_ui() -> None:
     html = html.replace('<form id="settingsForm">', panel + '<form id="settingsForm">', 1)
 
     css = """
-.pw-strategy-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
+.pw-strategy-total{margin-top:14px}
+.pw-strategy-total .pw-strategy-card{border-color:#41516d;background:#0d1726}
+.pw-strategy-total .pw-strategy-name{font-size:17px}
+.pw-strategy-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
 .pw-strategy-card{border:1px solid #273244;border-radius:12px;background:#0a111d;padding:13px;min-width:0}
 .pw-strategy-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px}
 .pw-strategy-name{font-size:15px;font-weight:900}
@@ -574,6 +625,37 @@ function pwStratClass(v){
 function pwMetric(label,value,cls){
  return '<div class="pw-strategy-metric"><div class="pw-strategy-metric-label">'+label+'</div><div class="pw-strategy-metric-value '+(cls||'')+'">'+value+'</div></div>';
 }
+function pwStrategyCard(x,isTotal){
+ const b=x.bot_test||{},s=x.historical||{},e=x.early||{},l=x.late||{};
+ const botWL=Number(b.wins||0)+'-'+Number(b.losses||0);
+ const histWL=Number(s.wins||0)+'-'+Number(s.losses||0);
+ const botDup=Number(b.duplicate_entry_credits_removed||0);
+ const histDup=Number(s.duplicate_entry_credits_removed||0);
+ const badge=isTotal?'<span class="pw-strategy-badge on">DEDUPED TOTAL</span>':'<span class="pw-strategy-badge '+(x.enabled?'on':'off')+'">'+(x.enabled?'ENABLED':'OFF')+'</span>';
+ return '<div class="pw-strategy-card">'+
+   '<div class="pw-strategy-card-head"><div><div class="pw-strategy-name">'+x.label+'</div><div class="pw-strategy-rule">'+x.rule+'</div></div>'+badge+'</div>'+
+   '<div class="pw-strategy-section"><div class="pw-strategy-section-title">BOT TEST · FORWARD PAPER RESULTS</div>'+
+     '<div class="pw-strategy-metrics">'+
+       pwMetric('Entries',Number(b.entries||0))+
+       pwMetric('Open',Number(b.open||0))+
+       pwMetric('W-L',botWL)+
+       pwMetric('P/L',pwStratMoney(b.pnl_usdc),pwStratClass(b.pnl_usdc))+
+       pwMetric('ROI',pwStratPct(b.roi_pct),pwStratClass(b.roi_pct))+
+     '</div>'+
+     '<div class="pw-strategy-sub">Realized '+pwStratMoney(b.realized_pnl_usdc)+' · Open P/L '+pwStratMoney(b.open_pnl_usdc)+(isTotal?' · '+botDup+' crossover credits removed':'')+'</div>'+
+   '</div>'+
+   '<div class="pw-strategy-section"><div class="pw-strategy-section-title">HISTORICAL PW ARCHIVE · FLAT $100</div>'+
+     '<div class="pw-strategy-metrics">'+
+       pwMetric('PW bets',Number(s.alerts||0))+
+       pwMetric('Games',Number(s.games||0))+
+       pwMetric('W-L',histWL)+
+       pwMetric('P/L',pwStratMoney(s.pnl_usdc),pwStratClass(s.pnl_usdc))+
+       pwMetric('ROI',pwStratPct(s.roi_pct),pwStratClass(s.roi_pct))+
+     '</div>'+
+     '<div class="pw-strategy-sub">Win '+(s.win_rate_pct==null?'—':Number(s.win_rate_pct).toFixed(1)+'%')+' · Early ROI '+pwStratPct(e.roi_pct)+' · Late ROI '+pwStratPct(l.roi_pct)+' · '+(s.alerts_per_game==null?'—':Number(s.alerts_per_game).toFixed(2))+' PW bets/game'+(isTotal?' · '+histDup+' crossover credits removed':'')+'</div>'+
+   '</div>'+
+ '</div>';
+}
 async function loadPwStrategies(){
  try{
   const r=await fetch('/api/wnba-pw/strategies',{cache:'no-store'}),d=await r.json();
@@ -581,42 +663,12 @@ async function loadPwStrategies(){
   const h=document.getElementById('pwStrategyHeadline');
   const m=document.getElementById('pwStrategyMode');
   const cards=document.getElementById('pwStrategyCards');
+  const total=document.getElementById('pwStrategyTotal');
   const enabled=(d.strategies||[]).filter(x=>x.enabled).length;
-  if(h)h.textContent=enabled+' of 4 independent filters enabled';
+  if(h)h.textContent=enabled+' of 4 independent filters enabled · total is deduped';
   if(m)m.textContent='PAPER ONLY · '+(d.repeated_alerts_count_as_entries?'repeated PW alerts count':'deduped');
-  if(cards){
-   cards.innerHTML=(d.strategies||[]).map(function(x){
-    const b=x.bot_test||{},s=x.historical||{},e=x.early||{},l=x.late||{};
-    const botWL=Number(b.wins||0)+'-'+Number(b.losses||0);
-    const histWL=Number(s.wins||0)+'-'+Number(s.losses||0);
-    const openNote=Number(b.open||0)+' open';
-    const unpriced=Number(b.open_unpriced||0);
-    return '<div class="pw-strategy-card">'+
-      '<div class="pw-strategy-card-head"><div><div class="pw-strategy-name">'+x.label+'</div><div class="pw-strategy-rule">'+x.rule+'</div></div>'+
-      '<span class="pw-strategy-badge '+(x.enabled?'on':'off')+'">'+(x.enabled?'ENABLED':'OFF')+'</span></div>'+
-      '<div class="pw-strategy-section"><div class="pw-strategy-section-title">BOT TEST · FORWARD PAPER RESULTS</div>'+
-        '<div class="pw-strategy-metrics">'+
-          pwMetric('Entries',Number(b.entries||0))+
-          pwMetric('Open',Number(b.open||0))+
-          pwMetric('W-L',botWL)+
-          pwMetric('P/L',pwStratMoney(b.pnl_usdc),pwStratClass(b.pnl_usdc))+
-          pwMetric('ROI',pwStratPct(b.roi_pct),pwStratClass(b.roi_pct))+
-        '</div>'+
-        '<div class="pw-strategy-sub">Realized '+pwStratMoney(b.realized_pnl_usdc)+' · Open P/L '+pwStratMoney(b.open_pnl_usdc)+' · '+openNote+(unpriced?' · '+unpriced+' open unpriced':'')+'</div>'+
-      '</div>'+
-      '<div class="pw-strategy-section"><div class="pw-strategy-section-title">HISTORICAL PW ARCHIVE · FLAT $100</div>'+
-        '<div class="pw-strategy-metrics">'+
-          pwMetric('PW bets',Number(s.alerts||0))+
-          pwMetric('Games',Number(s.games||0))+
-          pwMetric('W-L',histWL)+
-          pwMetric('P/L',pwStratMoney(s.pnl_usdc),pwStratClass(s.pnl_usdc))+
-          pwMetric('ROI',pwStratPct(s.roi_pct),pwStratClass(s.roi_pct))+
-        '</div>'+
-        '<div class="pw-strategy-sub">Win '+(s.win_rate_pct==null?'—':Number(s.win_rate_pct).toFixed(1)+'%')+' · Early ROI '+pwStratPct(e.roi_pct)+' · Late ROI '+pwStratPct(l.roi_pct)+' · '+(s.alerts_per_game==null?'—':Number(s.alerts_per_game).toFixed(2))+' PW bets/game</div>'+
-      '</div>'+
-    '</div>';
-   }).join('');
-  }
+  if(total&&d.total)total.innerHTML=pwStrategyCard(d.total,true);
+  if(cards)cards.innerHTML=(d.strategies||[]).map(function(x){return pwStrategyCard(x,false)}).join('');
  }catch(e){
   const h=document.getElementById('pwStrategyHeadline');
   const cards=document.getElementById('pwStrategyCards');
