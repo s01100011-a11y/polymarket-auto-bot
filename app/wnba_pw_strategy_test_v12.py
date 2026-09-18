@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -340,52 +341,130 @@ def _stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _paper_test_stats(strategy_id: str) -> dict[str, Any]:
+def _d(value: Any, default: str = "0") -> Decimal:
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return Decimal(default)
+
+
+def _realized_pnl(rec: dict[str, Any]) -> Decimal | None:
+    for key in ("realized_pnl", "pnl_usdc", "profit_usdc", "display_pnl"):
+        if rec.get(key) is not None:
+            try:
+                return Decimal(str(rec.get(key)))
+            except Exception:
+                pass
+    execution = rec.get("execution") or {}
+    for key in ("realized_pnl", "pnl_usdc", "profit_usdc"):
+        if execution.get(key) is not None:
+            try:
+                return Decimal(str(execution.get(key)))
+            except Exception:
+                pass
+    return None
+
+
+def _bot_test_stats_all(strategy_ids: list[str]) -> dict[str, dict[str, Any]]:
     executions = core._load(core.EXECUTIONS_FILE)
     rows = [
-        rec
-        for rec in executions.values()
-        if strategy_id in (rec.get("pw_strategies") or [])
+        rec for rec in executions.values()
+        if not rec.get("parent_trade_id")
+        and rec.get("pw_strategies")
+        and any(sid in (rec.get("pw_strategies") or []) for sid in strategy_ids)
     ]
-    open_count = sum(1 for r in rows if r.get("status") == "PAPER_OPEN")
-    closed = [r for r in rows if r.get("status") != "PAPER_OPEN"]
-    wins = 0
-    losses = 0
-    pnl = 0.0
-    for r in closed:
-        value = None
-        for key in ("realized_pnl", "pnl_usdc", "profit_usdc"):
-            if r.get(key) is not None:
-                try:
-                    value = float(r.get(key))
-                    break
-                except Exception:
-                    pass
-        if value is None:
-            execution = r.get("execution") or {}
-            for key in ("realized_pnl", "pnl_usdc", "profit_usdc"):
-                if execution.get(key) is not None:
+
+    # Price each open paper position once, even when the same PW alert is
+    # attributed to several strategies.
+    open_values: dict[str, Decimal | None] = {}
+    open_rows = [r for r in rows if r.get("status") == "PAPER_OPEN"]
+    if open_rows:
+        try:
+            with ingest.PublicClient() as client:
+                for rec in open_rows:
+                    trade_id = str(rec.get("id") or "")
+                    q = rec.get("quote") or {}
+                    asset_id = str(q.get("asset_id") or "")
+                    shares = _d(q.get("shares"))
+                    entry = _d(q.get("paper_entry_price") or q.get("entry_price") or q.get("limit_price"))
+                    if not trade_id or not asset_id or shares <= 0 or entry <= 0:
+                        open_values[trade_id] = None
+                        continue
                     try:
-                        value = float(execution.get(key))
-                        break
+                        midpoint = _d(client.get_midpoint(asset_id=asset_id))
+                        open_values[trade_id] = (midpoint - entry) * shares
                     except Exception:
-                        pass
-        if value is not None:
-            pnl += value
-            if value > 0:
+                        open_values[trade_id] = None
+        except Exception:
+            for rec in open_rows:
+                open_values[str(rec.get("id") or "")] = None
+
+    result: dict[str, dict[str, Any]] = {}
+    for strategy_id in strategy_ids:
+        matched = [r for r in rows if strategy_id in (r.get("pw_strategies") or [])]
+        wins = losses = pushes = 0
+        closed = 0
+        ungraded_closed = 0
+        realized = Decimal("0")
+        open_pnl = Decimal("0")
+        roi_stake = Decimal("0")
+        open_count = 0
+        open_unpriced = 0
+        games: set[str] = set()
+
+        for rec in matched:
+            decision = rec.get("pw_strategy_decision") or {}
+            game_id = str(decision.get("game_id") or "")
+            if game_id:
+                games.add(game_id)
+
+            budget = _d(rec.get("budget_usdc") or (rec.get("quote") or {}).get("budget_usdc"))
+            if rec.get("status") == "PAPER_OPEN":
+                open_count += 1
+                value = open_values.get(str(rec.get("id") or ""))
+                if value is None:
+                    open_unpriced += 1
+                    continue
+                open_pnl += value
+                if budget > 0:
+                    roi_stake += budget
+                continue
+
+            pnl = _realized_pnl(rec)
+            if pnl is None:
+                ungraded_closed += 1
+                continue
+            closed += 1
+            realized += pnl
+            if budget > 0:
+                roi_stake += budget
+            if pnl > 0:
                 wins += 1
-            elif value < 0:
+            elif pnl < 0:
                 losses += 1
-    stake = sum(float(r.get("budget_usdc") or 0) for r in closed if r.get("budget_usdc") is not None)
-    return {
-        "entries": len(rows),
-        "open": open_count,
-        "closed": len(closed),
-        "wins": wins,
-        "losses": losses,
-        "pnl_usdc": round(pnl, 2),
-        "roi_pct": round(pnl / stake * 100.0, 1) if stake else None,
-    }
+            else:
+                pushes += 1
+
+        total_pnl = realized + open_pnl
+        decided = wins + losses
+        result[strategy_id] = {
+            "entries": len(matched),
+            "games": len(games),
+            "open": open_count,
+            "open_unpriced": open_unpriced,
+            "closed": closed,
+            "ungraded_closed": ungraded_closed,
+            "wins": wins,
+            "losses": losses,
+            "pushes": pushes,
+            "win_rate_pct": round(wins / decided * 100.0, 1) if decided else None,
+            "realized_pnl_usdc": round(float(realized), 2),
+            "open_pnl_usdc": round(float(open_pnl), 2),
+            "pnl_usdc": round(float(total_pnl), 2),
+            "roi_pct": round(float(total_pnl / roi_stake * Decimal("100")), 1) if roi_stake > 0 else None,
+            "roi_basis_stake_usdc": round(float(roi_stake), 2),
+        }
+    return result
 
 
 @app.get("/api/wnba-pw/strategies", dependencies=[Depends(dashboard._auth)])
@@ -393,9 +472,11 @@ def wnba_pw_strategies():
     rows = _history_rows()
     timestamps = [str(r.get("event_ts") or "") for r in rows if r.get("event_ts")]
     split = timestamps[len(timestamps) // 2] if timestamps else ""
+    specs = _enabled_strategies()
+    bot_stats = _bot_test_stats_all([spec["id"] for spec in specs])
 
     strategies = []
-    for spec in _enabled_strategies():
+    for spec in specs:
         matched = [r for r in rows if _hist_match(spec["id"], r)]
         early = [r for r in matched if not split or str(r.get("event_ts") or "") < split]
         late = [r for r in matched if split and str(r.get("event_ts") or "") >= split]
@@ -405,7 +486,7 @@ def wnba_pw_strategies():
                 "historical": _stats(matched),
                 "early": _stats(early),
                 "late": _stats(late),
-                "paper_test": _paper_test_stats(spec["id"]),
+                "bot_test": bot_stats.get(spec["id"], {}),
             }
         )
 
@@ -415,15 +496,16 @@ def wnba_pw_strategies():
         "paper_only": True,
         "repeated_alerts_count_as_entries": True,
         "overlap_behavior": "One paper trade per Slack PW alert; every matched strategy receives attribution. No duplicate physical trade for strategy overlap.",
+        "historical_stake_model": "Flat $100 per PW alert at posted BK moneyline.",
+        "bot_pnl_model": "Actual paper stake. P/L includes realized closed P/L plus current midpoint P/L for open paper positions when priceable.",
         "split_ts": split,
         "strategies": strategies,
     }
 
-
 def _install_strategy_ui() -> None:
     html = dashboard.DASHBOARD_HTML
 
-    # Remove the old combined-filter panel if present in a cached/imported HTML.
+    # Remove the previous combined filter panel if it exists.
     if 'id="pwFilterPanel"' in html:
         start = html.find('<div class="slack-mode-box" id="pwFilterPanel"')
         if start >= 0:
@@ -431,46 +513,53 @@ def _install_strategy_ui() -> None:
             if end > start:
                 html = html[:start] + html[end:]
 
-    if 'id="pwStrategyPanel"' in html:
-        dashboard.DASHBOARD_HTML = html
-        return
-
     panel = """
     <div class="slack-mode-box" id="pwStrategyPanel" style="margin-top:16px">
       <div class="slack-mode-head">
         <div>
-          <div class="label">PW INDIVIDUAL STRATEGY TESTS</div>
-          <div class="slack-mode-value" id="pwStrategyHeadline">Loading strategies…</div>
+          <div class="label">PW FILTER PERFORMANCE</div>
+          <div class="slack-mode-value" id="pwStrategyHeadline">Loading 4 strategy filters…</div>
         </div>
         <div class="slack-mode-state" id="pwStrategyMode">PAPER ONLY · repeated PW alerts count</div>
       </div>
-      <div class="pw-strategy-table-wrap">
-        <table class="pw-strategy-table">
-          <thead>
-            <tr><th>Strategy</th><th>Status</th><th>Rule</th><th>PW bets</th><th>Games</th><th>W-L</th><th>Win %</th><th>P/L</th><th>ROI</th><th>Early ROI</th><th>Late ROI</th></tr>
-          </thead>
-          <tbody id="pwStrategyRows"><tr><td colspan="11">Loading…</td></tr></tbody>
-        </table>
+      <div class="pw-strategy-cards" id="pwStrategyCards">
+        <div class="pw-strategy-loading">Loading bot and historical stats…</div>
       </div>
-      <div class="slack-mode-note">Each strategy is tested independently. If one PW alert matches several strategies, the bot creates one paper trade and credits that same entry to every matching strategy. Repeated PW opportunity alerts remain separate entries.</div>
+      <div class="slack-mode-note">
+        BOT TEST = forward paper trades since these filters were enabled, using the configured bot stake.
+        HISTORICAL = full PW archive backtest using flat $100 per qualifying PW alert at the posted BK moneyline.
+        A repeated PW alert is a new opportunity and counts as a new entry. If one alert matches multiple filters,
+        one paper trade is made and the result is attributed to every matching filter.
+      </div>
     </div>
 """
     html = html.replace('<form id="settingsForm">', panel + '<form id="settingsForm">', 1)
 
     css = """
-.pw-strategy-table-wrap{overflow-x:auto;margin-top:12px}
-.pw-strategy-table{width:100%;border-collapse:collapse;min-width:1050px;font-size:12px}
-.pw-strategy-table th,.pw-strategy-table td{padding:9px 8px;border-bottom:1px solid #273244;text-align:right;white-space:nowrap}
-.pw-strategy-table th:first-child,.pw-strategy-table td:first-child,.pw-strategy-table th:nth-child(2),.pw-strategy-table td:nth-child(2),.pw-strategy-table th:nth-child(3),.pw-strategy-table td:nth-child(3){text-align:left}
-.pw-strategy-badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:900;letter-spacing:.04em}
+.pw-strategy-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
+.pw-strategy-card{border:1px solid #273244;border-radius:12px;background:#0a111d;padding:13px;min-width:0}
+.pw-strategy-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px}
+.pw-strategy-name{font-size:15px;font-weight:900}
+.pw-strategy-rule{font-size:10px;color:var(--muted);line-height:1.4;margin-top:4px}
+.pw-strategy-badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:900;letter-spacing:.04em;white-space:nowrap}
 .pw-strategy-badge.on{background:#15382f;border:1px solid #2f7d66;color:#a7f3d0}
 .pw-strategy-badge.off{background:#3a2020;border:1px solid #7f3d3d;color:#fecaca}
+.pw-strategy-section{border-top:1px solid #202b3d;margin-top:10px;padding-top:10px}
+.pw-strategy-section-title{font-size:10px;font-weight:900;letter-spacing:.08em;color:#93a4bb;margin-bottom:8px}
+.pw-strategy-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.pw-strategy-metric{background:#0d1725;border:1px solid #1e2b3e;border-radius:8px;padding:7px;min-width:0}
+.pw-strategy-metric-label{font-size:8px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);white-space:nowrap}
+.pw-strategy-metric-value{font-size:13px;font-weight:850;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pw-strategy-sub{font-size:9px;color:var(--muted);margin-top:7px;line-height:1.35}
+.pw-strategy-loading{font-size:12px;color:var(--muted);padding:8px 0}
+@media(max-width:900px){.pw-strategy-cards{grid-template-columns:1fr}.pw-strategy-metrics{grid-template-columns:repeat(5,minmax(70px,1fr));overflow-x:auto}}
 """
     html = html.replace("</style>", css + "\n</style>", 1)
 
     js = r"""
 function pwStratMoney(v){
- const n=Number(v||0),sign=n>0?'+':'';
+ if(v===null||v===undefined)return '—';
+ const n=Number(v),sign=n>0?'+':'';
  return sign+'$'+n.toFixed(2);
 }
 function pwStratPct(v){
@@ -478,37 +567,61 @@ function pwStratPct(v){
  const n=Number(v),sign=n>0?'+':'';
  return sign+n.toFixed(1)+'%';
 }
+function pwStratClass(v){
+ const n=Number(v);
+ return n>0?'green':n<0?'red':'';
+}
+function pwMetric(label,value,cls){
+ return '<div class="pw-strategy-metric"><div class="pw-strategy-metric-label">'+label+'</div><div class="pw-strategy-metric-value '+(cls||'')+'">'+value+'</div></div>';
+}
 async function loadPwStrategies(){
  try{
   const r=await fetch('/api/wnba-pw/strategies',{cache:'no-store'}),d=await r.json();
   if(!r.ok)throw new Error(d.detail||'strategy stats failed');
   const h=document.getElementById('pwStrategyHeadline');
   const m=document.getElementById('pwStrategyMode');
-  const body=document.getElementById('pwStrategyRows');
+  const cards=document.getElementById('pwStrategyCards');
   const enabled=(d.strategies||[]).filter(x=>x.enabled).length;
-  if(h)h.textContent=enabled+' independent strategies enabled';
+  if(h)h.textContent=enabled+' of 4 independent filters enabled';
   if(m)m.textContent='PAPER ONLY · '+(d.repeated_alerts_count_as_entries?'repeated PW alerts count':'deduped');
-  if(body){
-   body.innerHTML=(d.strategies||[]).map(function(x){
-    const s=x.historical||{},e=x.early||{},l=x.late||{};
-    return '<tr>'+
-      '<td><strong>'+x.label+'</strong></td>'+
-      '<td><span class="pw-strategy-badge '+(x.enabled?'on':'off')+'">'+(x.enabled?'ENABLED':'OFF')+'</span></td>'+
-      '<td>'+x.rule+'</td>'+
-      '<td>'+Number(s.alerts||0)+'</td>'+
-      '<td>'+Number(s.games||0)+'</td>'+
-      '<td>'+Number(s.wins||0)+'-'+Number(s.losses||0)+'</td>'+
-      '<td>'+(s.win_rate_pct==null?'—':Number(s.win_rate_pct).toFixed(1)+'%')+'</td>'+
-      '<td><strong>'+pwStratMoney(s.pnl_usdc)+'</strong></td>'+
-      '<td><strong>'+pwStratPct(s.roi_pct)+'</strong></td>'+
-      '<td>'+pwStratPct(e.roi_pct)+'</td>'+
-      '<td>'+pwStratPct(l.roi_pct)+'</td>'+
-    '</tr>';
+  if(cards){
+   cards.innerHTML=(d.strategies||[]).map(function(x){
+    const b=x.bot_test||{},s=x.historical||{},e=x.early||{},l=x.late||{};
+    const botWL=Number(b.wins||0)+'-'+Number(b.losses||0);
+    const histWL=Number(s.wins||0)+'-'+Number(s.losses||0);
+    const openNote=Number(b.open||0)+' open';
+    const unpriced=Number(b.open_unpriced||0);
+    return '<div class="pw-strategy-card">'+
+      '<div class="pw-strategy-card-head"><div><div class="pw-strategy-name">'+x.label+'</div><div class="pw-strategy-rule">'+x.rule+'</div></div>'+
+      '<span class="pw-strategy-badge '+(x.enabled?'on':'off')+'">'+(x.enabled?'ENABLED':'OFF')+'</span></div>'+
+      '<div class="pw-strategy-section"><div class="pw-strategy-section-title">BOT TEST · FORWARD PAPER RESULTS</div>'+
+        '<div class="pw-strategy-metrics">'+
+          pwMetric('Entries',Number(b.entries||0))+
+          pwMetric('Open',Number(b.open||0))+
+          pwMetric('W-L',botWL)+
+          pwMetric('P/L',pwStratMoney(b.pnl_usdc),pwStratClass(b.pnl_usdc))+
+          pwMetric('ROI',pwStratPct(b.roi_pct),pwStratClass(b.roi_pct))+
+        '</div>'+
+        '<div class="pw-strategy-sub">Realized '+pwStratMoney(b.realized_pnl_usdc)+' · Open P/L '+pwStratMoney(b.open_pnl_usdc)+' · '+openNote+(unpriced?' · '+unpriced+' open unpriced':'')+'</div>'+
+      '</div>'+
+      '<div class="pw-strategy-section"><div class="pw-strategy-section-title">HISTORICAL PW ARCHIVE · FLAT $100</div>'+
+        '<div class="pw-strategy-metrics">'+
+          pwMetric('PW bets',Number(s.alerts||0))+
+          pwMetric('Games',Number(s.games||0))+
+          pwMetric('W-L',histWL)+
+          pwMetric('P/L',pwStratMoney(s.pnl_usdc),pwStratClass(s.pnl_usdc))+
+          pwMetric('ROI',pwStratPct(s.roi_pct),pwStratClass(s.roi_pct))+
+        '</div>'+
+        '<div class="pw-strategy-sub">Win '+(s.win_rate_pct==null?'—':Number(s.win_rate_pct).toFixed(1)+'%')+' · Early ROI '+pwStratPct(e.roi_pct)+' · Late ROI '+pwStratPct(l.roi_pct)+' · '+(s.alerts_per_game==null?'—':Number(s.alerts_per_game).toFixed(2))+' PW bets/game</div>'+
+      '</div>'+
+    '</div>';
    }).join('');
   }
  }catch(e){
   const h=document.getElementById('pwStrategyHeadline');
-  if(h)h.textContent='Strategy stats unavailable: '+e.message;
+  const cards=document.getElementById('pwStrategyCards');
+  if(h)h.textContent='Strategy stats unavailable';
+  if(cards)cards.innerHTML='<div class="pw-strategy-loading">'+String(e.message||e)+'</div>';
  }
 }
 loadPwStrategies();
