@@ -27,14 +27,14 @@ class SlackTradingMode(BaseModel):
 def _mode() -> dict[str, Any]:
     saved = core._load(SLACK_MODE_FILE)
     auto_prepare_enabled = bool(saved.get("auto_prepare_enabled", saved.get("live_enabled", False)))
-    default_stake = min(Decimal("5"), remote.REMOTE_MAX_USDC)
+    default_stake = min(Decimal("5"), core.MAX_AUTO_TRADE_USDC)
     stake = Decimal(str(saved.get("stake_usdc") or default_stake))
-    stake = min(stake, remote.REMOTE_MAX_USDC)
+    stake = min(stake, core.MAX_AUTO_TRADE_USDC)
     return {"auto_prepare_enabled": auto_prepare_enabled, "live_enabled": False, "stake_usdc": str(stake)}
 
 
 def _save_mode(auto_prepare_enabled: bool, stake_usdc: Decimal) -> dict[str, Any]:
-    stake = min(Decimal(str(stake_usdc)), remote.REMOTE_MAX_USDC)
+    stake = min(Decimal(str(stake_usdc)), core.MAX_AUTO_TRADE_USDC)
     data = {"auto_prepare_enabled": bool(auto_prepare_enabled), "live_enabled": False, "stake_usdc": str(stake)}
     core._save(SLACK_MODE_FILE, data)
     # Slack can prepare live orders, but never dispatch them unattended.
@@ -151,7 +151,7 @@ def _slack_trade_handler(
     if _active_or_pending(asset_id, market_url, outcome_label):
         raise ValueError("An open or pending LIVE position already exists for this selection")
 
-    stake = min(Decimal(str(mode["stake_usdc"])), remote.REMOTE_MAX_USDC)
+    stake = min(Decimal(str(mode["stake_usdc"])), core.MAX_AUTO_TRADE_USDC)
     trade_id = f"slack-live-{slack_event_id[:12]}-{uuid.uuid4().hex[:6]}"
     payload = {
         "market_url": market_url,
@@ -209,7 +209,7 @@ def slack_trading_mode_get():
         "executor_geo_blocked": state.get("geo_blocked"),
         "executor_country": state.get("geo_country"),
         "executor_region": state.get("geo_region"),
-        "max_stake_usdc": str(remote.REMOTE_MAX_USDC),
+        "max_stake_usdc": str(core.MAX_AUTO_TRADE_USDC),
         "moneyline_only": True,
         "duplicate_position_guard": True,
         "unattended_live_execution": False,
@@ -275,10 +275,10 @@ def slack_reject_live(request_id: str):
 
 @app.put("/api/slack/trading-mode", dependencies=[Depends(dashboard._auth)])
 def slack_trading_mode_put(req: SlackTradingMode):
-    if req.stake_usdc > remote.REMOTE_MAX_USDC:
+    if req.stake_usdc > core.MAX_AUTO_TRADE_USDC:
         raise HTTPException(
             status_code=400,
-            detail=f"Slack live stake cannot exceed the Termux executor cap of {remote.REMOTE_MAX_USDC} USDC",
+            detail=f"Slack stake cannot exceed the dashboard Auto trade cap of {core.MAX_AUTO_TRADE_USDC} USDC",
         )
     saved = _save_mode(req.live_enabled, req.stake_usdc)
     return {
@@ -307,7 +307,7 @@ def _install_slack_live_controls() -> None:
         <button type="button" class="mode-paper-btn" id="slackPaperBtn">PAPER</button>
         <button type="button" class="mode-live-btn" id="slackLiveBtn">ENABLE AUTO-PREPARE</button>
       </div>
-      <div class="slack-mode-note">AUTO-PREPARE builds qualifying Predicted Winner moneyline orders from Slack alerts and places them in the approval queue. No real order is sent to the Termux executor until you approve that specific order.</div><div id="slackPendingApprovals" class="slack-pending"></div>
+      <div class="slack-mode-note">AUTO-PREPARE builds qualifying Predicted Winner moneyline orders from Slack alerts and places them in the approval queue. The Configuration → Auto trade cap is the maximum stake. No real order is sent to the Termux executor until you approve that specific order.</div><div id="slackPendingApprovals" class="slack-pending"></div>
     </div>
 """
     html = html.replace('<form id="settingsForm">', box + '<form id="settingsForm">', 1)
