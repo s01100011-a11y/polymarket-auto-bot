@@ -147,7 +147,7 @@ def executor_status():
         "geo_region": state.get("geo_region"),
         "geo_blocked": state.get("geo_blocked"),
         "worker_status": state.get("status"),
-        "remote_max_usdc": str(REMOTE_MAX_USDC),
+        "remote_max_usdc": str(core.MAX_AUTO_TRADE_USDC),
         "railway_live_trading": core.LIVE_TRADING,
     }
 
@@ -224,8 +224,8 @@ def _enqueue(action: str, payload: dict[str, Any]) -> dict[str, Any]:
 def _validate_remote_buy(req: live_trading.LiveTestBuy) -> None:
     if core._norm(req.market_type) != "moneyline":
         raise HTTPException(status_code=400, detail="Remote BUY is locked to moneyline only")
-    if req.budget_usdc > REMOTE_MAX_USDC:
-        raise HTTPException(status_code=400, detail=f"Remote test amount exceeds ${REMOTE_MAX_USDC}")
+    if req.budget_usdc > core.MAX_AUTO_TRADE_USDC:
+        raise HTTPException(status_code=400, detail=f"Remote amount exceeds dashboard Auto trade cap ${core.MAX_AUTO_TRADE_USDC}")
     if req.max_price > core.MAX_PRICE:
         raise HTTPException(status_code=400, detail=f"Maximum price exceeds MAX_PRICE={core.MAX_PRICE}")
     if core._sports_event_slug(str(req.market_url)) is None:
@@ -575,4 +575,4 @@ remoteStatus();setInterval(remoteStatus,3000);
 
 
 _install_remote_executor_ui()
-print("TERMUX_EXECUTOR_BRIDGE enabled max_usdc=" + str(REMOTE_MAX_USDC), flush=True)
+print("TERMUX_EXECUTOR_BRIDGE enabled dashboard_auto_cap_usdc=" + str(core.MAX_AUTO_TRADE_USDC), flush=True)
