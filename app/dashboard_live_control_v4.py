@@ -26,18 +26,19 @@ class SlackTradingMode(BaseModel):
 
 def _mode() -> dict[str, Any]:
     saved = core._load(SLACK_MODE_FILE)
-    live_enabled = bool(saved.get("live_enabled", False))
+    auto_prepare_enabled = bool(saved.get("auto_prepare_enabled", saved.get("live_enabled", False)))
     default_stake = min(Decimal("5"), remote.REMOTE_MAX_USDC)
     stake = Decimal(str(saved.get("stake_usdc") or default_stake))
     stake = min(stake, remote.REMOTE_MAX_USDC)
-    return {"live_enabled": live_enabled, "stake_usdc": str(stake)}
+    return {"auto_prepare_enabled": auto_prepare_enabled, "live_enabled": False, "stake_usdc": str(stake)}
 
 
-def _save_mode(live_enabled: bool, stake_usdc: Decimal) -> dict[str, Any]:
+def _save_mode(auto_prepare_enabled: bool, stake_usdc: Decimal) -> dict[str, Any]:
     stake = min(Decimal(str(stake_usdc)), remote.REMOTE_MAX_USDC)
-    data = {"live_enabled": bool(live_enabled), "stake_usdc": str(stake)}
+    data = {"auto_prepare_enabled": bool(auto_prepare_enabled), "live_enabled": False, "stake_usdc": str(stake)}
     core._save(SLACK_MODE_FILE, data)
-    ingest.SLACK_PAPER_ONLY = not bool(live_enabled)
+    # Slack can prepare live orders, but never dispatch them unattended.
+    ingest.SLACK_PAPER_ONLY = not bool(auto_prepare_enabled)
     return data
 
 
@@ -70,7 +71,7 @@ def _active_or_pending(asset_id: str, market_url: str, outcome: str) -> bool:
 
     queue = remote._queue_load()
     for rec in queue.values():
-        if rec.get("action") != "BUY" or rec.get("status") not in {"PENDING", "LEASED"}:
+        if rec.get("action") != "BUY" or rec.get("status") not in {"WAITING_APPROVAL", "PENDING", "LEASED"}:
             continue
         payload = rec.get("payload") or {}
         if payload.get("source") != "slack_live":
@@ -86,14 +87,32 @@ def _active_or_pending(asset_id: str, market_url: str, outcome: str) -> bool:
 _PAPER_HANDLER = ingest._paper_trade_from_alert
 
 
+def _prepare_remote_buy(payload: dict[str, Any]) -> dict[str, Any]:
+    req_id = f"exec-{uuid.uuid4().hex[:14]}"
+    record = {
+        "id": req_id,
+        "action": "BUY",
+        "status": "WAITING_APPROVAL",
+        "payload": payload,
+        "created_at": ingest._now_iso(),
+        "created_unix": time.time(),
+        "updated_at": ingest._now_iso(),
+    }
+    with remote._QUEUE_LOCK:
+        data = remote._queue_load()
+        data[req_id] = record
+        remote._queue_save(data)
+    return record
+
+
 def _slack_trade_handler(
     parsed: dict[str, Any],
     slack_event_id: str,
     slack_event: dict[str, Any],
 ) -> dict[str, Any]:
     mode = _mode()
-    ingest.SLACK_PAPER_ONLY = not mode["live_enabled"]
-    if not mode["live_enabled"]:
+    ingest.SLACK_PAPER_ONLY = not mode["auto_prepare_enabled"]
+    if not mode["auto_prepare_enabled"]:
         # Keep PAPER and LIVE sizing identical: the dashboard stake is the
         # single source of truth for every new Slack trade.
         ingest.SLACK_PAPER_BUDGET_USDC = Decimal(str(mode["stake_usdc"]))
@@ -103,12 +122,6 @@ def _slack_trade_handler(
         raise ValueError("Slack LIVE mode is hard-locked to moneyline only")
     if not parsed.get("selection"):
         raise ValueError("Could not identify the predicted winner")
-
-    ready, state = _executor_ready()
-    if not ready:
-        if state.get("geo_blocked"):
-            raise ValueError("Termux executor is geoblocked; LIVE Slack trade was not queued")
-        raise ValueError("Termux executor is not connected; LIVE Slack trade was not queued")
 
     event, market, outcome_label, outcome_obj = ingest._find_market(parsed)
     asset_id = str(
@@ -153,12 +166,14 @@ def _slack_trade_handler(
         "auto": True,
         "slack_event_id": slack_event_id,
     }
-    queued = remote._enqueue("BUY", payload)
+    queued = _prepare_remote_buy(payload)
     return {
         "id": trade_id,
         "trade_id": trade_id,
         "paper": False,
-        "queued": True,
+        "queued": False,
+        "prepared": True,
+        "requires_approval": True,
         "request_id": queued["id"],
         "source": "slack_live",
         "market": str(getattr(market, "question", None) or getattr(event, "title", "WNBA moneyline")),
@@ -173,7 +188,7 @@ def _slack_trade_handler(
 
 
 ingest._paper_trade_from_alert = _slack_trade_handler
-ingest.SLACK_PAPER_ONLY = not _mode()["live_enabled"]
+ingest.SLACK_PAPER_ONLY = not _mode()["auto_prepare_enabled"]
 
 
 @app.get("/api/slack/trading-mode", dependencies=[Depends(dashboard._auth)])
@@ -188,7 +203,7 @@ def slack_trading_mode_get():
     )
     return {
         **mode,
-        "paper_only": not mode["live_enabled"],
+        "paper_only": not mode["auto_prepare_enabled"],
         "executor_ready": ready,
         "executor_connected": connected,
         "executor_geo_blocked": state.get("geo_blocked"),
@@ -197,7 +212,65 @@ def slack_trading_mode_get():
         "max_stake_usdc": str(remote.REMOTE_MAX_USDC),
         "moneyline_only": True,
         "duplicate_position_guard": True,
+        "unattended_live_execution": False,
+        "approval_required": True,
     }
+
+
+@app.get("/api/slack/pending-live", dependencies=[Depends(dashboard._auth)])
+def slack_pending_live():
+    queue = remote._queue_load()
+    rows = []
+    for rec in queue.values():
+        payload = rec.get("payload") or {}
+        if rec.get("action") != "BUY" or rec.get("status") != "WAITING_APPROVAL" or payload.get("source") != "slack_live":
+            continue
+        rows.append({
+            "request_id": rec.get("id"),
+            "created_at": rec.get("created_at"),
+            "market_url": payload.get("market_url"),
+            "outcome": payload.get("outcome"),
+            "max_price": payload.get("max_price"),
+            "budget_usdc": payload.get("budget_usdc"),
+            "slack_event_id": payload.get("slack_event_id"),
+        })
+    rows.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    return {"pending": rows[:50]}
+
+
+@app.post("/api/slack/approve-live/{request_id}", dependencies=[Depends(dashboard._auth)])
+def slack_approve_live(request_id: str):
+    ready, state = _executor_ready()
+    if not ready:
+        if state.get("geo_blocked"):
+            raise HTTPException(status_code=409, detail="Termux executor is geoblocked")
+        raise HTTPException(status_code=409, detail="Termux executor is not connected")
+    with remote._QUEUE_LOCK:
+        queue = remote._queue_load()
+        rec = queue.get(request_id)
+        if not rec or rec.get("action") != "BUY" or rec.get("status") != "WAITING_APPROVAL":
+            raise HTTPException(status_code=404, detail="Prepared Slack order is not awaiting approval")
+        rec["status"] = "PENDING"
+        rec["approved_at"] = ingest._now_iso()
+        rec["updated_at"] = ingest._now_iso()
+        queue[request_id] = rec
+        remote._queue_save(queue)
+    return {"ok": True, "request_id": request_id, "status": "PENDING"}
+
+
+@app.post("/api/slack/reject-live/{request_id}", dependencies=[Depends(dashboard._auth)])
+def slack_reject_live(request_id: str):
+    with remote._QUEUE_LOCK:
+        queue = remote._queue_load()
+        rec = queue.get(request_id)
+        if not rec or rec.get("action") != "BUY" or rec.get("status") != "WAITING_APPROVAL":
+            raise HTTPException(status_code=404, detail="Prepared Slack order is not awaiting approval")
+        rec["status"] = "CANCELLED"
+        rec["rejected_at"] = ingest._now_iso()
+        rec["updated_at"] = ingest._now_iso()
+        queue[request_id] = rec
+        remote._queue_save(queue)
+    return {"ok": True, "request_id": request_id, "status": "CANCELLED"}
 
 
 @app.put("/api/slack/trading-mode", dependencies=[Depends(dashboard._auth)])
@@ -207,14 +280,14 @@ def slack_trading_mode_put(req: SlackTradingMode):
             status_code=400,
             detail=f"Slack live stake cannot exceed the Termux executor cap of {remote.REMOTE_MAX_USDC} USDC",
         )
-    if req.live_enabled:
-        ready, state = _executor_ready()
-        if not ready:
-            if state.get("geo_blocked"):
-                raise HTTPException(status_code=409, detail="Termux executor is geoblocked")
-            raise HTTPException(status_code=409, detail="Termux executor must be connected before LIVE mode can be enabled")
     saved = _save_mode(req.live_enabled, req.stake_usdc)
-    return {"ok": True, **saved, "paper_only": not saved["live_enabled"]}
+    return {
+        "ok": True,
+        **saved,
+        "paper_only": not saved["auto_prepare_enabled"],
+        "unattended_live_execution": False,
+        "approval_required": True,
+    }
 
 
 def _install_slack_live_controls() -> None:
@@ -225,22 +298,22 @@ def _install_slack_live_controls() -> None:
     box = """
     <div class="slack-mode-box">
       <div class="slack-mode-head">
-        <div><div class="label">Slack WNBA trading mode</div><div class="slack-mode-value" id="slackTradingMode">Checking…</div></div>
+        <div><div class="label">Slack WNBA live auto-prepare</div><div class="slack-mode-value" id="slackTradingMode">Checking…</div></div>
         <div class="slack-mode-state" id="slackExecutorState">Executor status…</div>
       </div>
       <div class="slack-mode-controls">
         <label>Stake per Slack alert (USDC, max <span id="slackStakeMax">—</span>)</label>
         <input id="slackLiveStake" type="number" min="0.01" step="0.01" value="5.00">
         <button type="button" class="mode-paper-btn" id="slackPaperBtn">PAPER</button>
-        <button type="button" class="mode-live-btn" id="slackLiveBtn">ENABLE LIVE</button>
+        <button type="button" class="mode-live-btn" id="slackLiveBtn">ENABLE AUTO-PREPARE</button>
       </div>
-      <div class="slack-mode-note">This stake applies to every new Slack trade in both PAPER and LIVE modes. LIVE sends qualifying Predicted Winner moneyline alerts to the connected Termux executor. One open/pending position per selection; Railway never signs the order.</div>
+      <div class="slack-mode-note">AUTO-PREPARE builds qualifying Predicted Winner moneyline orders from Slack alerts and places them in the approval queue. No real order is sent to the Termux executor until you approve that specific order.</div><div id="slackPendingApprovals" class="slack-pending"></div>
     </div>
 """
     html = html.replace('<form id="settingsForm">', box + '<form id="settingsForm">', 1)
 
     css = """
-.slack-mode-box{border:1px solid var(--border);border-radius:12px;background:#0d1522;padding:14px;margin:0 0 16px}.slack-mode-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.slack-mode-value{font-size:19px;font-weight:900;margin-top:5px}.slack-mode-state{font-size:11px;color:var(--muted);text-align:right}.slack-mode-controls{display:flex;gap:9px;align-items:end;flex-wrap:wrap;margin-top:12px}.slack-mode-controls label{width:100%;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800;letter-spacing:.07em}.slack-mode-controls input{width:145px;background:#080e18;border:1px solid #344157;color:#fff;border-radius:9px;padding:9px;font:inherit}.mode-paper-btn,.mode-live-btn{border-radius:9px;padding:9px 13px;font-weight:850;cursor:pointer}.mode-paper-btn{border:1px solid #3d4d67;background:#172033;color:#fff}.mode-live-btn{border:1px solid #7f1d1d;background:#3f1118;color:#fecdd3}.mode-live-btn.active{background:#7f1d1d;color:#fff}.mode-paper-btn.active{border-color:#2e7d64;background:#12362d;color:#a7f3d0}.slack-mode-note{font-size:10px;color:var(--muted);margin-top:9px;line-height:1.45}@media(max-width:650px){.slack-mode-head{align-items:flex-start;flex-direction:column}.slack-mode-state{text-align:left}}
+.slack-mode-box{border:1px solid var(--border);border-radius:12px;background:#0d1522;padding:14px;margin:0 0 16px}.slack-pending{margin-top:12px}.slack-pending-row{display:flex;justify-content:space-between;gap:10px;align-items:center;border-top:1px solid var(--border);padding:9px 0}.slack-pending-actions{display:flex;gap:6px}.slack-approve-btn,.slack-reject-btn{border-radius:8px;padding:6px 9px;font-size:11px;font-weight:850;cursor:pointer}.slack-approve-btn{border:1px solid #2e7d64;background:#12362d;color:#a7f3d0}.slack-reject-btn{border:1px solid #7f1d1d;background:#3f1118;color:#fecdd3}.slack-mode-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.slack-mode-value{font-size:19px;font-weight:900;margin-top:5px}.slack-mode-state{font-size:11px;color:var(--muted);text-align:right}.slack-mode-controls{display:flex;gap:9px;align-items:end;flex-wrap:wrap;margin-top:12px}.slack-mode-controls label{width:100%;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800;letter-spacing:.07em}.slack-mode-controls input{width:145px;background:#080e18;border:1px solid #344157;color:#fff;border-radius:9px;padding:9px;font:inherit}.mode-paper-btn,.mode-live-btn{border-radius:9px;padding:9px 13px;font-weight:850;cursor:pointer}.mode-paper-btn{border:1px solid #3d4d67;background:#172033;color:#fff}.mode-live-btn{border:1px solid #7f1d1d;background:#3f1118;color:#fecdd3}.mode-live-btn.active{background:#7f1d1d;color:#fff}.mode-paper-btn.active{border-color:#2e7d64;background:#12362d;color:#a7f3d0}.slack-mode-note{font-size:10px;color:var(--muted);margin-top:9px;line-height:1.45}@media(max-width:650px){.slack-mode-head{align-items:flex-start;flex-direction:column}.slack-mode-state{text-align:left}}
 """
     html = html.replace("</style>", css + "</style>", 1)
 
@@ -249,11 +322,12 @@ async function loadSlackTradingMode(){
  try{
   const r=await fetch('/api/slack/trading-mode',{cache:'no-store'}),d=await r.json();
   if(!r.ok)throw new Error(d.detail||'Could not load Slack mode');
-  const live=!!d.live_enabled;
+  const live=!!d.auto_prepare_enabled;
   const mode=document.getElementById('slackTradingMode'),state=document.getElementById('slackExecutorState'),stake=document.getElementById('slackLiveStake');
-  mode.textContent=live?'LIVE · REAL ORDERS':'PAPER ONLY';
+  mode.textContent=live?'LIVE AUTO-PREPARE · APPROVAL REQUIRED':'PAPER ONLY';
   mode.className='slack-mode-value '+(live?'red':'green');
   state.textContent=(d.executor_connected?'Termux connected':'Termux offline')+(d.executor_geo_blocked?' · BLOCKED':'')+(d.executor_country?' · '+d.executor_country+'/'+(d.executor_region||''):'');
+  try{const pr=await fetch('/api/slack/pending-live',{cache:'no-store'}),pd=await pr.json();const box=document.getElementById('slackPendingApprovals');const rows=(pd.pending||[]);box.innerHTML=rows.length?'<div class="label" style="margin-bottom:5px">Awaiting approval</div>'+rows.map(x=>`<div class="slack-pending-row"><div><b>${x.outcome||'Order'}</b><div class="muted">${Number(x.budget_usdc||0).toFixed(2)} · max ${Number(x.max_price||0).toFixed(3)}</div></div><div class="slack-pending-actions"><button class="slack-approve-btn" data-slack-approve="${x.request_id}">APPROVE</button><button class="slack-reject-btn" data-slack-reject="${x.request_id}">REJECT</button></div></div>`).join(''):''}catch(_e){}
   if(stake&&!stake.dataset.dirty)stake.value=d.stake_usdc;
   document.getElementById('slackStakeMax').textContent='$'+Number(d.max_stake_usdc).toFixed(2);
   document.getElementById('slackPaperBtn').classList.toggle('active',!live);
@@ -265,7 +339,7 @@ async function loadSlackTradingMode(){
 }
 async function setSlackTradingMode(live){
  const stake=document.getElementById('slackLiveStake').value;
- if(live&&!confirm('Enable REAL-MONEY Slack WNBA trading? Qualifying moneyline alerts will be queued automatically to the connected Termux executor using the displayed stake.'))return;
+ if(live&&!confirm('Enable LIVE AUTO-PREPARE? Qualifying Slack moneyline alerts will be prepared automatically, but every real order will still require your approval.'))return;
  try{
   const r=await fetch('/api/slack/trading-mode',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({live_enabled:live,stake_usdc:stake})});
   const d=await r.json();
@@ -277,6 +351,7 @@ async function setSlackTradingMode(live){
 document.getElementById('slackLiveStake').addEventListener('input',function(e){e.target.dataset.dirty='1'});
 document.getElementById('slackPaperBtn').addEventListener('click',function(){setSlackTradingMode(false)});
 document.getElementById('slackLiveBtn').addEventListener('click',function(){setSlackTradingMode(true)});
+document.addEventListener('click',async function(ev){const a=ev.target.closest('[data-slack-approve]'),r=ev.target.closest('[data-slack-reject]');if(!a&&!r)return;const id=(a||r).getAttribute(a?'data-slack-approve':'data-slack-reject');if(a&&!confirm('Approve this prepared live order for execution?'))return;try{const resp=await fetch(a?'/api/slack/approve-live/'+encodeURIComponent(id):'/api/slack/reject-live/'+encodeURIComponent(id),{method:'POST'}),d=await resp.json();if(!resp.ok)throw new Error(d.detail||'Action failed');await loadSlackTradingMode()}catch(e){alert(String(e))}});
 loadSlackTradingMode();
 setInterval(loadSlackTradingMode,5000);
 """
