@@ -97,6 +97,18 @@ def _install_filters() -> None:
     if 'id="statsModeFilter"' in html:
         return
 
+    # dashboard_metrics_v3 writes unfiltered stats during every normal dashboard
+    # refresh. Remove that block here so it cannot race/overwrite the selected
+    # BOTH/PAPER/LIVE view. Filtered stats are rendered only by
+    # refreshFilteredStats() below.
+    metric_overwrite = """  const roi=document.getElementById('performanceRoi'),wl=document.getElementById('performanceWL'),acc=document.getElementById('performanceAccuracy'),push=document.getElementById('performancePushes'),graded=document.getElementById('performanceGraded');
+  if(roi){const n=Number(s.roi_pct);roi.textContent=s.roi_pct===null||s.roi_pct===undefined?'—':n.toFixed(1)+'%';roi.className='performance-value '+(n>0?'green':n<0?'red':'')}
+  if(wl)wl.textContent=String(s.wins||0)+' / '+String(s.losses||0);
+  if(push)push.textContent=(s.pushes||0)+' push'+((s.pushes||0)===1?'':'es');
+  if(acc){const a=Number(s.accuracy_pct);acc.textContent=s.accuracy_pct===null||s.accuracy_pct===undefined?'—':a.toFixed(1)+'%'}
+  if(graded)graded.textContent=(s.graded_trades||0)+' graded closed trades';"""
+    html = html.replace(metric_overwrite, "")
+
     stats_filter = """
   <div class="mode-filter-row" id="statsModeFilter">
     <span class="mode-filter-label">Stats</span>
