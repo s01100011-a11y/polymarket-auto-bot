@@ -387,68 +387,69 @@ def _combined_predicate(row: dict[str, Any]) -> bool:
 @app.get("/api/wnba-pw/filters", dependencies=[Depends(dashboard._auth)])
 def wnba_pw_filters():
     rows = _history_rows()
+
+    def q(row: dict[str, Any]) -> bool:
+        return row.get("quarter") == PW_FILTER_QUARTER
+
+    def q_venue(row: dict[str, Any]) -> bool:
+        return q(row) and row.get("venue") == PW_FILTER_VENUE
+
+    def q_venue_price(row: dict[str, Any]) -> bool:
+        odds = row.get("bk_ml")
+        return bool(
+            q_venue(row)
+            and odds is not None
+            and PW_FILTER_MIN_ML <= int(odds) <= PW_FILTER_MAX_ML
+        )
+
+    def q_venue_price_edge(row: dict[str, Any]) -> bool:
+        edge = row.get("edge_pp_calc")
+        return bool(
+            q_venue_price(row)
+            and edge is not None
+            and float(edge) >= PW_FILTER_MIN_EDGE_PP
+        )
+
+    def all_rules(row: dict[str, Any]) -> bool:
+        ev = row.get("ev_pct_calc")
+        return bool(
+            q_venue_price_edge(row)
+            and ev is not None
+            and float(ev) >= PW_FILTER_MIN_EV_PCT
+        )
+
+    stages = [
+        ("quarter", "Quarter", f"{PW_FILTER_QUARTER} only", q),
+        ("venue", "Venue", f"Then require {PW_FILTER_VENUE.upper()}", q_venue),
+        ("price", "BK moneyline", f"Then require +{PW_FILTER_MIN_ML} to +{PW_FILTER_MAX_ML}", q_venue_price),
+        ("edge", "PW vs market edge", f"Then require >= {PW_FILTER_MIN_EDGE_PP:.1f} pp", q_venue_price_edge),
+        ("ev", "Expected value", f"Then require >= {PW_FILTER_MIN_EV_PCT:.1f}%", all_rules),
+    ]
     rules = [
         {
-            "id": "quarter",
-            "label": "Quarter",
+            "id": rule_id,
+            "label": label,
             "enabled": PW_FILTERS_ENABLED,
-            "rule": f"{PW_FILTER_QUARTER} only",
-            "stats": _rule_stats(rows, lambda r: r.get("quarter") == PW_FILTER_QUARTER),
-        },
-        {
-            "id": "venue",
-            "label": "Venue",
-            "enabled": PW_FILTERS_ENABLED,
-            "rule": f"{PW_FILTER_VENUE.upper()} team only",
-            "stats": _rule_stats(rows, lambda r: r.get("venue") == PW_FILTER_VENUE),
-        },
-        {
-            "id": "price",
-            "label": "BK moneyline",
-            "enabled": PW_FILTERS_ENABLED,
-            "rule": f"+{PW_FILTER_MIN_ML} to +{PW_FILTER_MAX_ML}",
-            "stats": _rule_stats(
-                rows,
-                lambda r: r.get("bk_ml") is not None
-                and PW_FILTER_MIN_ML <= int(r["bk_ml"]) <= PW_FILTER_MAX_ML,
-            ),
-        },
-        {
-            "id": "edge",
-            "label": "PW vs market edge",
-            "enabled": PW_FILTERS_ENABLED,
-            "rule": f">= {PW_FILTER_MIN_EDGE_PP:.1f} pp",
-            "stats": _rule_stats(
-                rows,
-                lambda r: r.get("edge_pp_calc") is not None
-                and float(r["edge_pp_calc"]) >= PW_FILTER_MIN_EDGE_PP,
-            ),
-        },
-        {
-            "id": "ev",
-            "label": "Expected value",
-            "enabled": PW_FILTERS_ENABLED,
-            "rule": f">= {PW_FILTER_MIN_EV_PCT:.1f}%",
-            "stats": _rule_stats(
-                rows,
-                lambda r: r.get("ev_pct_calc") is not None
-                and float(r["ev_pct_calc"]) >= PW_FILTER_MIN_EV_PCT,
-            ),
-        },
+            "rule": rule,
+            "stats": _rule_stats(rows, predicate),
+            "stats_mode": "cumulative",
+        }
+        for rule_id, label, rule, predicate in stages
     ]
 
-    combined_raw = [r for r in rows if _combined_predicate(r)]
+    combined_raw = [r for r in rows if all_rules(r)]
     combined_unique = _first_per_game_side(combined_raw) if PW_FILTER_ONE_PER_GAME_SIDE else combined_raw
     return {
         "enabled": PW_FILTERS_ENABLED,
         "strategy": "PW_FILTERED_AUTO_BET",
-        "assumption": "Historical stats use posted BK ML and flat $100 stakes. Main dashboard numbers dedupe to the first qualifying alert per game/side.",
+        "assumption": "Each filter row is cumulative. Historical stats use posted BK ML and flat $100 stakes. Main numbers dedupe to the first qualifying alert per game/side.",
         "rules": rules,
         "position_limit": {
             "id": "one_per_game_side",
             "label": "Position limit",
             "enabled": PW_FILTERS_ENABLED and PW_FILTER_ONE_PER_GAME_SIDE,
             "rule": "First qualifying bet per game/side only",
+            "stats": _stat(combined_unique),
         },
         "combined_before_dedupe": _stat(combined_raw),
         "auto_bet": _stat(combined_unique),
@@ -462,7 +463,6 @@ def wnba_pw_filters():
             "one_per_game_side": PW_FILTER_ONE_PER_GAME_SIDE,
         },
     }
-
 
 def _install_filter_ui() -> None:
     html = dashboard.DASHBOARD_HTML
