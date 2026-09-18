@@ -482,7 +482,10 @@ async def slack_events(request: Request):
                 rec["paper_trade_id"] = trade.get("id")
                 rec["paper_trade"] = trade
             else:
-                rec["status"] = "LIVE_TRADE_QUEUED" if trade.get("queued") else "LIVE_TRADE_CREATED"
+                if trade.get("requires_approval"):
+                    rec["status"] = "LIVE_TRADE_PREPARED"
+                else:
+                    rec["status"] = "LIVE_TRADE_QUEUED" if trade.get("queued") else "LIVE_TRADE_CREATED"
                 rec["live_trade_id"] = trade.get("id") or trade.get("trade_id")
                 rec["executor_request_id"] = trade.get("request_id")
                 rec["live_trade"] = trade
