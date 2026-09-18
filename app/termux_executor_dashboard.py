@@ -266,8 +266,8 @@ def request_sell(trade_id: str):
     rec = executions.get(trade_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Unknown remote test trade")
-    if rec.get("source") != "termux_executor" or rec.get("paper"):
-        raise HTTPException(status_code=400, detail="Only Termux live-test positions can be sold here")
+    if rec.get("source") not in {"termux_executor", "slack_live"} or rec.get("paper"):
+        raise HTTPException(status_code=400, detail="Only tracked Termux live positions can be sold here")
     if rec.get("status") not in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}:
         raise HTTPException(status_code=400, detail=f"Trade status is {rec.get('status')}")
     q = rec.get("quote") or {}
@@ -343,8 +343,10 @@ def _record_buy_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> Non
         "side": "BUY",
         "auto": False,
         "paper": False,
-        "source": "termux_executor",
+        "source": str(payload.get("source") or "termux_executor"),
         "budget_usdc": str(estimated_cost),
+        "slack_event_id": payload.get("slack_event_id"),
+        "auto": bool(payload.get("auto", False)),
         "filled_shares": str(filled),
         "pre_position_size": str(result.get("position_before") or "0"),
         "quote": {
@@ -402,9 +404,8 @@ def _record_sell_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> No
         "created_at": now,
         "submitted_at": now,
         "side": "SELL",
-        "auto": False,
         "paper": False,
-        "source": "termux_executor",
+        "source": str(payload.get("source") or "termux_executor"),
         "parent_trade_id": trade_id,
         "display_pnl": str(realized),
         "budget_usdc": str((sell_price * sold).quantize(Decimal("0.01"))),
