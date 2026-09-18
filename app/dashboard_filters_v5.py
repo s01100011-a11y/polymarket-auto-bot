@@ -29,10 +29,9 @@ def _trade_bucket(rec: dict[str, Any]) -> str | None:
     if "DRY_RUN" in status:
         return None
     source = str(rec.get("source") or "")
-    execution = rec.get("execution") or {}
-    if source in {"termux_executor", "slack_live"}:
-        return "live"
-    if execution.get("placed") is True:
+    # LIVE performance is bot performance only. Manual Termux "Live test"
+    # diagnostics stay visible in history but must not affect ROI/W-L/accuracy.
+    if source == "slack_live":
         return "live"
     return None
 
