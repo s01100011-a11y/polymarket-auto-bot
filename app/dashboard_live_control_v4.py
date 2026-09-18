@@ -94,6 +94,9 @@ def _slack_trade_handler(
     mode = _mode()
     ingest.SLACK_PAPER_ONLY = not mode["live_enabled"]
     if not mode["live_enabled"]:
+        # Keep PAPER and LIVE sizing identical: the dashboard stake is the
+        # single source of truth for every new Slack trade.
+        ingest.SLACK_PAPER_BUDGET_USDC = Decimal(str(mode["stake_usdc"]))
         return _PAPER_HANDLER(parsed, slack_event_id, slack_event)
 
     if parsed.get("market_kind") != "moneyline":
@@ -226,12 +229,12 @@ def _install_slack_live_controls() -> None:
         <div class="slack-mode-state" id="slackExecutorState">Executor status…</div>
       </div>
       <div class="slack-mode-controls">
-        <label>Stake per live alert (USDC, max <span id="slackStakeMax">—</span>)</label>
+        <label>Stake per Slack alert (USDC, max <span id="slackStakeMax">—</span>)</label>
         <input id="slackLiveStake" type="number" min="0.01" step="0.01" value="5.00">
         <button type="button" class="mode-paper-btn" id="slackPaperBtn">PAPER</button>
         <button type="button" class="mode-live-btn" id="slackLiveBtn">ENABLE LIVE</button>
       </div>
-      <div class="slack-mode-note">LIVE sends qualifying Predicted Winner moneyline alerts to the connected Termux executor. One open/pending position per selection; Railway never signs the order.</div>
+      <div class="slack-mode-note">This stake applies to every new Slack trade in both PAPER and LIVE modes. LIVE sends qualifying Predicted Winner moneyline alerts to the connected Termux executor. One open/pending position per selection; Railway never signs the order.</div>
     </div>
 """
     html = html.replace('<form id="settingsForm">', box + '<form id="settingsForm">', 1)
