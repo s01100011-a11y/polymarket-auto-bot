@@ -475,10 +475,17 @@ async def slack_events(request: Request):
 
     if SLACK_AUTO_PAPER:
         try:
-            paper = _paper_trade_from_alert(parsed, event_id, event)
-            rec["status"] = "PAPER_TRADE_CREATED"
-            rec["paper_trade_id"] = paper.get("id")
-            rec["paper_trade"] = paper
+            trade = _paper_trade_from_alert(parsed, event_id, event)
+            is_paper = bool(trade.get("paper", True))
+            if is_paper:
+                rec["status"] = "PAPER_TRADE_CREATED"
+                rec["paper_trade_id"] = trade.get("id")
+                rec["paper_trade"] = trade
+            else:
+                rec["status"] = "LIVE_TRADE_QUEUED" if trade.get("queued") else "LIVE_TRADE_CREATED"
+                rec["live_trade_id"] = trade.get("id") or trade.get("trade_id")
+                rec["executor_request_id"] = trade.get("request_id")
+                rec["live_trade"] = trade
         except Exception as exc:
             rec["status"] = "NO_TRADE"
             rec["error"] = str(exc)
