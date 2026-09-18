@@ -91,9 +91,14 @@ def _headers(token: str) -> dict[str, str]:
 
 
 def _geo() -> dict[str, Any]:
-    r = httpx.get("https://polymarket.com/api/geoblock", timeout=10)
-    r.raise_for_status()
-    geo = r.json()
+    # Some mobile networks advertise IPv6 for polymarket.com even when that route
+    # is unusable. Bind the HTTP transport to IPv4 so the geoblock check follows
+    # the same working path as `curl -4`.
+    transport = httpx.HTTPTransport(local_address="0.0.0.0", retries=1)
+    with httpx.Client(transport=transport, timeout=12) as h:
+        r = h.get("https://polymarket.com/api/geoblock")
+        r.raise_for_status()
+        geo = r.json()
     if geo.get("blocked"):
         raise RuntimeError(
             f"Polymarket geoblock reports this phone network is blocked ({geo.get('country')}/{geo.get('region')}). "
@@ -365,8 +370,16 @@ def main() -> None:
     while True:
         try:
             if time.time() - last_heartbeat >= 20:
-                geo = _geo()
-                _post_heartbeat(token, private_key, wallet, geo, "Ready")
+                heartbeat_status = "Ready"
+                try:
+                    geo = _geo()
+                except Exception as geo_exc:
+                    # Keep the Railway bridge alive even if the public geoblock
+                    # endpoint is temporarily unreachable. Every BUY/SELL still
+                    # performs its own mandatory fresh _geo() check and will fail
+                    # closed if that check cannot be completed.
+                    heartbeat_status = f"Geoblock check unavailable: {type(geo_exc).__name__}: {geo_exc}"
+                _post_heartbeat(token, private_key, wallet, geo, heartbeat_status)
                 last_heartbeat = time.time()
 
             r = httpx.get(f"{BRIDGE_URL}/api/executor/next", headers=_headers(token), timeout=20)
