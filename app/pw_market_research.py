@@ -178,12 +178,15 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
             decision = strategy._decision(text, event_id)
             matches = list(decision.get("matched_strategies") or [])
             with history._db() as con:
-                prior = con.execute(
+                # _original_save_alert has already persisted this PW call,
+                # so the canonical alerts table gives the true same-game/side
+                # call number, including calls from before this deployment.
+                same_side_call_no = con.execute(
                     """
-                    SELECT COUNT(*) c FROM pw_market_watches
-                    WHERE game_id=? AND pick_abbr=? AND created_at < ?
+                    SELECT COUNT(*) c FROM alerts
+                    WHERE game_id=? AND predicted_winner_abbr=?
                     """,
-                    (game_id, abbr, datetime.now(timezone.utc).isoformat()),
+                    (game_id, abbr),
                 ).fetchone()["c"]
                 alert_key = f"{event_id}:{asset_id}"
                 con.execute(
@@ -197,7 +200,7 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
                     (
                         alert_key, game_id, event_id, pick, abbr, venue, row.get("quarter"),
                         row.get("score_at_alert"), row.get("bk_ml"), row.get("win_probability"),
-                        json.dumps(matches), int(prior or 0) + 1,
+                        json.dumps(matches), max(1, int(same_side_call_no or 0)),
                         str(getattr(event, "slug", "") or "") or None,
                         str(getattr(market, "id", "") or "") or None,
                         str(getattr(market, "condition_id", "") or getattr(market, "conditionId", "") or "") or None,
