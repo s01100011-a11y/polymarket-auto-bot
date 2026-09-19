@@ -95,7 +95,7 @@ def _prepare_remote_buy(payload: dict[str, Any]) -> dict[str, Any]:
     record = {
         "id": req_id,
         "action": "BUY",
-        "status": "PENDING" if core.AUTO_TRADING else "WAITING_APPROVAL",
+        "status": "PENDING" if core.auto_trading_enabled() else "WAITING_APPROVAL",
         "payload": payload,
         "created_at": ingest._now_iso(),
         "created_unix": time.time(),
