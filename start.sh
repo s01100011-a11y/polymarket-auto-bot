@@ -50,32 +50,31 @@ if ! tailscale --socket="$TS_SOCKET" up \
 fi
 
 echo "TAILSCALE_READY"
-tailscale --socket="$TS_SOCKET" status || true
 tailscale --socket="$TS_SOCKET" ip -4 || true
-tailscale --socket="$TS_SOCKET" ping --timeout=5s bob-mbp-ubuntu || true
+sleep 1
+tailscale --socket="$TS_SOCKET" ping --timeout=5s 100.81.244.65 || true
 
-# Connectivity checks are informative only; the bot still starts if the PW server is offline.
+# PW checks are informative only; the bot still starts if the PW server is offline.
 python - <<'PY'
 import os
 import httpx
 
 proxy = "http://127.0.0.1:1055"
-host = "bob-mbp-ubuntu.taila35415.ts.net"
+since = os.getenv("PW_EXPORT_SINCE", "2026-08-01")
 checks = [
-    ("WNBA_HTTPS_DNS", os.getenv("PW_WNBA_EXPORT_URL", f"https://{host}:8445/api/pw-export"), True),
-    ("NBA_HTTPS_DNS", os.getenv("PW_NBA_EXPORT_URL", f"https://{host}:8444/api/pw-export"), True),
-    ("WNBA_HTTP_DNS", f"http://{host}:8445/api/pw-export", True),
-    ("NBA_HTTP_DNS", f"http://{host}:8444/api/pw-export", True),
-    ("WNBA_HTTPS_IP", "https://100.81.244.65:8445/api/pw-export", False),
-    ("NBA_HTTPS_IP", "https://100.81.244.65:8444/api/pw-export", False),
+    ("WNBA", os.getenv("PW_WNBA_EXPORT_URL", "http://bob-mbp-ubuntu.taila35415.ts.net:8445/api/pw-export")),
+    ("NBA", os.getenv("PW_NBA_EXPORT_URL", "http://bob-mbp-ubuntu.taila35415.ts.net:8444/api/pw-export")),
 ]
-for name, url, verify in checks:
+for name, url in checks:
     try:
-        with httpx.Client(proxy=proxy, timeout=5.0, verify=verify) as client:
-            r = client.get(url, params={"source": "live"})
-        print(f"TAILSCALE_DIAG check={name} status={r.status_code}")
+        with httpx.Client(proxy=proxy, timeout=7.0, follow_redirects=True) as client:
+            r = client.get(url, params={"source": "live", "since": since})
+        msg = f"TAILSCALE_PW_CHECK sport={name} status={r.status_code}"
+        if r.status_code >= 400:
+            msg += " body=" + r.text[:160].replace("\n", " ")
+        print(msg)
     except Exception as exc:
-        print(f"TAILSCALE_DIAG check={name} error={type(exc).__name__}: {exc}")
+        print(f"TAILSCALE_PW_CHECK sport={name} error={type(exc).__name__}: {exc}")
 PY
 
 exec uvicorn app.wnba_pw_strategy_test_v12:app --host 0.0.0.0 --port "${PORT:-8080}"
