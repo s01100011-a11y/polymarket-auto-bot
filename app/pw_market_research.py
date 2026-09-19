@@ -318,7 +318,7 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
 
     def event_slug_candidates(team_a: str, team_b: str, dt: datetime) -> list[str]:
         et = dt.astimezone(ZoneInfo("America/New_York"))
-        dates = [(et + timedelta(days=d)).date().isoformat() for d in (-1,0,1)]
+        dates = [(et + timedelta(days=d)).date().isoformat() for d in (0,-1,1)]
         out: list[str] = []
         for a in TEAM_SLUGS.get(team_a, [team_a.lower()]):
             for b in TEAM_SLUGS.get(team_b, [team_b.lower()]):
@@ -568,18 +568,63 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
                 unique[key]=(a,dt)
 
             mapped=0; map_errors=0
-            for key,(a,dt) in unique.items():
+            items=list(unique.items())
+            for idx,(key,(a,dt)) in enumerate(items, start=1):
                 existing=maps.get(key)
                 if existing and existing.get("status")=="OK" and existing.get("asset_id"):
+                    if idx % 25 == 0:
+                        print(f"PW_MARKET_MAP_PROGRESS done={idx}/{len(items)} ok={sum(1 for x in maps.values() if x.get('status')=='OK')} errors={sum(1 for x in maps.values() if x.get('status')!='OK')}", flush=True)
                     continue
-                m=map_history_game(
-                    str(a["game_id"]),str(a["predicted_winner_abbr"]),str(a["predicted_winner"]),
-                    str(a["team_a"]),str(a["team_b"]),dt
+
+                # If the other side of this same game is already mapped, derive
+                # this side by swapping the two binary moneyline outcome tokens.
+                sibling = next(
+                    (
+                        x for (gid,_),x in maps.items()
+                        if gid == str(a["game_id"])
+                        and x.get("status") == "OK"
+                        and x.get("asset_id")
+                        and x.get("opposite_asset_id")
+                    ),
+                    None,
                 )
+                if sibling:
+                    m={
+                        "game_id":str(a["game_id"]),
+                        "pick_abbr":str(a["predicted_winner_abbr"]),
+                        "event_slug":sibling.get("event_slug"),
+                        "market_id":sibling.get("market_id"),
+                        "condition_id":sibling.get("condition_id"),
+                        "asset_id":sibling.get("opposite_asset_id"),
+                        "opposite_asset_id":sibling.get("asset_id"),
+                        "outcome_label":sibling.get("opposite_outcome_label"),
+                        "opposite_outcome_label":sibling.get("outcome_label"),
+                        "status":"OK","error":None,"mapped_at":datetime.now(timezone.utc).isoformat(),
+                    }
+                    with history._db() as con:
+                        con.execute(
+                            """
+                            INSERT OR REPLACE INTO pw_market_history_map(
+                                game_id,pick_abbr,event_slug,market_id,condition_id,asset_id,
+                                opposite_asset_id,outcome_label,opposite_outcome_label,status,error,mapped_at
+                            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                            """,
+                            tuple(m[k] for k in (
+                                "game_id","pick_abbr","event_slug","market_id","condition_id","asset_id",
+                                "opposite_asset_id","outcome_label","opposite_outcome_label","status","error","mapped_at"
+                            )),
+                        )
+                else:
+                    m=map_history_game(
+                        str(a["game_id"]),str(a["predicted_winner_abbr"]),str(a["predicted_winner"]),
+                        str(a["team_a"]),str(a["team_b"]),dt
+                    )
+                    time.sleep(history_sleep)
                 maps[key]=m
                 if m.get("status")=="OK": mapped+=1
                 else: map_errors+=1
-                time.sleep(history_sleep)
+                if idx % 25 == 0:
+                    print(f"PW_MARKET_MAP_PROGRESS done={idx}/{len(items)} ok={sum(1 for x in maps.values() if x.get('status')=='OK')} errors={sum(1 for x in maps.values() if x.get('status')!='OK')}", flush=True)
 
             series_cache: dict[tuple[str,int,int],list[tuple[int,float]]]={}
             price_errors=0
