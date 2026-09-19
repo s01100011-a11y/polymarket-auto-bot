@@ -365,14 +365,16 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
                         dict(r)
                         for r in con.execute(
                             """
-                            SELECT g.game_id,g.team_a,g.team_b,
+                            SELECT p.game_id,
+                                   MAX(g.team_a) AS team_a,
+                                   MAX(g.team_b) AS team_b,
                                    COUNT(p.sequence_no) AS pbp_rows,
                                    MIN(p.event_ts) AS first_pbp_ts,
                                    MAX(p.event_ts) AS last_pbp_ts
-                            FROM games g
-                            JOIN play_by_play p ON p.game_id=g.game_id
-                            GROUP BY g.game_id,g.team_a,g.team_b
-                            ORDER BY MIN(p.event_ts),g.game_id
+                            FROM play_by_play p
+                            LEFT JOIN games g ON g.game_id=p.game_id
+                            GROUP BY p.game_id
+                            ORDER BY MIN(p.event_ts),p.game_id
                             """
                         ).fetchall()
                     ]
@@ -400,6 +402,7 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
                     "games_with_pbp": len(games),
                     "fully_reconstructed": 0,
                     "partially_reconstructed": 0,
+                    "no_game_metadata": 0,
                     "no_market_map": 0,
                     "no_price_history": 0,
                     "failed": 0,
@@ -429,9 +432,11 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
                     alerts = alerts_by_game.get(game_id) or []
                     summary["pbp_rows"] += len(plays)
                     summary["pw_calls"] += len(alerts)
+                    team_a = str(game.get("team_a") or "")
+                    team_b = str(game.get("team_b") or "")
                     assets = derive_game_assets(
-                        str(game.get("team_a") or ""),
-                        str(game.get("team_b") or ""),
+                        team_a,
+                        team_b,
                         mappings_by_game.get(game_id) or [],
                     )
                     coverage = {
@@ -456,6 +461,16 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
                         "error": None,
                         "generated_at": generated_at,
                     }
+
+                    if not team_a or not team_b:
+                        coverage["map_status"] = "MISSING_GAME_METADATA"
+                        coverage["reconstruction_status"] = "NO_GAME_METADATA"
+                        coverage["error"] = "play-by-play game_id is not present in canonical games metadata"
+                        summary["no_game_metadata"] += 1
+                        save_coverage(coverage)
+                        with history._db() as con:
+                            con.execute("DELETE FROM pw_game_reconstruction WHERE game_id=?", (game_id,))
+                        continue
 
                     if not assets["mapped"]:
                         summary["no_market_map"] += 1
@@ -581,6 +596,7 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
                             "PW_GAME_RECON_PROGRESS "
                             f"done={index}/{len(games)} full={summary['fully_reconstructed']} "
                             f"partial={summary['partially_reconstructed']} "
+                            f"no_game_meta={summary['no_game_metadata']} "
                             f"no_map={summary['no_market_map']} "
                             f"no_price={summary['no_price_history']} failed={summary['failed']}",
                             flush=True,
@@ -596,6 +612,7 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
                     f"games={summary['games_with_pbp']} "
                     f"full={summary['fully_reconstructed']} "
                     f"partial={summary['partially_reconstructed']} "
+                    f"no_game_meta={summary['no_game_metadata']} "
                     f"no_map={summary['no_market_map']} "
                     f"no_price={summary['no_price_history']} failed={summary['failed']} "
                     f"pbp_rows={summary['pbp_rows']} priced_rows={summary['priced_pbp_rows']} "
