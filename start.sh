@@ -54,4 +54,4 @@ tailscale --socket="$TS_SOCKET" ip -4 || true
 
 # Start the API immediately. The in-app PW export poller performs ongoing
 # Tailnet/feed health checks after /health is available to Railway.
-exec uvicorn app.wnba_pw_strategy_test_v12:app --host 0.0.0.0 --port "${PORT:-8080}"
+exec uvicorn app.wnba_pw_research_v13:app --host 0.0.0.0 --port "${PORT:-8080}"
