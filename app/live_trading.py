@@ -129,7 +129,7 @@ def live_status():
         "deposit_wallet_configured": bool(wallet),
         "deposit_wallet": _mask_wallet(wallet) if wallet else None,
         "live_trading": core.LIVE_TRADING,
-        "auto_trading": core.AUTO_TRADING,
+        "auto_trading": core.auto_trading_enabled(),
         "slack_paper_only": ingest.SLACK_PAPER_ONLY,
         "test_max_usdc": str(LIVE_TEST_MAX_USDC),
     }
