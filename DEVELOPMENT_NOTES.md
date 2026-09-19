@@ -339,3 +339,30 @@ For every future code change, append an entry containing: objective, files chang
 - **Limitation:** True scalp ROI/P&L requires historical Polymarket price ticks or a forward price recorder. Score movement alone cannot establish executable market returns, spreads, or slippage.
 - **Commits:** `30b2d53`, `4231bdc`, `c1a247d`, `21efa5c`, `6ff6d06`.
 - **Verified deployment:** `70d0f960-5489-4a34-8ba5-e7bffa902d7d` SUCCESS.
+
+
+## 2026-09-19 — Polymarket tick monitoring + PW scalp price backtest (#13)
+
+- **Objective:** Add executable live market monitoring around genuine WNBA PW calls and historical Polymarket price backtesting for scalp hypotheses.
+- **Safety:** Research-only. No order placement, cancellation, position resizing, or trade-closing path was added.
+- **Live recorder:** Added `app/pw_market_research.py` and wired it after the existing WNBA/PW research stack.
+- **Railway settings:** `PW_MARKET_RESEARCH_ENABLED=true`, `PW_MARKET_SAMPLE_SECONDS=1`, `PW_MARKET_WINDOW_SECONDS=300`, `PW_MARKET_HISTORY_BACKTEST_ENABLED=true`.
+- **Per-call live fields:** PW/game metadata, resolved asset/token, executable BUY and SELL price, midpoint, spread, best bid/ask and top sizes, event/market IDs, strategy attribution, same-game/side PW call number, and available game state.
+- **Repeat-call correction:** The recorder derives same-side call number from the canonical PW alerts table, so calls that occurred before the recorder deployment are included.
+- **Storage:** Added durable SQLite tables `pw_market_watches`, `pw_market_ticks`, `pw_market_history_map`, and `pw_market_history_points`.
+- **Research endpoints:** `/api/pw-market-research/status`, `/api/pw-market-research/backtest`, and `/api/pw-market-research/backtest/recompute`, all behind dashboard authentication.
+- **Historical market mapping:** 223 canonical game/side combinations were considered; 169 currently map to resolved Polymarket moneyline tokens and 54 exhausted the current slug/alias lookup.
+- **Historical price coverage:** 1,018 of 1,362 graded PW calls had usable mapped historical Polymarket price data. Historical price requests completed with zero price-fetch errors for the mapped tokens.
+- **Method:** Historical results use Polymarket price-history midpoint/proxy data at approximately one-minute fidelity. They are not executable bid/ask fills and do not include live spread/slippage. $100 is treated as the stake for each simulated entry.
+- **Early-Q4 correction:** The fade backtest now joins each Q4 PW call to exact-score play-by-play and restricts the strategy to the first three minutes of Q4 (10:00 through 7:00 remaining). It does not use the entire fourth quarter.
+- **Grid searched:** TP +3c/+5c/+8c; SL -3c/-5c/-8c; maximum hold 60/120/180/300 seconds.
+- **Best in-sample grid results:**
+  - Immediate PW: 1,017 trades, +$363.98, +0.36% ROI; TP +3c / SL -3c / 60s; max drawdown $357.61.
+  - Early-Q4 fade: 116 trades, +$1,755.08, +15.13% ROI; TP +5c / SL -3c / 300s; max drawdown $580.45.
+  - Away-underdog fade: 123 trades, +$150.30, +1.22% ROI; TP +3c / SL -3c / 120s; max drawdown $89.33.
+  - Repeat-PW wait for 3c dip then buy PW: 189 trades, -$233.17, -1.23% ROI; best tested grid TP +3c / SL -5c / 300s.
+  - Repeat-PW wait for 5c dip then buy PW: 130 trades, -$210.73, -1.62% ROI; best tested grid TP +3c / SL -3c / 60s.
+- **Interpretation:** Early-Q4 fade is the strongest initial price-history hypothesis. Immediate PW entry is approximately flat in the best grid; the simple repeat-call price-dip strategies were negative. Because the best settings were selected from a parameter grid on the same history, these are exploratory/in-sample figures and require forward/out-of-sample validation.
+- **Live validation status:** Recorder is armed in production at 1-second sampling for 300 seconds after each new genuine PW alert. No genuine post-deployment PW alert has yet produced a `PW_MARKET_WATCH` log, so live tick capture remains pending natural verification rather than injecting a synthetic alert through the trading pipeline.
+- **Verified deployment:** `b4071172-973e-4dc8-a716-1bcddcc201d7` SUCCESS.
+- **Commits:** `05aa6bf`, `195adf2`, `2422c79`, `72a4396`, `8360e71`, `9c674df`, `1ead4ae`, `64e7a19`.
