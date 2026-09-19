@@ -32,7 +32,11 @@ EXECUTIONS_FILE = DATA_DIR / "executions.json"
 FILE_LOCK = Lock()
 
 LIVE_TRADING = os.getenv("LIVE_TRADING", "false").lower() == "true"
-AUTO_TRADING = os.getenv("AUTO_TRADING", "false").lower() == "true"
+def auto_trading_enabled() -> bool:
+    """Railway AUTO_TRADING is the authoritative automation switch."""
+    return os.getenv("AUTO_TRADING", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+AUTO_TRADING = auto_trading_enabled()
 SIGNAL_SECRET = os.getenv("SIGNAL_SECRET", "")
 MAX_TRADE_USDC = Decimal(os.getenv("MAX_TRADE_USDC", "100"))
 MAX_AUTO_TRADE_USDC = Decimal(os.getenv("MAX_AUTO_TRADE_USDC", "25"))
@@ -282,7 +286,7 @@ def _quote(intent: TradeIntent, *, auto: bool = False) -> dict:
         "geo_country": geo.get("country"),
         "geo_region": geo.get("region"),
         "live_trading_enabled": LIVE_TRADING,
-        "auto_trading_enabled": AUTO_TRADING,
+        "auto_trading_enabled": auto_trading_enabled(),
         "note": intent.note,
     }
 
@@ -327,7 +331,7 @@ def _execute_limit(intent: TradeIntent, quote: dict, *, auto: bool, signal_id: s
         "auto": auto,
     }
 
-    if not LIVE_TRADING or (auto and not AUTO_TRADING):
+    if not LIVE_TRADING or (auto and not auto_trading_enabled()):
         base.update({
             "status": "AUTO_DRY_RUN" if auto else "APPROVED_DRY_RUN",
             "submitted_at": _now().isoformat(),
@@ -460,7 +464,7 @@ def health():
         "ok": True,
         "version": "0.3.0",
         "live_trading": LIVE_TRADING,
-        "auto_trading": AUTO_TRADING,
+        "auto_trading": auto_trading_enabled(),
         "poll_seconds": AUTO_POLL_SECONDS,
         "max_trade_usdc": str(MAX_TRADE_USDC),
         "max_auto_trade_usdc": str(MAX_AUTO_TRADE_USDC),
@@ -564,7 +568,7 @@ def list_executions(x_signal_secret: str | None = Header(default=None)):
 @app.get("/", response_class=HTMLResponse)
 def index():
     mode = "LIVE" if LIVE_TRADING else "DRY RUN"
-    auto = "ON" if AUTO_TRADING else "OFF"
+    auto = "ON" if auto_trading_enabled() else "OFF"
     return f"""
 <!doctype html>
 <html>
