@@ -146,6 +146,36 @@ def _estimate_pnl_live(records: list[dict]) -> tuple[list[dict], Decimal]:
 
 # Replace the prior midpoint-based estimator with executable exit-price marking.
 dashboard._estimate_pnl = _estimate_pnl_live
+
+# Reconcile open live positions even when nobody has the dashboard open.
+# Executed BUY fills are cached after the first successful match; later cycles
+# mostly refresh the wallet position and executable SELL mark.
+_RECONCILE_SECONDS = 30
+_RECONCILE_THREAD_STARTED = False
+
+def _background_live_reconcile() -> None:
+    while True:
+        try:
+            execution_map = core._load(core.EXECUTIONS_FILE)
+            records = list(execution_map.values())
+            if any(r.get("status") == "ORDER_SUBMITTED" for r in records):
+                _estimate_pnl_live(records)
+        except Exception as exc:
+            print(f"LIVE_NETWORK_RECONCILE_ERROR {type(exc).__name__}:{exc}", flush=True)
+        time.sleep(_RECONCILE_SECONDS)
+
+def _start_background_live_reconcile() -> None:
+    global _RECONCILE_THREAD_STARTED
+    if _RECONCILE_THREAD_STARTED:
+        return
+    _RECONCILE_THREAD_STARTED = True
+    threading.Thread(
+        target=_background_live_reconcile,
+        name="polymarket-live-reconcile",
+        daemon=True,
+    ).start()
+
+_start_background_live_reconcile()
 _BASE_SNAPSHOT = dashboard._dashboard_snapshot
 
 
