@@ -467,6 +467,12 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
                         coverage["reconstruction_status"] = "NO_GAME_METADATA"
                         coverage["error"] = "play-by-play game_id is not present in canonical games metadata"
                         summary["no_game_metadata"] += 1
+                        print(
+                            "PW_GAME_RECON_UNRESOLVED "
+                            f"game={game_id} away={team_a or 'UNKNOWN'} home={team_b or 'UNKNOWN'} "
+                            f"first_ts={coverage.get('first_pbp_ts')} reason=no_game_metadata",
+                            flush=True,
+                        )
                         save_coverage(coverage)
                         with history._db() as con:
                             con.execute("DELETE FROM pw_game_reconstruction WHERE game_id=?", (game_id,))
@@ -474,6 +480,18 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
 
                     if not assets["mapped"]:
                         summary["no_market_map"] += 1
+                        mapping_errors = [
+                            str(x.get("error") or "")
+                            for x in (mappings_by_game.get(game_id) or [])
+                            if x.get("error")
+                        ]
+                        print(
+                            "PW_GAME_RECON_UNRESOLVED "
+                            f"game={game_id} away={team_a} home={team_b} "
+                            f"first_ts={coverage.get('first_pbp_ts')} reason=no_market_map "
+                            f"detail={mapping_errors[-1] if mapping_errors else 'no_mapping_row'}",
+                            flush=True,
+                        )
                         save_coverage(coverage)
                         with history._db() as con:
                             con.execute("DELETE FROM pw_game_reconstruction WHERE game_id=?", (game_id,))
