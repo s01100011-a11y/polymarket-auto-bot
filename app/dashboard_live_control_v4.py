@@ -358,8 +358,7 @@ document.addEventListener('click',async function(ev){const a=ev.target.closest('
 loadSlackTradingMode();
 setInterval(loadSlackTradingMode,5000);
 """
-    html = html.replace("</script>", js + "
-</script>", 1)
+    html = html.replace("</script>", js + "\n</script>", 1)
     dashboard.DASHBOARD_HTML = html
 
 
