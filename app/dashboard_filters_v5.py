@@ -25,13 +25,22 @@ def _trade_bucket(rec: dict[str, Any]) -> str | None:
         return None
     if bool(rec.get("paper")):
         return "paper"
+
     status = str(rec.get("status") or "").upper()
-    if "DRY_RUN" in status:
+    if "DRY_RUN" in status or status in {"FAILED", "REJECTED", "CANCELLED"}:
         return None
+
     source = str(rec.get("source") or "")
-    # LIVE performance is bot performance only. Manual Termux "Live test"
-    # diagnostics stay visible in history but must not affect ROI/W-L/accuracy.
-    if source == "slack_live":
+    execution = rec.get("execution") or {}
+    placed = bool(execution.get("placed"))
+
+    # LIVE means a real funded execution, regardless of whether it originated
+    # from Slack/PW automation or the Termux executor path. Failed/pending
+    # diagnostics never reach this bucket.
+    if source in {"slack_live", "termux_executor"} and (
+        placed
+        or status in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED", "CLOSED", "CLOSED_RECONCILED"}
+    ):
         return "live"
     return None
 
@@ -39,6 +48,7 @@ def _trade_bucket(rec: dict[str, Any]) -> str | None:
 def _performance(mode: str) -> dict[str, Any]:
     executions = core._load(core.EXECUTIONS_FILE)
     wins = losses = pushes = graded = 0
+    open_trades = 0
     realized_total = Decimal("0")
     stake_total = Decimal("0")
 
@@ -49,6 +59,7 @@ def _performance(mode: str) -> dict[str, Any]:
         if mode != "both" and bucket != mode:
             continue
         if rec.get("status") in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED", "PAPER_OPEN"}:
+            open_trades += 1
             continue
 
         realized = metrics_base.base.pnl_base._explicit_realized_pnl(rec)
@@ -78,6 +89,7 @@ def _performance(mode: str) -> dict[str, Any]:
         "losses": losses,
         "pushes": pushes,
         "graded_trades": graded,
+        "open_trades": open_trades,
         "graded_stake_usdc": str(stake_total.quantize(Decimal("0.01"))),
         "realized_pnl": str(realized_total.quantize(Decimal("0.01"))),
         "accuracy_pct": str(accuracy.quantize(Decimal("0.1"))) if accuracy is not None else None,
@@ -182,7 +194,7 @@ async function refreshFilteredStats(){
    const a=Number(s.accuracy_pct);
    acc.textContent=s.accuracy_pct===null||s.accuracy_pct===undefined?'—':a.toFixed(1)+'%';
   }
-  if(graded)graded.textContent=(s.graded_trades||0)+' graded closed trades · '+String(s.mode||dashboardStatsFilter).toUpperCase();
+  if(graded)graded.textContent=(s.graded_trades||0)+' graded closed · '+String(s.open_trades||0)+' open · '+String(s.mode||dashboardStatsFilter).toUpperCase();
  }catch(e){}
 }
 
