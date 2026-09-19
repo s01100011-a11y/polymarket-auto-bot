@@ -6,6 +6,7 @@ import json
 import os
 import re
 import ssl
+import socket
 import subprocess
 import threading
 import time
@@ -13,7 +14,6 @@ from urllib.parse import urlencode, urlsplit
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import socks
 from fastapi import Depends
 
 _INSTALLED = False
@@ -375,14 +375,34 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
         query = urlencode(params)
         request_path = f"{path}?{query}" if query else path
 
-        raw = socks.socksocket()
-        raw.set_proxy(socks.SOCKS5, proxy_host, proxy_port, rdns=False)
+        raw = socket.create_connection((proxy_host, proxy_port), timeout=20.0)
         raw.settimeout(20.0)
         tls = None
         try:
-            raw.connect((connect_host, target_port))
+            # Tailscale's userspace listener accepts HTTP CONNECT and SOCKS5 on
+            # the same port. CONNECT directly to the peer's Tailscale IP so no
+            # DNS resolution is involved in establishing the encrypted route.
+            authority = f"{connect_host}:{target_port}"
+            connect_request = (
+                f"CONNECT {authority} HTTP/1.1\r\n"
+                f"Host: {authority}\r\n"
+                "Proxy-Connection: keep-alive\r\n"
+                "\r\n"
+            )
+            raw.sendall(connect_request.encode("ascii"))
+            header = bytearray()
+            while b"\r\n\r\n" not in header and len(header) < 16384:
+                chunk = raw.recv(4096)
+                if not chunk:
+                    break
+                header.extend(chunk)
+            status_line = bytes(header).split(b"\r\n", 1)[0].decode("ascii", "replace")
+            if " 200 " not in f" {status_line} " and not status_line.endswith(" 200"):
+                raise RuntimeError(f"Tailscale CONNECT failed: {status_line}")
+
             context = ssl.create_default_context()
             tls = context.wrap_socket(raw, server_hostname=target.hostname)
+            tls.settimeout(20.0)
             host_header = target.hostname if target_port == 443 else f"{target.hostname}:{target_port}"
             request = (
                 f"GET {request_path} HTTP/1.1\r\n"
