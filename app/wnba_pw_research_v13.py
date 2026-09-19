@@ -35,4 +35,5 @@ pw_game_reconstruction.install(
     app=app,
     history=history,
     dashboard=dashboard,
+    ingest=ingest,
 )
