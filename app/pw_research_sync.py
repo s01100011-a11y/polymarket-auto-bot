@@ -117,7 +117,7 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
         target_port = target.port or 443
         connect_host = tailnet_peer or target.hostname
         raw = socket.create_connection((proxy_host, proxy_port), timeout=8.0)
-        raw.settimeout(12.0)
+        raw.settimeout(45.0)
         try:
             authority = f"{connect_host}:{target_port}"
             raw.sendall(
@@ -139,7 +139,7 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
 
             context = ssl.create_default_context()
             tls = context.wrap_socket(raw, server_hostname=target.hostname)
-            tls.settimeout(15.0)
+            tls.settimeout(45.0)
             query = urlencode(params)
             path = target.path or "/"
             request_path = f"{path}?{query}" if query else path
@@ -497,7 +497,7 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
             # server is temporarily offline, retry only the research-only PW
             # backfill so historical calls are never routed through trading.
             while isinstance((state.get("pw") or {}), dict) and (state.get("pw") or {}).get("error"):
-                time.sleep(60.0)
+                time.sleep(20.0)
                 try:
                     pw_result = import_missing_pw()
                     state = load_state()
