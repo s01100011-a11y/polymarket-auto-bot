@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import secrets
 import uuid
@@ -20,8 +21,11 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, HttpUrl
 from polymarket import PublicClient, SecureClient
+from app.structured_logging import configure_logging, log_event
 
 load_dotenv()
+configure_logging()
+logger = logging.getLogger("polymarket_bot")
 
 APP_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = APP_DIR / "data"
@@ -444,6 +448,7 @@ def _process_watchlist_once() -> None:
         _save(WATCH_FILE, watch)
     WATCH_HEALTH["last_completed_at"] = datetime.now(timezone.utc).isoformat()
     WATCH_HEALTH["last_error"] = None
+    log_event(logger, "watch_cycle_completed", stage="watch_loop", status="ok")
     WATCH_HEALTH["cycles"] = int(WATCH_HEALTH.get("cycles") or 0) + 1
 
 
@@ -453,6 +458,7 @@ async def _watch_loop() -> None:
             await asyncio.to_thread(_process_watchlist_once)
         except Exception as exc:
             WATCH_HEALTH["last_error"] = f"{type(exc).__name__}: {exc}"
+            log_event(logger, "watch_cycle_failed", stage="watch_loop", status="error", reason=WATCH_HEALTH["last_error"])
         await asyncio.sleep(AUTO_POLL_SECONDS)
 
 
