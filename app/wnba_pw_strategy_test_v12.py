@@ -238,9 +238,9 @@ def _strategy_trade_handler(
     if decision.get("action") != "BET":
         raise ValueError("PW STRATEGY PASS — " + str(decision.get("reason") or "no match"))
 
-    # Strategy testing is intentionally PAPER-ONLY even if the dashboard's
-    # general Slack mode is switched to live. We are comparing filters, not
-    # risking real money while the strategies are being evaluated.
+    # Railway AUTO_TRADING is authoritative for qualifying PW alerts.
+    # When enabled, use the current live-capable Slack handler; otherwise
+    # preserve paper-only strategy evaluation.
     try:
         mode = live_control._mode()
         ingest.SLACK_PAPER_BUDGET_USDC = min(
@@ -250,7 +250,8 @@ def _strategy_trade_handler(
     except Exception:
         pass
 
-    trade = _PAPER_ONLY_HANDLER(parsed, slack_event_id, slack_event)
+    handler = _CURRENT_TRADE_HANDLER if core.auto_trading_enabled() else _PAPER_ONLY_HANDLER
+    trade = handler(parsed, slack_event_id, slack_event)
     trade["pw_strategies"] = list(decision.get("matched_strategies") or [])
     trade["pw_strategy_decision"] = decision
     executions = core._load(core.EXECUTIONS_FILE)
