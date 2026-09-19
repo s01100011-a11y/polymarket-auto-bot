@@ -130,6 +130,15 @@ def _estimate_pnl_live(records: list[dict]) -> tuple[list[dict], Decimal]:
             row["paper"] = bool(rec.get("paper"))
             row["price_error"] = price_error
 
+            if not row["paper"] and pnl is not None:
+                print(
+                    "LIVE_POSITION_MARK "
+                    f"trade={row.get('id')} entry={entry} limit={row.get('limit_price')} "
+                    f"sell={live_price} shares={shares} cost={cost} "
+                    f"value={current_value} pnl={pnl} pnl_pct={pnl_percent}",
+                    flush=True,
+                )
+
         # If a row could not be marked at SELL but the reconciler already produced
         # a P/L, include that fallback rather than dropping it from the portfolio.
         if total == 0:
