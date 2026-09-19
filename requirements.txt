@@ -5,3 +5,4 @@ httpx>=0.27,<1
 socksio>=1.0,<2
 python-dotenv>=1.0,<2
 tzdata>=2025.2
+PySocks>=1.7,<2
