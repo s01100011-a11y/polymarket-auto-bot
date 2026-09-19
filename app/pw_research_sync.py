@@ -321,7 +321,15 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
             game_ids = [
                 str(r["game_id"])
                 for r in con.execute(
-                    "SELECT DISTINCT game_id FROM alerts WHERE game_id IS NOT NULL AND game_id<>'' ORDER BY game_id"
+                    """
+                    SELECT DISTINCT a.game_id
+                    FROM alerts a
+                    LEFT JOIN (
+                        SELECT DISTINCT game_id FROM play_by_play
+                    ) p ON p.game_id=a.game_id
+                    WHERE a.game_id IS NOT NULL AND a.game_id<>'' AND p.game_id IS NULL
+                    ORDER BY a.game_id
+                    """
                 ).fetchall()
             ]
         games_ok = 0
