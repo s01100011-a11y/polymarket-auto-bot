@@ -89,16 +89,27 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
                 con.execute("ALTER TABLE alerts ADD COLUMN research_raw_json TEXT")
 
             state = load_state()
-            if int(state.get("research_import_version") or 0) < 3:
+            if int(state.get("research_import_version") or 0) < 4:
                 removed = con.execute(
                     "DELETE FROM alerts WHERE research_source='pw-server'"
                 ).rowcount
-                state["research_import_version"] = 3
+                removed_pbp = con.execute(
+                    """
+                    DELETE FROM play_by_play
+                    WHERE game_id NOT IN (
+                        SELECT DISTINCT game_id FROM alerts
+                        WHERE game_id IS NOT NULL AND game_id<>''
+                    )
+                    """
+                ).rowcount
+                state["research_import_version"] = 4
                 state["research_import_cleanup_removed"] = int(removed or 0)
+                state["research_pbp_cleanup_removed"] = int(removed_pbp or 0)
                 state["research_import_cleanup_at"] = datetime.now(timezone.utc).isoformat()
                 save_state(state)
                 print(
-                    f"PW_RESEARCH_IMPORT_MIGRATION version=3 removed={int(removed or 0)}",
+                    f"PW_RESEARCH_IMPORT_MIGRATION version=4 removed={int(removed or 0)} "
+                    f"orphan_pbp_removed={int(removed_pbp or 0)}",
                     flush=True,
                 )
 
