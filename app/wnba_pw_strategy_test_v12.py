@@ -21,8 +21,7 @@ PW_STRATEGY_TEST_ENABLED = os.getenv("PW_STRATEGY_TEST_ENABLED", "true").lower()
 PW_STRAT_Q3_AWAY = os.getenv("PW_STRAT_Q3_AWAY", "true").lower() == "true"
 PW_STRAT_AWAY_DOG = os.getenv("PW_STRAT_AWAY_DOG", "true").lower() == "true"
 PW_STRAT_PLUS_MONEY = os.getenv("PW_STRAT_PLUS_MONEY", "true").lower() == "true"
-PW_STRAT_PLUS_EDGE40 = os.getenv("PW_STRAT_PLUS_EDGE40", "true").lower() == "true"
-PW_EDGE40_PP = float(os.getenv("PW_EDGE40_PP", "40"))
+PW_STRAT_HOME_DOG = os.getenv("PW_STRAT_HOME_DOG", "true").lower() == "true"
 
 PW_STRATEGY_DECISIONS_FILE = core.DATA_DIR / "pw_strategy_decisions.json"
 
@@ -119,10 +118,10 @@ def _enabled_strategies() -> list[dict[str, Any]]:
             "rule": "BK moneyline is +100 or higher",
         },
         {
-            "id": "plus_edge40",
-            "label": f"Plus-Money + Edge >= {PW_EDGE40_PP:.0f}pp",
-            "enabled": PW_STRAT_PLUS_EDGE40,
-            "rule": f"Plus-money and PW win probability exceeds market implied probability by at least {PW_EDGE40_PP:.0f} percentage points",
+            "id": "home_underdog",
+            "label": "Home Underdog",
+            "enabled": PW_STRAT_HOME_DOG,
+            "rule": "Predicted winner is home and BK moneyline is plus-money",
         },
     ]
 
@@ -130,11 +129,6 @@ def _enabled_strategies() -> list[dict[str, Any]]:
 def _match_strategies(row: dict[str, Any], venue: str | None) -> list[str]:
     quarter = str(row.get("quarter") or "").upper()
     odds = row.get("bk_ml")
-    probability = row.get("win_probability")
-    edge = None
-    if odds is not None and probability is not None:
-        edge = _edge_pp(float(probability), int(odds))
-
     matches: list[str] = []
     if PW_STRAT_Q3_AWAY and quarter == "Q3" and venue == "away":
         matches.append("q3_away")
@@ -142,14 +136,8 @@ def _match_strategies(row: dict[str, Any], venue: str | None) -> list[str]:
         matches.append("away_underdog")
     if PW_STRAT_PLUS_MONEY and odds is not None and int(odds) > 0:
         matches.append("plus_money")
-    if (
-        PW_STRAT_PLUS_EDGE40
-        and odds is not None
-        and int(odds) > 0
-        and edge is not None
-        and edge >= PW_EDGE40_PP
-    ):
-        matches.append("plus_edge40")
+    if PW_STRAT_HOME_DOG and venue == "home" and odds is not None and int(odds) > 0:
+        matches.append("home_underdog")
     return matches
 
 
@@ -314,13 +302,8 @@ def _hist_match(strategy_id: str, row: dict[str, Any]) -> bool:
         return row.get("venue") == "away" and odds is not None and int(odds) > 0
     if strategy_id == "plus_money":
         return odds is not None and int(odds) > 0
-    if strategy_id == "plus_edge40":
-        return bool(
-            odds is not None
-            and int(odds) > 0
-            and row.get("edge_pp_calc") is not None
-            and float(row["edge_pp_calc"]) >= PW_EDGE40_PP
-        )
+    if strategy_id == "home_underdog":
+        return row.get("venue") == "home" and odds is not None and int(odds) > 0
     return False
 
 
@@ -692,7 +675,7 @@ print(
     f"q3_away={PW_STRAT_Q3_AWAY} "
     f"away_dog={PW_STRAT_AWAY_DOG} "
     f"plus_money={PW_STRAT_PLUS_MONEY} "
-    f"plus_edge40={PW_STRAT_PLUS_EDGE40} "
+    f"home_dog={PW_STRAT_HOME_DOG} "
     "paper_only=True repeated_alerts=True"
 )
 
