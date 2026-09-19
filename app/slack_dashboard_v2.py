@@ -84,7 +84,7 @@ def _estimate_pnl_live(records: list[dict]) -> tuple[list[dict], Decimal]:
             asset_id = str(q.get("asset_id") or "")
             shares = _d(row.get("shares"))
             entry = _d(row.get("entry_price"))
-            cost = _d(row.get("budget_usdc"))
+            cost = _d(rec.get("actual_cost_usdc") or row.get("budget_usdc"))
             if cost <= 0 and shares > 0 and entry > 0:
                 cost = shares * entry
 
