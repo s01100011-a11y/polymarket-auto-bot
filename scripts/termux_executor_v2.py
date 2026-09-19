@@ -17,20 +17,34 @@ import termux_executor as base
 # the exit starts. Each retry can cross one extra cent of the visible book.
 SELL_MAX_SLIPPAGE = max(Decimal("0"), min(Decimal("0.10"), Decimal(os.getenv("EXECUTOR_SELL_MAX_SLIPPAGE", "0.03"))))
 SELL_STEP = max(Decimal("0.001"), min(Decimal("0.03"), Decimal(os.getenv("EXECUTOR_SELL_STEP", "0.01"))))
-SELL_MIN_PRICE = max(Decimal("0.001"), min(Decimal("0.50"), Decimal(os.getenv("EXECUTOR_SELL_MIN_PRICE", "0.01"))))
+SELL_MIN_PRICE = max(Decimal("0.001"), min(Decimal("0.50"), Decimal(os.getenv("EXECUTOR_SELL_MIN_PRICE", "0.001"))))
 SELL_RETRIES = max(1, min(5, int(os.getenv("EXECUTOR_SELL_RETRIES", "3"))))
 SELL_POSITION_WAIT_SECONDS = max(1, min(8, int(os.getenv("EXECUTOR_SELL_POSITION_WAIT_SECONDS", "4"))))
 BASE_UNITS = Decimal("1000000")
 
 
-def _best_bid(asset_id: str) -> Decimal:
+def _book_price_context(asset_id: str) -> tuple[Decimal, Decimal]:
     with PublicClient() as client:
         book = client.get_order_book(asset_id=asset_id)
     bids = getattr(book, "bids", None) or []
     best = max((Decimal(str(level.price)) for level in bids), default=Decimal("0"))
     if best <= 0 or best >= 1:
         raise RuntimeError("No valid bid is currently available for this position")
-    return best
+    tick = Decimal(str(getattr(book, "tick_size", None) or "0.001"))
+    if tick <= 0:
+        tick = Decimal("0.001")
+    return best, tick
+
+
+def _best_bid(asset_id: str) -> Decimal:
+    return _book_price_context(asset_id)[0]
+
+
+def _floor_to_tick(value: Decimal, tick: Decimal) -> Decimal:
+    if tick <= 0:
+        tick = Decimal("0.001")
+    steps = (value / tick).to_integral_value(rounding=ROUND_DOWN)
+    return max(tick, steps * tick)
 
 
 def _response_price(response: Any, fallback: Decimal) -> Decimal:
@@ -97,11 +111,12 @@ def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, A
         f"target={target} asset_type={asset_type} allowances={len(allowances)}"
     )
 
-    initial_best_bid = _best_bid(asset_id)
-    hard_floor = max(SELL_MIN_PRICE, initial_best_bid - SELL_MAX_SLIPPAGE)
-    hard_floor = hard_floor.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-    if hard_floor <= 0:
-        hard_floor = SELL_MIN_PRICE
+    initial_best_bid, tick_size = _book_price_context(asset_id)
+    # Never protect a market SELL above the bid that actually exists. The prior
+    # 0.01 default/2dp rounding made 0.001-tick markets impossible to exit.
+    configured_floor = min(SELL_MIN_PRICE, initial_best_bid)
+    hard_floor = max(configured_floor, initial_best_bid - SELL_MAX_SLIPPAGE)
+    hard_floor = min(initial_best_bid, _floor_to_tick(hard_floor, tick_size))
 
     current_position = position_before
     total_sold = Decimal("0")
@@ -114,11 +129,14 @@ def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, A
         if remaining <= Decimal("0.0001"):
             break
 
-        best_bid = _best_bid(asset_id)
-        min_price = max(hard_floor, best_bid - SELL_STEP)
-        min_price = min_price.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-        if min_price <= 0:
-            min_price = hard_floor
+        best_bid, live_tick = _book_price_context(asset_id)
+        tick_size = live_tick if live_tick > 0 else tick_size
+        # Stay on the exchange tick grid and never submit a minimum above the
+        # visible bid unless the market moved below the protected hard floor.
+        candidate = max(hard_floor, best_bid - SELL_STEP)
+        min_price = _floor_to_tick(candidate, tick_size)
+        if best_bid >= hard_floor:
+            min_price = min(min_price, best_bid)
 
         response = None
         response_error = None
@@ -200,6 +218,7 @@ def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, A
         "realized_pnl": str(realized),
         "initial_best_bid": str(initial_best_bid),
         "min_sell_price": str(hard_floor),
+        "tick_size": str(tick_size),
         "clob_sellable_before": str(clob_sellable),
         "attempts": attempts,
         "executor": base.WORKER_NAME,
