@@ -626,29 +626,45 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
                 if idx % 25 == 0:
                     print(f"PW_MARKET_MAP_PROGRESS done={idx}/{len(items)} ok={sum(1 for x in maps.values() if x.get('status')=='OK')} errors={sum(1 for x in maps.values() if x.get('status')!='OK')}", flush=True)
 
-            series_cache: dict[tuple[str,int,int],list[tuple[int,float]]]={}
-            price_errors=0
+            # Fetch one continuous history range per token rather than one
+            # overlapping request per PW alert.
+            asset_ranges: dict[str, list[int]] = {}
+            candidates: list[tuple[dict[str,Any],datetime,dict[str,Any],int]] = []
             for a in alerts:
                 dt=parse_event_ts(a.get("event_ts"))
-                if not dt: continue
+                if not dt:
+                    continue
                 key=(str(a["game_id"]),str(a["predicted_winner_abbr"]))
                 m=maps.get(key)
-                if not m or m.get("status")!="OK": continue
+                if not m or m.get("status")!="OK":
+                    continue
                 call_ts=int(dt.timestamp())
-                start=call_ts-120; end=call_ts+600
+                candidates.append((a,dt,m,call_ts))
+                for asset in (str(m["asset_id"]),str(m["opposite_asset_id"])):
+                    lo=call_ts-120; hi=call_ts+600
+                    if asset not in asset_ranges:
+                        asset_ranges[asset]=[lo,hi]
+                    else:
+                        asset_ranges[asset][0]=min(asset_ranges[asset][0],lo)
+                        asset_ranges[asset][1]=max(asset_ranges[asset][1],hi)
+
+            token_series: dict[str,list[tuple[int,float]]] = {}
+            price_errors=0
+            for idx,(asset,(start,end)) in enumerate(asset_ranges.items(), start=1):
                 try:
-                    pk=(str(m["asset_id"]),start,end)
-                    points=series_cache.get(pk)
-                    if points is None:
-                        points=fetch_history(str(m["asset_id"]),start,end); series_cache[pk]=points
-                        time.sleep(history_sleep)
-                    oppk=(str(m["opposite_asset_id"]),start,end)
-                    opp=series_cache.get(oppk)
-                    if opp is None:
-                        opp=fetch_history(str(m["opposite_asset_id"]),start,end); series_cache[oppk]=opp
-                        time.sleep(history_sleep)
-                except Exception:
+                    token_series[asset]=fetch_history(asset,start,end)
+                except Exception as exc:
                     price_errors+=1
+                    token_series[asset]=[]
+                    print(f"PW_MARKET_PRICE_ERROR asset={asset[:12]} error={type(exc).__name__}:{exc}", flush=True)
+                if idx % 25 == 0:
+                    print(f"PW_MARKET_PRICE_PROGRESS done={idx}/{len(asset_ranges)} errors={price_errors}", flush=True)
+                time.sleep(history_sleep)
+
+            for a,dt,m,call_ts in candidates:
+                points=token_series.get(str(m["asset_id"])) or []
+                opp=token_series.get(str(m["opposite_asset_id"])) or []
+                if not points or not opp:
                     continue
                 a["_dt"]=dt; a["_call_ts"]=call_ts; a["_map"]=m; a["_points"]=points; a["_opp_points"]=opp
                 prepared.append(a)
