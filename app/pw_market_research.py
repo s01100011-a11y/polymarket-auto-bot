@@ -351,7 +351,7 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
                 score += 20
             if any(x in q for x in ("spread","over ","under ","points","assists","rebounds","margin")):
                 score -= 20
-            if any(a and any(a in norm(o) for a in aliases) for o in outcomes):
+            if any(any(alias and alias in norm(o) for alias in aliases) for o in outcomes):
                 score += 10
             if score > 0:
                 scored.append((score, m))
