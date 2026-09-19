@@ -236,6 +236,86 @@ def _enqueue(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
+def _active_sell_request(trade_id: str) -> dict[str, Any] | None:
+    """Return an already queued/leased SELL for this trade to prevent duplicate exits."""
+    with _QUEUE_LOCK:
+        data = _queue_load()
+        matches = [
+            rec for rec in data.values()
+            if rec.get("action") == "SELL"
+            and str((rec.get("payload") or {}).get("trade_id") or "") == str(trade_id)
+            and rec.get("status") in {"PENDING", "LEASED"}
+        ]
+    if not matches:
+        return None
+    return sorted(matches, key=lambda r: r.get("created_unix", 0), reverse=True)[0]
+
+
+def _executor_event(rec: dict[str, Any]) -> dict[str, Any]:
+    payload = rec.get("payload") or {}
+    result = rec.get("result") or {}
+    action = str(rec.get("action") or "")
+    status = str(rec.get("status") or "")
+    message = None
+    if status == "PENDING":
+        message = f"{action} queued for executor"
+    elif status == "LEASED":
+        message = f"{action} executing on Termux"
+    elif status == "FAILED":
+        message = str(rec.get("error") or result.get("message") or f"{action} failed")
+    elif status == "DONE":
+        if action == "SELL":
+            if result.get("already_closed"):
+                message = str(result.get("message") or "Position already closed")
+            elif result.get("sold_shares"):
+                message = (
+                    f"SELL confirmed: {result.get('sold_shares')} shares"
+                    + (f" @ {result.get('sell_price')}" if result.get("sell_price") else "")
+                    + (f" · P/L {result.get('realized_pnl')}" if result.get("realized_pnl") is not None else "")
+                )
+            else:
+                message = str(result.get("message") or "SELL completed")
+        elif action == "BUY":
+            message = (
+                f"BUY confirmed: {result.get('filled_shares')} shares"
+                + (f" @ {result.get('entry_price')}" if result.get("entry_price") else "")
+            )
+        else:
+            message = str(result.get("message") or f"{action} completed")
+    return {
+        "request_id": rec.get("id"),
+        "trade_id": payload.get("trade_id"),
+        "action": action,
+        "status": status,
+        "message": message,
+        "error": rec.get("error"),
+        "created_at": rec.get("created_at"),
+        "updated_at": rec.get("updated_at"),
+        "result": {
+            k: result.get(k)
+            for k in (
+                "status", "sold_shares", "remaining_shares", "sell_price",
+                "realized_pnl", "filled_shares", "entry_price", "order_id",
+                "already_closed", "message", "initial_best_bid", "min_sell_price",
+                "tick_size",
+            )
+            if result.get(k) is not None
+        },
+    }
+
+
+@app.get("/api/executor/recent-actions", dependencies=[Depends(dashboard._auth)])
+def recent_executor_actions(limit: int = 12):
+    limit = max(1, min(50, int(limit)))
+    data = _queue_load()
+    ordered = sorted(
+        data.values(),
+        key=lambda r: r.get("created_unix", 0),
+        reverse=True,
+    )[:limit]
+    return {"ok": True, "events": [_executor_event(rec) for rec in ordered]}
+
+
 def _validate_remote_buy(req: live_trading.LiveTestBuy) -> None:
     if core._norm(req.market_type) != "moneyline":
         raise HTTPException(status_code=400, detail="Remote BUY is locked to moneyline only")
@@ -317,6 +397,15 @@ def request_sell(trade_id: str):
     }
     if not payload["asset_id"] or Decimal(shares) <= 0:
         raise HTTPException(status_code=400, detail="Tracked trade has no sellable shares")
+    existing = _active_sell_request(trade_id)
+    if existing is not None:
+        return {
+            "ok": True,
+            "queued": True,
+            "duplicate_prevented": True,
+            "request_id": existing["id"],
+            "trade_id": trade_id,
+        }
     queued = _enqueue("SELL", payload)
     return {"ok": True, "queued": True, "request_id": queued["id"], "trade_id": trade_id}
 
@@ -530,6 +619,13 @@ def executor_result(request_id: str, body: ExecutorResult, _: dict[str, Any] = D
         _record_sell_result(rec, result)
     elif already_closed:
         _record_already_closed_sell(rec, str(body.error or ""))
+    event = _executor_event(rec)
+    print(
+        f"EXECUTOR_EVENT request={request_id} action={event.get('action')} "
+        f"status={event.get('status')} trade={event.get('trade_id')} "
+        f"message={event.get('message')}",
+        flush=True,
+    )
     return {"ok": True}
 
 
@@ -609,4 +705,21 @@ remoteStatus();setInterval(remoteStatus,3000);
 
 
 _install_remote_executor_ui()
+try:
+    _recent_queue = sorted(
+        _queue_load().values(),
+        key=lambda r: r.get("created_unix", 0),
+        reverse=True,
+    )[:8]
+    for _rec in _recent_queue:
+        if _rec.get("action") == "SELL":
+            _event = _executor_event(_rec)
+            print(
+                f"EXECUTOR_SAVED_EVENT request={_event.get('request_id')} "
+                f"status={_event.get('status')} trade={_event.get('trade_id')} "
+                f"message={_event.get('message')}",
+                flush=True,
+            )
+except Exception as _exc:
+    print(f"EXECUTOR_SAVED_EVENT_ERROR {type(_exc).__name__}:{_exc}", flush=True)
 print("TERMUX_EXECUTOR_BRIDGE enabled dashboard_auto_cap_usdc=" + str(core.MAX_AUTO_TRADE_USDC), flush=True)
