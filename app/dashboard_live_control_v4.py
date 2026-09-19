@@ -40,7 +40,7 @@ def _save_mode(auto_prepare_enabled: bool, stake_usdc: Decimal) -> dict[str, Any
     effective_auto = bool(core.auto_trading_enabled()) or bool(auto_prepare_enabled)
     data = {"auto_prepare_enabled": effective_auto, "live_enabled": bool(core.auto_trading_enabled()), "stake_usdc": str(stake), "railway_override": bool(core.auto_trading_enabled())}
     core._save(SLACK_MODE_FILE, data)
-    # Slack can prepare live orders, but never dispatch them unattended.
+    # Railway AUTO_TRADING authorizes unattended dispatch; normal risk filters still apply.
     ingest.SLACK_PAPER_ONLY = not effective_auto
     return data
 
@@ -174,7 +174,7 @@ def _slack_trade_handler(
         "id": trade_id,
         "trade_id": trade_id,
         "paper": False,
-        "queued": False,
+        "queued": bool(core.auto_trading_enabled()),
         "prepared": True,
         "requires_approval": not bool(core.auto_trading_enabled()),
         "request_id": queued["id"],
@@ -215,8 +215,8 @@ def slack_trading_mode_get():
         "max_stake_usdc": str(core.MAX_AUTO_TRADE_USDC),
         "moneyline_only": True,
         "duplicate_position_guard": True,
-        "unattended_live_execution": False,
-        "approval_required": True,
+        "unattended_live_execution": bool(core.auto_trading_enabled()),
+        "approval_required": not bool(core.auto_trading_enabled()),
     }
 
 
