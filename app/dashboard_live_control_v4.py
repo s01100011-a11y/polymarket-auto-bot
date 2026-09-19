@@ -26,7 +26,9 @@ class SlackTradingMode(BaseModel):
 
 def _mode() -> dict[str, Any]:
     saved = core._load(SLACK_MODE_FILE)
-    # Railway AUTO_TRADING is authoritative. When enabled, no saved/dashboard\n    # state may disable automatic live preparation/execution.\n    auto_prepare_enabled = bool(core.AUTO_TRADING) or bool(saved.get("auto_prepare_enabled", saved.get("live_enabled", False)))
+    # Railway AUTO_TRADING is authoritative. When enabled, no saved/dashboard
+    # state may disable automatic live preparation/execution.
+    auto_prepare_enabled = bool(core.AUTO_TRADING) or bool(saved.get("auto_prepare_enabled", saved.get("live_enabled", False)))
     default_stake = min(Decimal("5"), core.MAX_AUTO_TRADE_USDC)
     stake = Decimal(str(saved.get("stake_usdc") or default_stake))
     stake = min(stake, core.MAX_AUTO_TRADE_USDC)
@@ -356,7 +358,8 @@ document.addEventListener('click',async function(ev){const a=ev.target.closest('
 loadSlackTradingMode();
 setInterval(loadSlackTradingMode,5000);
 """
-    html = html.replace("</script>", js + "\n</script>", 1)
+    html = html.replace("</script>", js + "
+</script>", 1)
     dashboard.DASHBOARD_HTML = html
 
 
