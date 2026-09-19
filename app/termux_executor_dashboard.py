@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from fastapi import Depends, Header, HTTPException
 from pydantic import BaseModel, Field
+from polymarket import PublicClient
 
 from app import live_test_dashboard as base
 from app import live_trading
@@ -190,6 +191,20 @@ def executor_wallet():
     }
 
 
+def _authoritative_position(asset_id: str):
+    wallet = os.getenv("POLYMARKET_DEPOSIT_WALLET", "").strip()
+    if not wallet or not asset_id:
+        return None
+    try:
+        with PublicClient() as client:
+            for position in client.list_positions(user=wallet, page_size=100).iter_items():
+                if str(getattr(position, "asset_id", "")) == str(asset_id):
+                    return position
+    except Exception:
+        return None
+    return None
+
+
 def _queue_load() -> dict[str, Any]:
     return core._load(EXECUTOR_QUEUE_FILE)
 
@@ -271,12 +286,31 @@ def request_sell(trade_id: str):
     if rec.get("status") not in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}:
         raise HTTPException(status_code=400, detail=f"Trade status is {rec.get('status')}")
     q = rec.get("quote") or {}
+    asset_id = str(q.get("asset_id") or "")
     shares = str(rec.get("remaining_shares") or rec.get("filled_shares") or q.get("shares") or "0")
+    entry_price = str(q.get("entry_price") or q.get("limit_price") or "0")
+
+    # If this bot opened the wallet position from zero shares, Polymarket's
+    # wallet-position average price and entry cost are authoritative.
+    position = _authoritative_position(asset_id)
+    pre_size = Decimal(str(rec.get("pre_position_size") or "0"))
+    if position is not None and pre_size <= Decimal("0.0001"):
+        pos_entry = Decimal(str(getattr(position, "avg_price", "0") or "0"))
+        pos_cost = Decimal(str(getattr(position, "entry_cost_usdc", "0") or "0"))
+        if pos_entry > 0:
+            entry_price = str(pos_entry)
+            q["entry_price"] = entry_price
+            rec["quote"] = q
+        if pos_cost > 0:
+            rec["budget_usdc"] = str(pos_cost.quantize(Decimal("0.01")))
+        executions[trade_id] = rec
+        core._save(core.EXECUTIONS_FILE, executions)
+
     payload = {
         "trade_id": trade_id,
-        "asset_id": str(q.get("asset_id") or ""),
+        "asset_id": asset_id,
         "shares": shares,
-        "entry_price": str(q.get("entry_price") or q.get("limit_price") or "0"),
+        "entry_price": entry_price,
         "market": q.get("market"),
         "market_url": q.get("market_url"),
         "outcome": q.get("resolved_outcome") or q.get("requested_outcome"),
@@ -386,7 +420,7 @@ def _record_sell_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> No
     sold = Decimal(str(result.get("sold_shares") or "0"))
     remaining = Decimal(str(result.get("remaining_shares") or "0"))
     sell_price = Decimal(str(result.get("sell_price") or "0"))
-    entry = Decimal(str(q.get("entry_price") or q.get("limit_price") or "0"))
+    entry = Decimal(str(payload.get("entry_price") or q.get("entry_price") or q.get("limit_price") or "0"))
     realized = Decimal(str(result.get("realized_pnl") or ((sell_price - entry) * sold).quantize(Decimal("0.01"))))
     now = _now_iso()
     rec["status"] = "CLOSED" if remaining <= Decimal("0.0001") else "PARTIALLY_CLOSED"
