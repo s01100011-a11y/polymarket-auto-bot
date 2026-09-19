@@ -8,7 +8,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from statistics import mean
+from statistics import mean, median
 from typing import Any
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -558,6 +558,42 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
             "time_exits":sum(1 for x in trades if x["reason"]=="TIME"),
         }
 
+    def stressed_trade_summary(
+        trades: list[dict[str, Any]],
+        cents_each_side: float,
+    ) -> dict[str, Any]:
+        if not trades:
+            return {"trades": 0}
+        stressed: list[dict[str, Any]] = []
+        delta = float(cents_each_side) / 100.0
+        for trade in trades:
+            entry = min(0.999, float(trade["entry_price"]) + delta)
+            exit_price = max(0.001, float(trade["exit_price"]) - delta)
+            pnl = 100.0 * ((exit_price / entry) - 1.0)
+            copy = dict(trade)
+            copy["pnl"] = pnl
+            copy["roi_pct"] = pnl
+            stressed.append(copy)
+        return summarize_trades(stressed)
+
+    def positive_config_pct(configs: list[dict[str, Any]], section: str) -> float | None:
+        vals = [
+            float((cfg.get(section) or {}).get("roi_pct"))
+            for cfg in configs
+            if (cfg.get(section) or {}).get("trades")
+            and (cfg.get(section) or {}).get("roi_pct") is not None
+        ]
+        return round(sum(1 for value in vals if value > 0) / len(vals) * 100.0, 1) if vals else None
+
+    def median_config_roi(configs: list[dict[str, Any]], section: str) -> float | None:
+        vals = [
+            float((cfg.get(section) or {}).get("roi_pct"))
+            for cfg in configs
+            if (cfg.get(section) or {}).get("trades")
+            and (cfg.get(section) or {}).get("roi_pct") is not None
+        ]
+        return round(median(vals), 2) if vals else None
+
     def run_historical_backtest() -> dict[str, Any]:
         if not history_enabled:
             return {"enabled":False}
@@ -737,6 +773,20 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
                 a["_dt"]=dt; a["_call_ts"]=call_ts; a["_map"]=m; a["_points"]=points; a["_opp_points"]=opp
                 prepared.append(a)
 
+            game_first_ts: dict[str,int] = {}
+            for a in prepared:
+                gid = str(a.get("game_id") or "")
+                ts = int(a.get("_call_ts") or 0)
+                if gid and ts and (gid not in game_first_ts or ts < game_first_ts[gid]):
+                    game_first_ts[gid] = ts
+            ordered_games = [
+                game_id
+                for game_id,_ in sorted(game_first_ts.items(), key=lambda item: item[1])
+            ]
+            holdout_cut = max(1, min(len(ordered_games)-1, int(len(ordered_games) * 0.70))) if len(ordered_games) > 1 else len(ordered_games)
+            holdout_train_games = set(ordered_games[:holdout_cut])
+            holdout_test_games = set(ordered_games[holdout_cut:])
+
             def is_away(a: dict[str,Any]) -> bool:
                 return str(a.get("predicted_winner_abbr"))==str(a.get("team_a"))
             def early_q4(a: dict[str,Any]) -> bool:
@@ -754,26 +804,131 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
                 "repeat_pw_dip5": lambda a:(a["_points"],"dip5") if int(a.get("same_side_call_no") or 0)>=2 else None,
             }
             results={}
+            robustness={}
             for name,selector in strategies.items():
                 configs=[]
+                config_runs=[]
                 for tp_c in (3,5,8):
                     for sl_c in (3,5,8):
                         for horizon in (60,120,180,300):
                             trades=[]
                             for a in prepared:
                                 selected=selector(a)
-                                if not selected: continue
+                                if not selected:
+                                    continue
                                 points,mode=selected
                                 sim=simulate(points,int(a["_call_ts"]),mode,tp_c/100.0,sl_c/100.0,horizon)
                                 if sim:
-                                    sim["call_ts"]=a["_call_ts"]; trades.append(sim)
+                                    sim["call_ts"]=a["_call_ts"]
+                                    sim["game_id"]=str(a.get("game_id") or "")
+                                    trades.append(sim)
+                            train_trades=[t for t in trades if t.get("game_id") in holdout_train_games]
+                            test_trades=[t for t in trades if t.get("game_id") in holdout_test_games]
                             stats=summarize_trades(trades)
-                            configs.append({
-                                "tp_cents":tp_c,"sl_cents":sl_c,"horizon_s":horizon,
+                            row={
+                                "tp_cents":tp_c,
+                                "sl_cents":sl_c,
+                                "horizon_s":horizon,
                                 **stats,
-                            })
-                configs.sort(key=lambda x:(float(x.get("roi_pct") or -999),int(x.get("trades") or 0)), reverse=True)
+                                "train_70":summarize_trades(train_trades),
+                                "test_30":summarize_trades(test_trades),
+                            }
+                            configs.append(row)
+                            config_runs.append((row,trades))
+                configs.sort(
+                    key=lambda x:(float(x.get("roi_pct") or -999),int(x.get("trades") or 0)),
+                    reverse=True,
+                )
                 results[name]={"best":configs[:5],"all_configs":configs}
+
+                eligible_train=[
+                    (row,trades)
+                    for row,trades in config_runs
+                    if int((row.get("train_70") or {}).get("trades") or 0) > 0
+                ]
+                train_best=max(
+                    eligible_train,
+                    key=lambda item:(
+                        float((item[0].get("train_70") or {}).get("roi_pct") or -999),
+                        int((item[0].get("train_70") or {}).get("trades") or 0),
+                    ),
+                ) if eligible_train else None
+
+                holdout=None
+                if train_best:
+                    selected_row,selected_trades=train_best
+                    test_trades=[
+                        t for t in selected_trades
+                        if t.get("game_id") in holdout_test_games
+                    ]
+                    holdout={
+                        "selected_config":{
+                            "tp_cents":selected_row["tp_cents"],
+                            "sl_cents":selected_row["sl_cents"],
+                            "horizon_s":selected_row["horizon_s"],
+                        },
+                        "train":selected_row.get("train_70"),
+                        "test":selected_row.get("test_30"),
+                        "test_stress_0_5c_each_side":stressed_trade_summary(test_trades,0.5),
+                        "test_stress_1c_each_side":stressed_trade_summary(test_trades,1.0),
+                        "positive_config_pct_train":positive_config_pct(configs,"train_70"),
+                        "positive_config_pct_test":positive_config_pct(configs,"test_30"),
+                        "median_config_roi_train":median_config_roi(configs,"train_70"),
+                        "median_config_roi_test":median_config_roi(configs,"test_30"),
+                    }
+
+                folds=[]
+                aggregate_oos=[]
+                n_games=len(ordered_games)
+                for fold_no,start_frac in enumerate((0.60,0.70,0.80,0.90),start=1):
+                    train_end=int(n_games*start_frac)
+                    test_end=n_games if fold_no==4 else int(n_games*(start_frac+0.10))
+                    if train_end <= 0 or test_end <= train_end:
+                        continue
+                    fold_train=set(ordered_games[:train_end])
+                    fold_test=set(ordered_games[train_end:test_end])
+                    choices=[]
+                    for row,trades in config_runs:
+                        train_slice=[t for t in trades if t.get("game_id") in fold_train]
+                        train_stats=summarize_trades(train_slice)
+                        if int(train_stats.get("trades") or 0) > 0:
+                            choices.append((row,trades,train_stats))
+                    if not choices:
+                        continue
+                    chosen=max(
+                        choices,
+                        key=lambda item:(
+                            float(item[2].get("roi_pct") or -999),
+                            int(item[2].get("trades") or 0),
+                        ),
+                    )
+                    row,trades,train_stats=chosen
+                    test_slice=[t for t in trades if t.get("game_id") in fold_test]
+                    test_stats=summarize_trades(test_slice)
+                    aggregate_oos.extend(test_slice)
+                    folds.append({
+                        "fold":fold_no,
+                        "train_games":len(fold_train),
+                        "test_games":len(fold_test),
+                        "selected_config":{
+                            "tp_cents":row["tp_cents"],
+                            "sl_cents":row["sl_cents"],
+                            "horizon_s":row["horizon_s"],
+                        },
+                        "train":train_stats,
+                        "test":test_stats,
+                    })
+
+                robustness[name]={
+                    "game_split":{
+                        "all_games":len(ordered_games),
+                        "train_games":len(holdout_train_games),
+                        "test_games":len(holdout_test_games),
+                    },
+                    "holdout_70_30":holdout,
+                    "walk_forward_folds":folds,
+                    "walk_forward_oos":summarize_trades(aggregate_oos),
+                }
 
             output={
                 "generated_at":datetime.now(timezone.utc).isoformat(),
@@ -786,6 +941,7 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
                 "market_maps_error":sum(1 for x in maps.values() if x.get("status")!="OK"),
                 "price_errors":price_errors,
                 "strategies":results,
+                "robustness":robustness,
             }
             backtest_cache.clear(); backtest_cache.update(output)
             print(
@@ -803,6 +959,39 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
                     f"horizon={b.get('horizon_s')} dd={b.get('max_drawdown_usdc')}",
                     flush=True,
                 )
+            for name,r in robustness.items():
+                h=r.get("holdout_70_30") or {}
+                cfg=h.get("selected_config") or {}
+                tr=h.get("train") or {}
+                te=h.get("test") or {}
+                s05=h.get("test_stress_0_5c_each_side") or {}
+                s10=h.get("test_stress_1c_each_side") or {}
+                wf=r.get("walk_forward_oos") or {}
+                print(
+                    "PW_MARKET_HOLDOUT "
+                    f"strategy={name} tp={cfg.get('tp_cents')} sl={cfg.get('sl_cents')} "
+                    f"horizon={cfg.get('horizon_s')} train_trades={tr.get('trades',0)} "
+                    f"train_roi={tr.get('roi_pct')} test_trades={te.get('trades',0)} "
+                    f"test_roi={te.get('roi_pct')} test_pnl={te.get('pnl_usdc')} "
+                    f"positive_configs_test_pct={h.get('positive_config_pct_test')} "
+                    f"median_test_roi={h.get('median_config_roi_test')} "
+                    f"stress05_roi={s05.get('roi_pct')} stress10_roi={s10.get('roi_pct')} "
+                    f"walkforward_trades={wf.get('trades',0)} walkforward_roi={wf.get('roi_pct')} "
+                    f"walkforward_pnl={wf.get('pnl_usdc')}",
+                    flush=True,
+                )
+                for fold in r.get("walk_forward_folds") or []:
+                    fc=fold.get("selected_config") or {}
+                    ft=fold.get("test") or {}
+                    print(
+                        "PW_MARKET_WALK_FORWARD "
+                        f"strategy={name} fold={fold.get('fold')} "
+                        f"train_games={fold.get('train_games')} test_games={fold.get('test_games')} "
+                        f"tp={fc.get('tp_cents')} sl={fc.get('sl_cents')} horizon={fc.get('horizon_s')} "
+                        f"test_trades={ft.get('trades',0)} test_roi={ft.get('roi_pct')} "
+                        f"test_pnl={ft.get('pnl_usdc')}",
+                        flush=True,
+                    )
             return output
 
     _original_save_alert = ingest._save_alert
