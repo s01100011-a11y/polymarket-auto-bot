@@ -695,3 +695,17 @@ print(
     f"plus_edge40={PW_STRAT_PLUS_EDGE40} "
     "paper_only=True repeated_alerts=True"
 )
+
+
+# Start the private PW-export poller only after all Slack/PW strategy monkey
+# patches above are installed, so direct feed records use the identical
+# filtering, sizing, duplicate guards, and live/paper execution path.
+from app import pw_export_ingest as pw_export_ingest
+
+pw_export_ingest.install(
+    app=app,
+    ingest=ingest,
+    core=core,
+    history=history,
+    dashboard=dashboard,
+)
