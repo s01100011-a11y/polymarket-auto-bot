@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -300,6 +301,8 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
         "https://bob-mbp-ubuntu.taila35415.ts.net:8445/api/pw-export",
     ).strip()
     proxy = os.getenv("PW_EXPORT_SOCKS_PROXY", "socks5://127.0.0.1:1055").strip()
+    tailnet_peer = os.getenv("PW_TAILNET_PEER", "100.81.244.65").strip()
+    ts_socket = os.getenv("TS_SOCKET", "/tmp/tailscale/tailscaled.sock").strip()
     state_file = core.DATA_DIR / "pw_export_ingest_state.json"
     stop = threading.Event()
 
@@ -317,13 +320,44 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
     def query_since() -> str:
         return (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
 
+    def ensure_tailnet_ready() -> None:
+        if not tailnet_peer:
+            return
+        try:
+            proc = subprocess.run(
+                [
+                    "tailscale",
+                    f"--socket={ts_socket}",
+                    "ping",
+                    "--timeout=4s",
+                    tailnet_peer,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=6,
+                check=False,
+            )
+            if proc.returncode != 0:
+                detail = (proc.stderr or proc.stdout or "").strip().replace("\n", " ")[:180]
+                print(
+                    f"PW_EXPORT_TAILNET_WAIT peer={tailnet_peer} rc={proc.returncode} detail={detail}",
+                    flush=True,
+                )
+        except Exception as exc:
+            print(
+                f"PW_EXPORT_TAILNET_WAIT peer={tailnet_peer} error={type(exc).__name__}:{exc}",
+                flush=True,
+            )
+
     def fetch_rows() -> tuple[list[dict[str, Any]], Any]:
+        ensure_tailnet_ready()
         params = {
             "source": source,
             "since": query_since(),
             "include_suppressed": include_suppressed,
         }
-        with httpx.Client(proxy=proxy, timeout=15.0, follow_redirects=True) as client:
+        timeout = httpx.Timeout(20.0, connect=20.0)
+        with httpx.Client(proxy=proxy, timeout=timeout, follow_redirects=True) as client:
             response = client.get(url, params=params)
             response.raise_for_status()
             payload = response.json()
