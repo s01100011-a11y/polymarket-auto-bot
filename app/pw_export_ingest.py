@@ -60,10 +60,25 @@ def _identity(row: dict[str, Any]) -> str:
     )
     if raw not in (None, ""):
         return str(raw)
+
+    # /api/pw-export rows do not currently expose a dedicated call id.
+    # Build the identity only from fields that belong to the call itself.
+    # Do not hash grading/final-score fields because those can change later.
+    stable_parts = [
+        _first(row, "game_id", "gameId"),
+        _first(row, "ts", "event_ts", "timestamp"),
+        _first(row, "predicted_team", "predicted_winner", "predictedWinner", "pick"),
+        _first(row, "quarter", "period", "q"),
+        _first(row, "basis"),
+        _first(row, "pw_version"),
+        _first(row, "model_schema_version"),
+    ]
+    if any(x not in (None, "") for x in stable_parts):
+        stable = "|".join("" if x is None else str(x) for x in stable_parts)
+        return hashlib.sha256(stable.encode("utf-8")).hexdigest()
+
     stable = json.dumps(row, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(stable.encode("utf-8")).hexdigest()
-
-
 def _parse_dt(value: Any) -> datetime | None:
     if value in (None, ""):
         return None
@@ -202,6 +217,8 @@ def _synth_text(row: dict[str, Any], history: Any) -> tuple[str | None, dict[str
             row,
             "predicted_winner",
             "predictedWinner",
+            "predicted_team",
+            "predictedTeam",
             "pick",
             "selection",
             "team",
@@ -217,6 +234,7 @@ def _synth_text(row: dict[str, Any], history: Any) -> tuple[str | None, dict[str
             "winProbability",
             "win_prob",
             "probability",
+            "pct",
             "confidence",
         )
     )
@@ -227,6 +245,8 @@ def _synth_text(row: dict[str, Any], history: Any) -> tuple[str | None, dict[str
             row,
             "bk_ml",
             "bkML",
+            "bk_moneyline",
+            "bkMoneyline",
             "bk_odds",
             "bkOdds",
             "moneyline",
@@ -235,6 +255,11 @@ def _synth_text(row: dict[str, Any], history: Any) -> tuple[str | None, dict[str
         )
     )
     score = _first(row, "score_at_alert", "scoreAtAlert", "score")
+    if score in (None, ""):
+        away_score = _first(row, "away_score_at_fire", "away_score")
+        home_score = _first(row, "home_score_at_fire", "home_score")
+        if away_score not in (None, "") and home_score not in (None, ""):
+            score = f"{away_score}-{home_score}"
     event_ts = _first(
         row,
         "event_ts",
@@ -484,7 +509,17 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
 
     def loop() -> None:
         state = load_state()
+        identity_version = 2
+        if int(state.get("identity_version") or 0) != identity_version:
+            # Identity logic changed after inspecting the live export schema.
+            # Re-bootstrap safely so existing calls can never become "new".
+            state["bootstrapped"] = False
+            state["seen"] = []
+            state["identity_version"] = identity_version
+            state["identity_migrated_at"] = datetime.now(timezone.utc).isoformat()
+
         state.setdefault("processed", 0)
+        state.setdefault("successful_polls", 0)
         state.setdefault("trade_actions", 0)
         state.setdefault("no_trade", 0)
         state.setdefault("invalid", 0)
@@ -499,6 +534,7 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
                 state["last_poll_records"] = len(rows)
                 state["last_http_status"] = 200
                 state["last_error"] = None
+                state["successful_polls"] = int(state.get("successful_polls") or 0) + 1
 
                 if not state.get("schema_logged") and rows:
                     print(
@@ -516,9 +552,11 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
                     state["bootstrapped"] = True
                     state["bootstrapped_at"] = datetime.now(timezone.utc).isoformat()
                     state["bootstrap_records"] = len(rows)
+                    parseable = sum(1 for r in rows if _synth_text(r, history)[0])
+                    state["bootstrap_parseable"] = parseable
                     save_state(state)
                     print(
-                        f"PW_EXPORT_BOOTSTRAP records={len(rows)} action=cursor_only",
+                        f"PW_EXPORT_BOOTSTRAP records={len(rows)} parseable={parseable} action=cursor_only",
                         flush=True,
                     )
                 else:
@@ -529,7 +567,7 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
                     for row, rec_id in fresh:
                         # Respect an explicit suppression marker even if the API was
                         # configured to include suppressed rows for diagnostics.
-                        if bool(_first(row, "suppressed", "is_suppressed", "isSuppressed")):
+                        if bool(_first(row, "_suppressed", "suppressed", "is_suppressed", "isSuppressed")):
                             mark_seen(state, [rec_id])
                             continue
 
@@ -566,6 +604,10 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
 
                     if not fresh:
                         save_state(state)
+                        print(
+                            f"PW_EXPORT_POLL_OK records={len(rows)} fresh=0 poll={state.get('successful_polls')}",
+                            flush=True,
+                        )
 
             except Exception as exc:
                 state["errors"] = int(state.get("errors") or 0) + 1
