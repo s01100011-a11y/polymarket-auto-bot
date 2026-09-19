@@ -339,6 +339,67 @@ def _save_alert(event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _resolved_market_outcome(client: PublicClient, asset_id: str) -> dict[str, Any] | None:
+    """Return authoritative Polymarket settlement info for an outcome token.
+
+    Wallet token balances can remain nonzero after a market finishes. A closed
+    market with UMA status resolved/settled and terminal outcome prices is the
+    settlement source of truth for whether the tracked token won or lost.
+    """
+    if not asset_id:
+        return None
+    try:
+        markets = list(
+            client.list_markets(
+                clob_token_ids=[asset_id],
+                closed=True,
+                page_size=5,
+            ).iter_items()
+        )
+    except Exception as exc:
+        print(
+            f"MARKET_SETTLEMENT_LOOKUP_ERROR asset={asset_id} "
+            f"error={type(exc).__name__}:{exc}",
+            flush=True,
+        )
+        return None
+
+    for market in markets:
+        state = getattr(market, "state", None)
+        resolution = getattr(market, "resolution", None)
+        status = str(getattr(resolution, "uma_resolution_status", "") or "").lower()
+        closed = bool(getattr(state, "closed", False))
+        if not closed or status not in {"resolved", "settled"}:
+            continue
+
+        outcomes = getattr(market, "outcomes", None)
+        candidates = [
+            getattr(outcomes, "yes", None),
+            getattr(outcomes, "no", None),
+        ]
+        for outcome in candidates:
+            if outcome is None or str(getattr(outcome, "token_id", "")) != str(asset_id):
+                continue
+            price = dashboard._safe_decimal(getattr(outcome, "price", None))
+            if price >= Decimal("0.9999"):
+                terminal = Decimal("1")
+                result = "WIN"
+            elif price <= Decimal("0.0001"):
+                terminal = Decimal("0")
+                result = "LOSS"
+            else:
+                return None
+            return {
+                "result": result,
+                "terminal_price": terminal,
+                "market_id": str(getattr(market, "id", "") or ""),
+                "market_slug": str(getattr(market, "slug", "") or ""),
+                "outcome_label": str(getattr(outcome, "label", "") or ""),
+                "uma_status": status,
+            }
+    return None
+
+
 def _live_fill_snapshot(client: PublicClient, wallet: str, rec: dict[str, Any], asset_id: str) -> dict[str, Any] | None:
     """Recover this tracked BUY from Polymarket's executed-trade feed.
 
@@ -460,6 +521,43 @@ def _estimate_pnl_with_paper(records: list[dict]) -> tuple[list[dict], Decimal]:
             pnl_percent = None
             fill_txs: list[str] = []
             entry_source = "paper_snapshot" if is_paper else "recorded_limit_fallback"
+
+            # A resolved market supersedes wallet token balance. Losing CTF
+            # shares may remain visible in the wallet but are worth $0.
+            if not is_paper and client and asset_id:
+                settlement = _resolved_market_outcome(client, asset_id)
+                if settlement:
+                    terminal_price = settlement["terminal_price"]
+                    if shares <= 0:
+                        shares = dashboard._safe_decimal(rec.get("filled_shares") or q.get("shares"))
+                    if cost_basis is None or cost_basis <= 0:
+                        cost_basis = dashboard._safe_decimal(rec.get("actual_cost_usdc"))
+                    if (cost_basis is None or cost_basis <= 0) and entry > 0 and shares > 0:
+                        cost_basis = entry * shares
+                    final_value = terminal_price * shares
+                    realized = final_value - (cost_basis or Decimal("0"))
+                    rec["status"] = "SETTLED_WIN" if settlement["result"] == "WIN" else "SETTLED_LOSS"
+                    rec["exit_price"] = str(terminal_price)
+                    rec["realized_pnl"] = str(realized.quantize(Decimal("0.00001")))
+                    rec["remaining_shares"] = "0"
+                    rec["closed_at"] = datetime.now(timezone.utc).isoformat()
+                    rec["settlement"] = {
+                        "source": "polymarket_market_resolution",
+                        "result": settlement["result"],
+                        "terminal_price": str(terminal_price),
+                        "market_id": settlement["market_id"],
+                        "market_slug": settlement["market_slug"],
+                        "outcome_label": settlement["outcome_label"],
+                        "uma_status": settlement["uma_status"],
+                    }
+                    executions_changed = True
+                    print(
+                        f"LIVE_POSITION_SETTLED trade={rec.get('id')} "
+                        f"result={settlement['result']} terminal={terminal_price} "
+                        f"cost={cost_basis} value={final_value} pnl={realized}",
+                        flush=True,
+                    )
+                    continue
 
             position = positions_by_asset.get(asset_id) if asset_id else None
 
