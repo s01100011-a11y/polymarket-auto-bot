@@ -486,6 +486,7 @@ def _estimate_pnl_with_paper(records: list[dict]) -> tuple[list[dict], Decimal]:
                     # and history use the same authoritative entry.
                     if q.get("entry_price") != str(entry) or rec.get("actual_cost_usdc") != str(cost_basis):
                         q["entry_price"] = str(entry)
+                        q["entry_source"] = "polymarket_executed_trades"
                         q["fill_transaction_hashes"] = fill_txs
                         rec["quote"] = q
                         rec["actual_cost_usdc"] = str(cost_basis)
