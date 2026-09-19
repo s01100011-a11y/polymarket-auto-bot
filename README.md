@@ -2,6 +2,12 @@
 
 Termux-friendly Polymarket trading service using the current official `polymarket-client` Python SDK.
 
+## Engineering history
+
+Full implementation notes, deployment history, safeguards, incidents/fixes, and the complete commit index are maintained in [DEVELOPMENT_NOTES.md](DEVELOPMENT_NOTES.md).
+
+Future code changes should update that file with the objective, files changed, behavior/data/configuration impact, verification performed, deployment result, and any outstanding work.
+
 ## What changed in v0.2
 
 - Keeps the v0.1 approval flow.
