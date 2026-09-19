@@ -374,10 +374,12 @@ def _live_fill_snapshot(client: PublicClient, wallet: str, rec: dict[str, Any], 
             if str(getattr(trade, "asset_id", "")) != asset_id:
                 continue
             rows.append(trade)
-    except Exception:
+    except Exception as exc:
+        print(f"LIVE_FILL_RECONCILE_ERROR trade={rec.get('id')} error={type(exc).__name__}:{exc}", flush=True)
         return None
 
     if not rows:
+        print(f"LIVE_FILL_RECONCILE_NO_MATCH trade={rec.get('id')} asset={asset_id}", flush=True)
         return None
     rows.sort(key=lambda t: abs((getattr(t, "timestamp") - anchor).total_seconds()))
     remaining = target
@@ -395,9 +397,14 @@ def _live_fill_snapshot(client: PublicClient, wallet: str, rec: dict[str, Any], 
 
     matched_size = sum((x[0] for x in matched), Decimal("0"))
     if matched_size <= 0 or matched_size < target * Decimal("0.98"):
+        print(f"LIVE_FILL_RECONCILE_PARTIAL trade={rec.get('id')} matched={matched_size} target={target}", flush=True)
         return None
     notional = sum((size * price for size, price, _ in matched), Decimal("0"))
     avg = notional / matched_size
+    print(
+        f"LIVE_FILL_RECONCILED trade={rec.get('id')} shares={matched_size} avg={avg} cost={notional} txs={len(set(tx for _, _, tx in matched if tx))}",
+        flush=True,
+    )
     return {
         "shares": matched_size,
         "avg_price": avg,
@@ -455,7 +462,18 @@ def _estimate_pnl_with_paper(records: list[dict]) -> tuple[list[dict], Decimal]:
 
             # For live trades, executed Polymarket trades are the primary source
             # of the actual entry price and cost. The limit is only a ceiling.
-            if not is_paper and client and wallet and asset_id:
+            already_fill_reconciled = (
+                not is_paper
+                and q.get("entry_source") == "polymarket_executed_trades"
+                and q.get("entry_price")
+                and rec.get("actual_cost_usdc")
+            )
+            if already_fill_reconciled:
+                entry = dashboard._safe_decimal(q.get("entry_price"))
+                cost_basis = dashboard._safe_decimal(rec.get("actual_cost_usdc"))
+                fill_txs = q.get("fill_transaction_hashes") or []
+                entry_source = "polymarket_executed_trades"
+            elif not is_paper and client and wallet and asset_id:
                 fills = _live_fill_snapshot(client, wallet, rec, asset_id)
                 if fills:
                     shares = fills["shares"]
@@ -492,6 +510,7 @@ def _estimate_pnl_with_paper(records: list[dict]) -> tuple[list[dict], Decimal]:
                     entry_source = "polymarket_position"
                     if entry > 0:
                         q["entry_price"] = str(entry)
+                        q["entry_source"] = "polymarket_position"
                         rec["quote"] = q
                     if cost_basis > 0:
                         rec["actual_cost_usdc"] = str(cost_basis)
