@@ -303,3 +303,16 @@ For every future code change, append an entry containing: objective, files chang
 - **Commits:** `a84ad7f` (LIVE classification/open count), `35e3be1` (LIVE P/L inclusion).
 - **Deployment:** Railway production deployment `2c98983a-66ab-4ca6-ae3a-408eb32e357b` reached SUCCESS.
 - **Verification:** Service startup completed, /health passed, and no startup exceptions were introduced by the stats changes.
+
+
+## 2026-09-19 — Use top four PW single-condition filters (#11)
+
+- **Objective:** Align the four individual WNBA PW strategy filters with the current top four raw alert-level ROI conditions from the 1,921-call database.
+- **Enabled strategy set:** Away Underdog, Plus-money, Q3 Away, Home Underdog.
+- **Replaced strategy:** Plus-money + PW edge >= 40pp was removed from the four-filter strategy set and replaced by Home Underdog.
+- **Code change:** `app/wnba_pw_strategy_test_v12.py` now defines/matches `home_underdog` and reports `home_dog` at startup.
+- **Railway variables:** `PW_STRAT_HOME_DOG=true`; legacy `PW_STRAT_PLUS_EDGE40=false`.
+- **Unchanged:** Separate composite PW filter, moneyline-only execution, duplicate-position protection, max stake, max price, spread limits, live/auto switches, and other execution safeguards.
+- **Commit:** `0f7fb90`.
+- **Deployment:** Railway production deployment `898d6377-1b70-4138-8d00-89d7185cbf54` reached SUCCESS.
+- **Verification:** Startup logged `PW_STRATEGY_TEST_READY enabled=True q3_away=True away_dog=True plus_money=True home_dog=True paper_only=True repeated_alerts=True`. PW database remained 1,921 alerts / 1,362 graded. No historical orders were created by deployment.
