@@ -253,6 +253,18 @@ The repository contained 140 commits when this retrospective log was created. Th
 - `7d8e5e9` — Fix PW historical dedupe timestamp normalization
 - `66b0691` — Harden full-season PW research fetch
 
+## 2026-09-19 — Documentation backfill and new logging standard
+
+- Reconstructed the standalone repository history from GitHub and documented all 140 commits that existed before the documentation pass.
+- Added this `DEVELOPMENT_NOTES.md` file as the permanent engineering/audit record.
+- Added a README link so the development record is visible from the repository front page.
+- Recorded the current WNBA PW/play-by-play state, Tailnet limitations, database safeguards, and operating invariants.
+- Established the rule that future code changes must update this file with: objective, files changed, behavior change, data/schema impact, configuration impact, safety implications, deployment result, tests/verification, issues found/fixed, and outstanding work.
+- Documentation commits created during this pass:
+  - `9cef884` — Add complete development notes and commit history.
+  - `3c143dc` — Link full engineering history from README.
+- No application behavior, trading configuration, database contents, or runtime secrets were changed by this documentation-only pass.
+
 ## Future note format
 
 For every future code change, append an entry containing: objective, files changed, behavior change, data/schema impact, configuration impact, safety implications, deployment result, tests/verification, problems found/fixed, and outstanding work. Commit messages should stay concise; this file carries the full operational record.
