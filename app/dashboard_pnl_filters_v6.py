@@ -41,14 +41,15 @@ def _mode_totals(data: dict[str, Any]) -> dict[str, dict[str, Decimal]]:
         if pnl is not None:
             realized[bucket] += pnl
 
+    execution_by_id = {
+        str(rec.get("id") or key): rec
+        for key, rec in executions.items()
+        if isinstance(rec, dict)
+    }
     for row in data.get("live_trades", []):
-        if row.get("paper"):
-            bucket = "paper"
-        elif str(row.get("source") or "") == "slack_live":
-            bucket = "live"
-        else:
-            # Manual Termux live-test positions are diagnostic and intentionally
-            # excluded from bot performance/P&L filters.
+        rec = execution_by_id.get(str(row.get("id") or "")) or row
+        bucket = base._trade_bucket(rec)
+        if bucket not in {"paper", "live"}:
             continue
         if row.get("estimated_pnl") is not None:
             open_pnl[bucket] += _d(row.get("estimated_pnl"))
