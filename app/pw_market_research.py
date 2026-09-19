@@ -276,6 +276,27 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
             delay = max(0.05, sample_seconds - (time.time() - started))
             time.sleep(delay)
 
+    def game_clock_seconds(value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            text = str(value).strip()
+            if ":" in text:
+                minutes, seconds = text.split(":", 1)
+                return int(minutes) * 60 + int(float(seconds))
+            return int(float(text))
+        except Exception:
+            return None
+
+    def parse_score(value: Any) -> tuple[int, int] | None:
+        if not value:
+            return None
+        try:
+            away, home = str(value).split("-", 1)
+            return int(away), int(home)
+        except Exception:
+            return None
+
     def parse_event_ts(value: Any) -> datetime | None:
         if not value:
             return None
@@ -543,7 +564,7 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
                     dict(r) for r in con.execute(
                         """
                         SELECT a.id,a.event_ts,a.game_id,a.predicted_winner,a.predicted_winner_abbr,
-                               a.quarter,a.bk_ml,a.result,g.team_a,g.team_b
+                               a.quarter,a.score_at_alert,a.bk_ml,a.result,g.team_a,g.team_b
                         FROM alerts a JOIN games g ON g.game_id=a.game_id
                         WHERE a.backtest_eligible=1
                         ORDER BY a.event_ts,a.id
@@ -554,6 +575,20 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
                     (str(r["game_id"]),str(r["pick_abbr"])):dict(r)
                     for r in con.execute("SELECT * FROM pw_market_history_map").fetchall()
                 }
+                q4_pbp = [
+                    dict(r) for r in con.execute(
+                        """
+                        SELECT game_id,event_ts,clock,away_score,home_score,sequence_no
+                        FROM play_by_play
+                        WHERE period=4
+                        ORDER BY game_id,sequence_no
+                        """
+                    ).fetchall()
+                ]
+
+            q4_by_game: dict[str,list[dict[str,Any]]] = defaultdict(list)
+            for play in q4_pbp:
+                q4_by_game[str(play.get("game_id") or "")].append(play)
 
             side_count: dict[tuple[str,str],int]=defaultdict(int)
             prepared=[]
@@ -565,6 +600,33 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
                 key=(str(a["game_id"]),str(a["predicted_winner_abbr"]))
                 side_count[key]+=1
                 a["same_side_call_no"]=side_count[key]
+
+                # Align Q4 alerts to an exact play-by-play score so the
+                # early-Q4 fade is truly restricted to the first 3:00
+                # (10:00 through 7:00 remaining), rather than every Q4 call.
+                a["_q4_clock_seconds"]=None
+                if str(a.get("quarter") or "").upper()=="Q4":
+                    score=parse_score(a.get("score_at_alert"))
+                    if score:
+                        matches=[
+                            p for p in q4_by_game.get(str(a.get("game_id") or ""),[])
+                            if p.get("away_score") is not None
+                            and p.get("home_score") is not None
+                            and (int(p["away_score"]),int(p["home_score"]))==score
+                        ]
+                        if matches:
+                            def pbp_distance(play: dict[str,Any]) -> float:
+                                pdt=parse_event_ts(play.get("event_ts"))
+                                if pdt is None:
+                                    return float("inf")
+                                try:
+                                    return abs((pdt-dt).total_seconds())
+                                except Exception:
+                                    return float("inf")
+                            timed=[p for p in matches if parse_event_ts(p.get("event_ts")) is not None]
+                            anchor=min(timed,key=pbp_distance) if timed else matches[-1]
+                            a["_q4_clock_seconds"]=game_clock_seconds(anchor.get("clock"))
+
                 unique[key]=(a,dt)
 
             mapped=0; map_errors=0
@@ -675,7 +737,12 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
             def is_away(a: dict[str,Any]) -> bool:
                 return str(a.get("predicted_winner_abbr"))==str(a.get("team_a"))
             def early_q4(a: dict[str,Any]) -> bool:
-                return str(a.get("quarter"))=="Q4"
+                seconds=a.get("_q4_clock_seconds")
+                return (
+                    str(a.get("quarter"))=="Q4"
+                    and seconds is not None
+                    and 420 <= int(seconds) <= 600
+                )
             strategies={
                 "immediate_pw": lambda a:(a["_points"],"immediate"),
                 "early_q4_fade": lambda a:(a["_opp_points"],"immediate") if early_q4(a) else None,
@@ -711,6 +778,7 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
                 "alerts":len(alerts),
                 "unique_game_sides":len(unique),
                 "prepared_calls":len(prepared),
+                "early_q4_calls":sum(1 for a in prepared if early_q4(a)),
                 "market_maps_ok":sum(1 for x in maps.values() if x.get("status")=="OK"),
                 "market_maps_error":sum(1 for x in maps.values() if x.get("status")!="OK"),
                 "price_errors":price_errors,
