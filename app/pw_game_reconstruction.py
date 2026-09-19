@@ -7,7 +7,7 @@ import os
 import threading
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -134,7 +134,7 @@ def nearest_price(
     return None
 
 
-def install(*, app: Any, history: Any, dashboard: Any) -> None:
+def install(*, app: Any, history: Any, dashboard: Any, ingest: Any) -> None:
     global _INSTALLED
     if _INSTALLED:
         return
@@ -153,6 +153,180 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
         "last_completed_at": None,
         "last_error": None,
     }
+
+    abbr_to_name = {str(abbr): str(name) for name, abbr in history.TEAM_ABBR.items()}
+
+    def json_list(value: Any) -> list[Any]:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else []
+            except Exception:
+                return []
+        return []
+
+    def norm(value: Any) -> str:
+        return " ".join(str(value or "").lower().replace("-", " ").split())
+
+    def gamma_event(slug: str) -> dict[str, Any] | None:
+        response = httpx.get(
+            "https://gamma-api.polymarket.com/events",
+            params={"slug": slug},
+            timeout=15.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, list):
+            return data[0] if data else None
+        if isinstance(data, dict):
+            if isinstance(data.get("data"), list):
+                return data["data"][0] if data["data"] else None
+            return data if data.get("markets") else None
+        return None
+
+    def slug_candidates(team_a: str, team_b: str, game_dt: datetime) -> list[str]:
+        et = game_dt.astimezone(ZoneInfo("America/New_York"))
+        dates = [(et + timedelta(days=delta)).date().isoformat() for delta in (0, -1, 1)]
+        out: list[str] = []
+        for away_code in TEAM_SLUGS.get(team_a, [team_a.lower()]):
+            for home_code in TEAM_SLUGS.get(team_b, [team_b.lower()]):
+                for date in dates:
+                    out.append(f"wnba-{away_code}-{home_code}-{date}")
+                    out.append(f"wnba-{home_code}-{away_code}-{date}")
+        return list(dict.fromkeys(out))
+
+    def outcome_index(team_name: str, outcomes: list[str]) -> int | None:
+        aliases = [norm(team_name)]
+        aliases.extend(norm(x) for x in ingest.WNBA_ALIASES.get(team_name, ()))
+        for index, outcome in enumerate(outcomes):
+            outcome_norm = norm(outcome)
+            if any(alias and alias in outcome_norm for alias in aliases):
+                return index
+        return None
+
+    def moneyline_market(event: dict[str, Any], away_name: str, home_name: str) -> dict[str, Any] | None:
+        candidates: list[tuple[int, dict[str, Any]]] = []
+        for market in event.get("markets") or []:
+            if not isinstance(market, dict):
+                continue
+            outcomes = [str(x) for x in json_list(market.get("outcomes"))]
+            tokens = [str(x) for x in json_list(market.get("clobTokenIds"))]
+            if len(outcomes) != 2 or len(tokens) != 2:
+                continue
+            away_idx = outcome_index(away_name, outcomes)
+            home_idx = outcome_index(home_name, outcomes)
+            if away_idx is None or home_idx is None or away_idx == home_idx:
+                continue
+            question = norm(market.get("question"))
+            market_type = norm(
+                market.get("sportsMarketType")
+                or market.get("marketType")
+                or market.get("groupItemTitle")
+            )
+            score = 20
+            if "moneyline" in market_type or market_type in {"money line", "winner"}:
+                score += 20
+            if any(word in question for word in ("spread", "over ", "under ", "points", "assists", "rebounds", "margin")):
+                score -= 30
+            candidates.append((score, market))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1]
+
+    def recover_game_mapping(
+        game_id: str,
+        team_a: str,
+        team_b: str,
+        first_pbp_ts: Any,
+    ) -> list[dict[str, Any]]:
+        game_dt = parse_dt(first_pbp_ts)
+        away_name = abbr_to_name.get(team_a)
+        home_name = abbr_to_name.get(team_b)
+        if game_dt is None or not away_name or not home_name:
+            return []
+
+        last_error = "event not found"
+        for slug in slug_candidates(team_a, team_b, game_dt):
+            try:
+                event = gamma_event(slug)
+            except Exception as exc:
+                last_error = f"{type(exc).__name__}:{exc}"
+                time.sleep(request_sleep)
+                continue
+            if not event:
+                continue
+
+            market = moneyline_market(event, away_name, home_name)
+            if not market:
+                last_error = f"no moneyline market in {slug}"
+                continue
+
+            outcomes = [str(x) for x in json_list(market.get("outcomes"))]
+            tokens = [str(x) for x in json_list(market.get("clobTokenIds"))]
+            away_idx = outcome_index(away_name, outcomes)
+            home_idx = outcome_index(home_name, outcomes)
+            if away_idx is None or home_idx is None or away_idx == home_idx:
+                last_error = f"team outcomes not found in {slug}"
+                continue
+
+            now = datetime.now(timezone.utc).isoformat()
+            common = {
+                "game_id": game_id,
+                "event_slug": slug,
+                "market_id": str(market.get("id") or ""),
+                "condition_id": str(market.get("conditionId") or market.get("condition_id") or ""),
+                "status": "OK",
+                "error": None,
+                "mapped_at": now,
+            }
+            away_row = {
+                **common,
+                "pick_abbr": team_a,
+                "asset_id": tokens[away_idx],
+                "opposite_asset_id": tokens[home_idx],
+                "outcome_label": outcomes[away_idx],
+                "opposite_outcome_label": outcomes[home_idx],
+            }
+            home_row = {
+                **common,
+                "pick_abbr": team_b,
+                "asset_id": tokens[home_idx],
+                "opposite_asset_id": tokens[away_idx],
+                "outcome_label": outcomes[home_idx],
+                "opposite_outcome_label": outcomes[away_idx],
+            }
+            with history._db() as con:
+                for row in (away_row, home_row):
+                    con.execute(
+                        """
+                        INSERT OR REPLACE INTO pw_market_history_map(
+                            game_id,pick_abbr,event_slug,market_id,condition_id,asset_id,
+                            opposite_asset_id,outcome_label,opposite_outcome_label,status,error,mapped_at
+                        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                        """,
+                        (
+                            row["game_id"], row["pick_abbr"], row["event_slug"], row["market_id"],
+                            row["condition_id"], row["asset_id"], row["opposite_asset_id"],
+                            row["outcome_label"], row["opposite_outcome_label"], row["status"],
+                            row["error"], row["mapped_at"],
+                        ),
+                    )
+            print(
+                "PW_GAME_RECON_MAP_RECOVERED "
+                f"game={game_id} away={team_a} home={team_b} slug={slug}",
+                flush=True,
+            )
+            return [away_row, home_row]
+
+        print(
+            "PW_GAME_RECON_MAP_RECOVERY_MISS "
+            f"game={game_id} away={team_a} home={team_b} detail={last_error}",
+            flush=True,
+        )
+        return []
 
     def init_schema() -> None:
         with history._db() as con:
@@ -439,6 +613,16 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
                         team_b,
                         mappings_by_game.get(game_id) or [],
                     )
+                    if team_a and team_b and not assets["mapped"]:
+                        recovered = recover_game_mapping(
+                            game_id,
+                            team_a,
+                            team_b,
+                            game.get("first_pbp_ts"),
+                        )
+                        if recovered:
+                            mappings_by_game[game_id] = recovered
+                            assets = derive_game_assets(team_a, team_b, recovered)
                     coverage = {
                         "game_id": game_id,
                         "team_a": game.get("team_a"),
