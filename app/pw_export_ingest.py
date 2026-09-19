@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import re
+import ssl
 import subprocess
 import threading
 import time
+from urllib.parse import urlencode, urlsplit
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import httpx
+import socks
 from fastapi import Depends
 
 _INSTALLED = False
@@ -356,12 +359,56 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
             "since": query_since(),
             "include_suppressed": include_suppressed,
         }
-        timeout = httpx.Timeout(20.0, connect=20.0)
-        with httpx.Client(proxy=proxy, timeout=timeout, follow_redirects=True) as client:
-            response = client.get(url, params=params)
-            response.raise_for_status()
-            payload = response.json()
-        return _records(payload), payload
+
+        target = urlsplit(url)
+        if target.scheme.lower() != "https":
+            raise RuntimeError("PW export URL must use https")
+        if not target.hostname:
+            raise RuntimeError("PW export URL is missing a hostname")
+
+        proxy_url = urlsplit(proxy)
+        proxy_host = proxy_url.hostname or "127.0.0.1"
+        proxy_port = proxy_url.port or 1055
+        target_port = target.port or 443
+        connect_host = tailnet_peer or target.hostname
+        path = target.path or "/"
+        query = urlencode(params)
+        request_path = f"{path}?{query}" if query else path
+
+        raw = socks.socksocket()
+        raw.set_proxy(socks.SOCKS5, proxy_host, proxy_port, rdns=False)
+        raw.settimeout(20.0)
+        tls = None
+        try:
+            raw.connect((connect_host, target_port))
+            context = ssl.create_default_context()
+            tls = context.wrap_socket(raw, server_hostname=target.hostname)
+            host_header = target.hostname if target_port == 443 else f"{target.hostname}:{target_port}"
+            request = (
+                f"GET {request_path} HTTP/1.1\r\n"
+                f"Host: {host_header}\r\n"
+                "Accept: application/json\r\n"
+                "Connection: close\r\n"
+                "User-Agent: railway-pw-export-poller/1\r\n"
+                "\r\n"
+            )
+            tls.sendall(request.encode("ascii"))
+            response = http.client.HTTPResponse(tls)
+            response.begin()
+            body = response.read()
+            if response.status >= 400:
+                preview = body[:240].decode("utf-8", "replace").replace("\n", " ")
+                raise RuntimeError(f"PW export HTTP {response.status}: {preview}")
+            payload = json.loads(body.decode("utf-8"))
+            return _records(payload), payload
+        finally:
+            try:
+                if tls is not None:
+                    tls.close()
+                else:
+                    raw.close()
+            except Exception:
+                pass
 
     def mark_seen(state: dict[str, Any], ids: list[str]) -> None:
         existing = [str(x) for x in (state.get("seen") or [])]
