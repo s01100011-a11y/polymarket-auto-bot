@@ -51,34 +51,7 @@ fi
 
 echo "TAILSCALE_READY"
 tailscale --socket="$TS_SOCKET" ip -4 || true
-sleep 1
-tailscale --socket="$TS_SOCKET" ping --timeout=5s 100.81.244.65 || true
 
-# Verify the private PW feeds through Tailscale's SOCKS5 proxy.
-# SOCKS5 preserves the destination hostname for TLS/SNI without proxying
-# unrelated Polymarket or Slack traffic.
-python - <<'PY'
-import os
-import httpx
-
-proxy = "socks5://127.0.0.1:1055"
-since = os.getenv("PW_EXPORT_SINCE", "2026-08-01")
-checks = [
-    ("WNBA", os.getenv("PW_WNBA_EXPORT_URL", "https://bob-mbp-ubuntu.taila35415.ts.net:8445/api/pw-export")),
-    ("NBA", os.getenv("PW_NBA_EXPORT_URL", "https://bob-mbp-ubuntu.taila35415.ts.net:8444/api/pw-export")),
-]
-for name, url in checks:
-    try:
-        with httpx.Client(proxy=proxy, timeout=10.0, follow_redirects=True) as client:
-            r = client.get(url, params={"source": "live", "since": since})
-        msg = f"TAILSCALE_PW_CHECK sport={name} status={r.status_code}"
-        if r.status_code >= 400:
-            msg += " body=" + r.text[:180].replace("\n", " ")
-        else:
-            msg += f" bytes={len(r.content)}"
-        print(msg)
-    except Exception as exc:
-        print(f"TAILSCALE_PW_CHECK sport={name} error={type(exc).__name__}: {exc}")
-PY
-
+# Start the API immediately. The in-app PW export poller performs ongoing
+# Tailnet/feed health checks after /health is available to Railway.
 exec uvicorn app.wnba_pw_strategy_test_v12:app --host 0.0.0.0 --port "${PORT:-8080}"
