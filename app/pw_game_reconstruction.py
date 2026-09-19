@@ -337,6 +337,52 @@ def install(*, app: Any, history: Any, dashboard: Any, ingest: Any) -> None:
         )
         return []
 
+    def recover_game_teams(game_id: str) -> tuple[str, str] | None:
+        """Recover away/home abbreviations from ESPN without mutating canonical games."""
+        try:
+            response = httpx.get(
+                "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/summary",
+                params={"event": game_id},
+                timeout=8.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+            competitions = ((data.get("header") or {}).get("competitions") or [])
+            if not competitions:
+                return None
+            away = None
+            home = None
+            for competitor in competitions[0].get("competitors") or []:
+                team = competitor.get("team") or {}
+                display_name = str(team.get("displayName") or "").strip()
+                short_name = str(team.get("shortDisplayName") or "").strip()
+                name = str(team.get("name") or "").strip()
+                abbr = (
+                    history.TEAM_ABBR.get(display_name)
+                    or history.TEAM_ABBR.get(short_name)
+                    or history.TEAM_ABBR.get(name)
+                    or str(team.get("abbreviation") or "").strip()
+                )
+                venue = str(competitor.get("homeAway") or "").lower()
+                if venue == "away":
+                    away = abbr
+                elif venue == "home":
+                    home = abbr
+            if away and home:
+                print(
+                    "PW_GAME_RECON_METADATA_RECOVERED "
+                    f"game={game_id} away={away} home={home} source=espn",
+                    flush=True,
+                )
+                return str(away), str(home)
+        except Exception as exc:
+            print(
+                "PW_GAME_RECON_METADATA_ERROR "
+                f"game={game_id} error={type(exc).__name__}:{exc}",
+                flush=True,
+            )
+        return None
+
     def init_schema() -> None:
         with history._db() as con:
             con.executescript(
@@ -617,6 +663,10 @@ def install(*, app: Any, history: Any, dashboard: Any, ingest: Any) -> None:
                     summary["pw_calls"] += len(alerts)
                     team_a = str(game.get("team_a") or "")
                     team_b = str(game.get("team_b") or "")
+                    if not team_a or not team_b:
+                        recovered_teams = recover_game_teams(game_id)
+                        if recovered_teams:
+                            team_a, team_b = recovered_teams
                     assets = derive_game_assets(
                         team_a,
                         team_b,
@@ -634,8 +684,8 @@ def install(*, app: Any, history: Any, dashboard: Any, ingest: Any) -> None:
                             assets = derive_game_assets(team_a, team_b, recovered)
                     coverage = {
                         "game_id": game_id,
-                        "team_a": game.get("team_a"),
-                        "team_b": game.get("team_b"),
+                        "team_a": team_a or None,
+                        "team_b": team_b or None,
                         "pbp_rows": len(plays),
                         "pw_calls": len(alerts),
                         "map_status": "OK" if assets["mapped"] else "UNRESOLVED",
