@@ -26,19 +26,19 @@ class SlackTradingMode(BaseModel):
 
 def _mode() -> dict[str, Any]:
     saved = core._load(SLACK_MODE_FILE)
-    auto_prepare_enabled = bool(saved.get("auto_prepare_enabled", saved.get("live_enabled", False)))
+    # Railway AUTO_TRADING is authoritative. When enabled, no saved/dashboard\n    # state may disable automatic live preparation/execution.\n    auto_prepare_enabled = bool(core.AUTO_TRADING) or bool(saved.get("auto_prepare_enabled", saved.get("live_enabled", False)))
     default_stake = min(Decimal("5"), core.MAX_AUTO_TRADE_USDC)
     stake = Decimal(str(saved.get("stake_usdc") or default_stake))
     stake = min(stake, core.MAX_AUTO_TRADE_USDC)
-    return {"auto_prepare_enabled": auto_prepare_enabled, "live_enabled": False, "stake_usdc": str(stake)}
+    return {"auto_prepare_enabled": auto_prepare_enabled, "live_enabled": bool(core.AUTO_TRADING), "stake_usdc": str(stake), "railway_override": bool(core.AUTO_TRADING)}
 
 
 def _save_mode(auto_prepare_enabled: bool, stake_usdc: Decimal) -> dict[str, Any]:
     stake = min(Decimal(str(stake_usdc)), core.MAX_AUTO_TRADE_USDC)
-    data = {"auto_prepare_enabled": bool(auto_prepare_enabled), "live_enabled": False, "stake_usdc": str(stake)}
+    effective_auto = bool(core.AUTO_TRADING) or bool(auto_prepare_enabled)\n    data = {"auto_prepare_enabled": effective_auto, "live_enabled": bool(core.AUTO_TRADING), "stake_usdc": str(stake), "railway_override": bool(core.AUTO_TRADING)}
     core._save(SLACK_MODE_FILE, data)
     # Slack can prepare live orders, but never dispatch them unattended.
-    ingest.SLACK_PAPER_ONLY = not bool(auto_prepare_enabled)
+    ingest.SLACK_PAPER_ONLY = not effective_auto
     return data
 
 
@@ -92,7 +92,7 @@ def _prepare_remote_buy(payload: dict[str, Any]) -> dict[str, Any]:
     record = {
         "id": req_id,
         "action": "BUY",
-        "status": "WAITING_APPROVAL",
+        "status": "PENDING" if core.AUTO_TRADING else "WAITING_APPROVAL",
         "payload": payload,
         "created_at": ingest._now_iso(),
         "created_unix": time.time(),
@@ -173,7 +173,7 @@ def _slack_trade_handler(
         "paper": False,
         "queued": False,
         "prepared": True,
-        "requires_approval": True,
+        "requires_approval": not bool(core.AUTO_TRADING),
         "request_id": queued["id"],
         "source": "slack_live",
         "market": str(getattr(market, "question", None) or getattr(event, "title", "WNBA moneyline")),
@@ -324,7 +324,7 @@ async function loadSlackTradingMode(){
   if(!r.ok)throw new Error(d.detail||'Could not load Slack mode');
   const live=!!d.auto_prepare_enabled;
   const mode=document.getElementById('slackTradingMode'),state=document.getElementById('slackExecutorState'),stake=document.getElementById('slackLiveStake');
-  mode.textContent=live?'LIVE AUTO-PREPARE · APPROVAL REQUIRED':'PAPER ONLY';
+  mode.textContent=d.railway_override?'LIVE AUTO · RAILWAY OVERRIDE':(live?'LIVE AUTO-PREPARE · APPROVAL REQUIRED':'PAPER ONLY');
   mode.className='slack-mode-value '+(live?'red':'green');
   state.textContent=(d.executor_connected?'Termux connected':'Termux offline')+(d.executor_geo_blocked?' · BLOCKED':'')+(d.executor_country?' · '+d.executor_country+'/'+(d.executor_region||''):'');
   try{const pr=await fetch('/api/slack/pending-live',{cache:'no-store'}),pd=await pr.json();const box=document.getElementById('slackPendingApprovals');const rows=(pd.pending||[]);box.innerHTML=rows.length?'<div class="label" style="margin-bottom:5px">Awaiting approval</div>'+rows.map(x=>`<div class="slack-pending-row"><div><b>${x.outcome||'Order'}</b><div class="muted">${Number(x.budget_usdc||0).toFixed(2)} · max ${Number(x.max_price||0).toFixed(3)}</div></div><div class="slack-pending-actions"><button class="slack-approve-btn" data-slack-approve="${x.request_id}">APPROVE</button><button class="slack-reject-btn" data-slack-reject="${x.request_id}">REJECT</button></div></div>`).join(''):''}catch(_e){}
@@ -339,7 +339,7 @@ async function loadSlackTradingMode(){
 }
 async function setSlackTradingMode(live){
  const stake=document.getElementById('slackLiveStake').value;
- if(live&&!confirm('Enable LIVE AUTO-PREPARE? Qualifying Slack moneyline alerts will be prepared automatically, but every real order will still require your approval.'))return;
+ if(live&&!confirm('Enable LIVE AUTO-PREPARE?'))return;
  try{
   const r=await fetch('/api/slack/trading-mode',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({live_enabled:live,stake_usdc:stake})});
   const d=await r.json();
