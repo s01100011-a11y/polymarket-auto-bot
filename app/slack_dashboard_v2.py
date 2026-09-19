@@ -167,7 +167,7 @@ def _background_live_reconcile() -> None:
         try:
             execution_map = core._load(core.EXECUTIONS_FILE)
             records = list(execution_map.values())
-            if any(r.get("status") == "ORDER_SUBMITTED" for r in records):
+            if any(r.get("status") in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"} for r in records):
                 _estimate_pnl_live(records)
         except Exception as exc:
             print(f"LIVE_NETWORK_RECONCILE_ERROR {type(exc).__name__}:{exc}", flush=True)
