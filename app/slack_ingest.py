@@ -420,7 +420,7 @@ def _live_fill_snapshot(client: PublicClient, wallet: str, rec: dict[str, Any], 
 def _estimate_pnl_with_paper(records: list[dict]) -> tuple[list[dict], Decimal]:
     current: list[dict] = []
     total = Decimal("0")
-    active = [r for r in records if r.get("status") in {"ORDER_SUBMITTED", "PAPER_OPEN"}]
+    active = [r for r in records if r.get("status") in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED", "PAPER_OPEN"}]
     if not active:
         return current, total
 
@@ -431,6 +431,7 @@ def _estimate_pnl_with_paper(records: list[dict]) -> tuple[list[dict], Decimal]:
 
     wallet = os.getenv("POLYMARKET_DEPOSIT_WALLET", "").strip()
     positions_by_asset: dict[str, Any] = {}
+    positions_fetch_ok = False
     if client and wallet:
         try:
             positions_by_asset = {
@@ -438,8 +439,10 @@ def _estimate_pnl_with_paper(records: list[dict]) -> tuple[list[dict], Decimal]:
                 for p in client.list_positions(user=wallet, page_size=100).iter_items()
                 if getattr(p, "asset_id", None)
             }
+            positions_fetch_ok = True
         except Exception:
             positions_by_asset = {}
+            positions_fetch_ok = False
 
     executions_changed = False
     try:
@@ -459,6 +462,49 @@ def _estimate_pnl_with_paper(records: list[dict]) -> tuple[list[dict], Decimal]:
             entry_source = "paper_snapshot" if is_paper else "recorded_limit_fallback"
 
             position = positions_by_asset.get(asset_id) if asset_id else None
+
+            # Reconcile the bot's open-state against the authoritative wallet position.
+            # A short age guard avoids treating normal post-fill indexing lag as a close.
+            if not is_paper and positions_fetch_ok and asset_id:
+                try:
+                    raw_created = rec.get("submitted_at") or rec.get("created_at")
+                    created = datetime.fromisoformat(str(raw_created).replace("Z", "+00:00")) if raw_created else None
+                    if created and created.tzinfo is None:
+                        created = created.replace(tzinfo=timezone.utc)
+                    age_seconds = (
+                        (datetime.now(timezone.utc) - created).total_seconds()
+                        if created else 0
+                    )
+                except Exception:
+                    age_seconds = 0
+
+                if age_seconds >= 60 and q.get("entry_source") in {"polymarket_executed_trades", "polymarket_position"}:
+                    wallet_size = dashboard._safe_decimal(
+                        getattr(position, "current_size", None) if position is not None else None
+                    )
+                    if wallet_size <= Decimal("0.0001"):
+                        rec["status"] = "CLOSED_RECONCILED"
+                        rec["remaining_shares"] = "0"
+                        rec["wallet_position_size"] = "0"
+                        rec["wallet_reconciled_at"] = datetime.now(timezone.utc).isoformat()
+                        rec["reconciliation_note"] = (
+                            "Polymarket position data confirms the wallet no longer holds this tracked outcome token."
+                        )
+                        executions_changed = True
+                        print(f"LIVE_POSITION_RECONCILED_CLOSED trade={rec.get('id')}", flush=True)
+                        continue
+                    if tracked_shares > wallet_size + Decimal("0.0001"):
+                        rec["status"] = "PARTIALLY_CLOSED"
+                        rec["remaining_shares"] = str(wallet_size)
+                        rec["wallet_position_size"] = str(wallet_size)
+                        rec["wallet_reconciled_at"] = datetime.now(timezone.utc).isoformat()
+                        shares = wallet_size
+                        executions_changed = True
+                        print(
+                            f"LIVE_POSITION_RECONCILED_PARTIAL trade={rec.get('id')} "
+                            f"tracked={tracked_shares} wallet={wallet_size}",
+                            flush=True,
+                        )
 
             # For live trades, executed Polymarket trades are the primary source
             # of the actual entry price and cost. The limit is only a ceiling.
