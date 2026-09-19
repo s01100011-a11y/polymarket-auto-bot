@@ -16,6 +16,14 @@ from fastapi import Depends, Query
 
 _INSTALLED = False
 
+TEAM_SLUGS = {
+    "ATL": ["atl"], "CHI": ["chi"], "CON": ["conn", "con"], "DAL": ["dal"],
+    "GS": ["gsv", "gs"], "IND": ["ind"], "LV": ["las", "lva", "lv"],
+    "LA": ["la", "las"], "MIN": ["min"], "NY": ["nyl", "ny"],
+    "PHX": ["phx"], "POR": ["por"], "SEA": ["sea"], "TOR": ["tor"],
+    "WSH": ["was", "wsh"],
+}
+
 
 def parse_dt(value: Any) -> datetime | None:
     if not value:
