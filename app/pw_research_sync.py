@@ -7,7 +7,7 @@ import socket
 import ssl
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, urlsplit
@@ -86,6 +86,20 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
                 con.execute("ALTER TABLE alerts ADD COLUMN research_source TEXT")
             if "research_raw_json" not in cols:
                 con.execute("ALTER TABLE alerts ADD COLUMN research_raw_json TEXT")
+
+            state = load_state()
+            if int(state.get("research_import_version") or 0) < 2:
+                removed = con.execute(
+                    "DELETE FROM alerts WHERE research_source='pw-server'"
+                ).rowcount
+                state["research_import_version"] = 2
+                state["research_import_cleanup_removed"] = int(removed or 0)
+                state["research_import_cleanup_at"] = datetime.now(timezone.utc).isoformat()
+                save_state(state)
+                print(
+                    f"PW_RESEARCH_IMPORT_MIGRATION version=2 removed={int(removed or 0)}",
+                    flush=True,
+                )
 
     def fetch_export_rows() -> list[dict[str, Any]]:
         params = {
@@ -188,7 +202,12 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
             return pwexp._first(raw, *keys)
 
         alert["source_channel"] = "pw-export-historical"
-        alert["event_ts"] = meta.get("event_ts") or alert.get("event_ts")
+        row_dt = pwexp._row_dt(raw)
+        if row_dt is not None:
+            kl = row_dt.astimezone(timezone(timedelta(hours=8)))
+            alert["event_ts"] = kl.strftime("%Y-%m-%d %H:%M:%S +08")
+        else:
+            alert["event_ts"] = meta.get("event_ts") or alert.get("event_ts")
         alert["game_id"] = meta.get("game_id") or alert.get("game_id")
         alert["predicted_winner"] = meta.get("predicted_winner") or alert.get("predicted_winner")
         alert["quarter"] = meta.get("quarter") or alert.get("quarter")
