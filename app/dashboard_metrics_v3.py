@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 import uuid
@@ -35,12 +36,19 @@ def _d(value: Any, default: str = "0") -> Decimal:
 
 
 def _wallet_for_reconciliation() -> str | None:
+    # Railway keeps the full deposit/funder address. The Termux heartbeat stores
+    # a masked display value, which must never be sent back to Polymarket APIs.
+    wallet = os.getenv("POLYMARKET_DEPOSIT_WALLET", "").strip()
+    if wallet and "…" not in wallet and wallet.startswith("0x") and len(wallet) == 42:
+        return wallet
     try:
         state = remote._state()
-        wallet = str(state.get("wallet") or "").strip()
-        return wallet or None
+        candidate = str(state.get("wallet") or "").strip()
+        if candidate and "…" not in candidate and candidate.startswith("0x") and len(candidate) == 42:
+            return candidate
     except Exception:
-        return None
+        pass
+    return None
 
 
 def _full_wallet_positions(wallet: str) -> dict[str, Any]:
