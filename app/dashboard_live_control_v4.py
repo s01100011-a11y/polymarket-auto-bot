@@ -35,7 +35,8 @@ def _mode() -> dict[str, Any]:
 
 def _save_mode(auto_prepare_enabled: bool, stake_usdc: Decimal) -> dict[str, Any]:
     stake = min(Decimal(str(stake_usdc)), core.MAX_AUTO_TRADE_USDC)
-    effective_auto = bool(core.AUTO_TRADING) or bool(auto_prepare_enabled)\n    data = {"auto_prepare_enabled": effective_auto, "live_enabled": bool(core.AUTO_TRADING), "stake_usdc": str(stake), "railway_override": bool(core.AUTO_TRADING)}
+    effective_auto = bool(core.AUTO_TRADING) or bool(auto_prepare_enabled)
+    data = {"auto_prepare_enabled": effective_auto, "live_enabled": bool(core.AUTO_TRADING), "stake_usdc": str(stake), "railway_override": bool(core.AUTO_TRADING)}
     core._save(SLACK_MODE_FILE, data)
     # Slack can prepare live orders, but never dispatch them unattended.
     ingest.SLACK_PAPER_ONLY = not effective_auto
