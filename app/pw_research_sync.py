@@ -30,7 +30,7 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
     enabled = os.getenv("PW_RESEARCH_SYNC_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
     pbp_enabled = os.getenv("PW_RESEARCH_PBP_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
     export_source = os.getenv("PW_RESEARCH_EXPORT_SOURCE", "all").strip() or "all"
-    since = os.getenv("PW_EXPORT_SINCE", os.getenv("PW_RESEARCH_SINCE", "2026-06-01")).strip() or "2026-06-01"
+    since = os.getenv("PW_RESEARCH_SINCE", "2026-05-01").strip() or "2026-05-01"
     export_url = os.getenv(
         "PW_WNBA_EXPORT_URL",
         "https://bob-mbp-ubuntu.taila35415.ts.net:8445/api/pw-export",
@@ -465,7 +465,32 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
     if enabled:
         def boot_sync() -> None:
             time.sleep(4.0)
-            sync_all()
+            state = sync_all()
+            # Play-by-play is durable after the first pass. If the private PW
+            # server is temporarily offline, retry only the research-only PW
+            # backfill so historical calls are never routed through trading.
+            while isinstance((state.get("pw") or {}), dict) and (state.get("pw") or {}).get("error"):
+                time.sleep(60.0)
+                try:
+                    pw_result = import_missing_pw()
+                    state = load_state()
+                    state["pw"] = pw_result
+                    state["summary"] = summary()
+                    state["pw_retry_completed_at"] = datetime.now(timezone.utc).isoformat()
+                    save_state(state)
+                    print(
+                        "PW_RESEARCH_PW_RETRY_OK "
+                        f"rows={pw_result['server_rows']} inserted={pw_result['inserted']} "
+                        f"duplicates={pw_result['duplicates']} invalid={pw_result['invalid']}",
+                        flush=True,
+                    )
+                    break
+                except Exception as exc:
+                    state = load_state()
+                    state["pw"] = {"error": f"{type(exc).__name__}: {exc}"}
+                    state["pw_retry_at"] = datetime.now(timezone.utc).isoformat()
+                    save_state(state)
+                    print(f"PW_RESEARCH_PW_RETRY_ERROR {type(exc).__name__}:{exc}", flush=True)
         _THREAD = threading.Thread(target=boot_sync, name="pw-research-sync", daemon=True)
         _THREAD.start()
         print(
