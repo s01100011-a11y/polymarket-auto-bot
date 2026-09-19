@@ -1,6 +1,7 @@
 from app import wnba_pw_strategy_test_v12 as base
 from app import pw_research_sync
 from app import pw_scalping_research
+from app import pw_market_research
 
 app = base.app
 history = base.history
@@ -19,4 +20,12 @@ pw_scalping_research.install(
     app=app,
     history=history,
     dashboard=dashboard,
+)
+
+pw_market_research.install(
+    app=app,
+    history=history,
+    ingest=ingest,
+    dashboard=dashboard,
+    strategy=base,
 )
