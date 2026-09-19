@@ -93,7 +93,7 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
         if not rows:
             return out
         out["final_win_pct"] = pct(sum(1 for r in rows if r.get("final_win")), len(rows))
-        for seconds in (30, 60, 120, 180):
+        for seconds in (30, 60, 120, 180, 300):
             key = str(seconds)
             deltas = [float(r[f"delta_{seconds}"]) for r in rows if r.get(f"delta_{seconds}") is not None]
             mfes = [float(r[f"mfe_{seconds}"]) for r in rows if r.get(f"mfe_{seconds}") is not None]
@@ -120,6 +120,7 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
             "seen_pct": pct(len(dip), len(rows)),
             "recover_to_start_pct": pct(sum(1 for r in dip if r.get("dip2_recover0")), len(dip)),
             "recover_to_plus2_pct": pct(sum(1 for r in dip if r.get("dip2_recover2")), len(dip)),
+            "final_win_pct": pct(sum(1 for r in dip if r.get("final_win")), len(dip)),
         }
         return out
 
@@ -243,7 +244,7 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
             }
             alignment_modes[mode] += 1
 
-            for seconds in (30, 60, 120, 180):
+            for seconds in (30, 60, 120, 180, 300):
                 window = [p for p in future if int(p["_elapsed"]) <= int(anchor_elapsed) + seconds]
                 margins = [pick_margin(p, venue) for p in window]
                 margins = [m for m in margins if m is not None]
@@ -307,6 +308,13 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
         first_calls = [r for r in aligned if int(r.get("same_side_call_no") or 0) == 1]
         repeat_calls = [r for r in aligned if int(r.get("same_side_call_no") or 0) >= 2]
 
+        segments = {
+            "early_q4_plus_money": lambda r: r in early_q4 and float(r.get("bk_ml") or 0) > 0,
+            "early_q4_away_underdog": lambda r: r in early_q4 and r.get("venue") == "away" and float(r.get("bk_ml") or 0) > 0,
+            "late_q3_q3_away": lambda r: r in late_q3 and r.get("venue") == "away",
+            "late_q3_plus_money": lambda r: r in late_q3 and float(r.get("bk_ml") or 0) > 0,
+        }
+
         filters = {
             "away_underdog": lambda r: r.get("venue") == "away" and float(r.get("bk_ml") or 0) > 0,
             "plus_money": lambda r: float(r.get("bk_ml") or 0) > 0,
@@ -332,6 +340,10 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
             "filters": {
                 name: aggregate([r for r in aligned if pred(r)])
                 for name, pred in filters.items()
+            },
+            "segments": {
+                name: aggregate([r for r in aligned if pred(r)])
+                for name, pred in segments.items()
             },
         }
         return result
@@ -365,19 +377,39 @@ def install(*, app: Any, history: Any, dashboard: Any) -> None:
                 f"plus4_first_pct={t4.get('favorable_first_pct')} "
                 f"minus4_first_pct={t4.get('adverse_first_pct')} "
                 f"dip2_pct={dip.get('seen_pct')} "
+                f"dip2_recover0_pct={dip.get('recover_to_start_pct')} "
                 f"dip2_recover_plus2_pct={dip.get('recover_to_plus2_pct')} "
+                f"dip2_final_win_pct={dip.get('final_win_pct')} "
                 f"final_win_pct={s.get('final_win_pct')}",
                 flush=True,
             )
         for name, s in (result.get("filters") or {}).items():
             h120 = s.get("h120") or {}
             t4 = s.get("threshold_4") or {}
+            dip = s.get("dip2") or {}
             print(
                 "PW_SCALP_FILTER "
                 f"name={name} calls={s.get('calls')} "
                 f"delta120={h120.get('avg_score_delta')} "
                 f"plus4_first_pct={t4.get('favorable_first_pct')} "
                 f"minus4_first_pct={t4.get('adverse_first_pct')} "
+                f"dip2_pct={dip.get('seen_pct')} "
+                f"dip2_final_win_pct={dip.get('final_win_pct')} "
+                f"final_win_pct={s.get('final_win_pct')}",
+                flush=True,
+            )
+        for name, s in (result.get("segments") or {}).items():
+            h120 = s.get("h120") or {}
+            t4 = s.get("threshold_4") or {}
+            dip = s.get("dip2") or {}
+            print(
+                "PW_SCALP_SEGMENT "
+                f"name={name} calls={s.get('calls')} "
+                f"delta120={h120.get('avg_score_delta')} "
+                f"plus4_first_pct={t4.get('favorable_first_pct')} "
+                f"minus4_first_pct={t4.get('adverse_first_pct')} "
+                f"dip2_pct={dip.get('seen_pct')} "
+                f"dip2_final_win_pct={dip.get('final_win_pct')} "
                 f"final_win_pct={s.get('final_win_pct')}",
                 flush=True,
             )
