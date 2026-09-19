@@ -571,7 +571,10 @@ def install(*, app: Any, history: Any, ingest: Any, dashboard: Any, strategy: An
             items=list(unique.items())
             for idx,(key,(a,dt)) in enumerate(items, start=1):
                 existing=maps.get(key)
-                if existing and existing.get("status")=="OK" and existing.get("asset_id"):
+                if existing and (
+                    (existing.get("status")=="OK" and existing.get("asset_id"))
+                    or existing.get("status")=="ERROR"
+                ):
                     if idx % 25 == 0:
                         print(f"PW_MARKET_MAP_PROGRESS done={idx}/{len(items)} ok={sum(1 for x in maps.values() if x.get('status')=='OK')} errors={sum(1 for x in maps.values() if x.get('status')!='OK')}", flush=True)
                     continue
