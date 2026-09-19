@@ -64,11 +64,13 @@ def _explicit_realized_pnl(rec: dict[str, Any]) -> Decimal | None:
 
 
 def _estimate_pnl_live(records: list[dict]) -> tuple[list[dict], Decimal]:
-    current: list[dict] = []
+    """Final live estimator: reconcile fills first, then mark at executable SELL price."""
+    current, _ = ingest._estimate_pnl_with_paper(records)
     total = Decimal("0")
-    active = [r for r in records if r.get("status") in {"ORDER_SUBMITTED", "PAPER_OPEN"}]
-    if not active:
+    if not current:
         return current, total
+
+    records_by_id = {str(r.get("id")): r for r in records if r.get("id") is not None}
 
     try:
         client = ingest.PublicClient()
@@ -76,63 +78,69 @@ def _estimate_pnl_live(records: list[dict]) -> tuple[list[dict], Decimal]:
         client = None
 
     try:
-        for rec in active:
+        for row in current:
+            rec = records_by_id.get(str(row.get("id"))) or {}
             q = rec.get("quote") or {}
-            asset_id = q.get("asset_id")
-            shares = _d(q.get("shares"))
-            entry = _d(q.get("paper_entry_price") or q.get("entry_price") or q.get("limit_price"))
-            live_price = None
-            midpoint = None
-            pnl = None
-            price_error = None
+            asset_id = str(q.get("asset_id") or "")
+            shares = _d(row.get("shares"))
+            entry = _d(row.get("entry_price"))
+            cost = _d(row.get("budget_usdc"))
+            if cost <= 0 and shares > 0 and entry > 0:
+                cost = shares * entry
 
-            if client and asset_id and shares > 0 and entry > 0:
+            live_price = None
+            midpoint = _d(row.get("current_midpoint")) if row.get("current_midpoint") is not None else None
+            price_error = None
+            if client and asset_id:
                 try:
-                    # SELL is the executable exit-side price, so it is a more realistic
-                    # unrealized P/L mark than midpoint for an open long position.
-                    live_price = _d(client.get_price(asset_id=str(asset_id), side="SELL"))
-                    midpoint = _d(client.get_midpoint(asset_id=str(asset_id)))
-                    pnl = (live_price - entry) * shares
-                    total += pnl
+                    # Use executable exit-side SELL price for mark-to-market P/L.
+                    live_price = _d(client.get_price(asset_id=asset_id, side="SELL"))
+                    try:
+                        midpoint = _d(client.get_midpoint(asset_id=asset_id))
+                    except Exception:
+                        pass
                 except Exception as exc:
                     price_error = str(exc)
-                    try:
-                        midpoint = _d(client.get_midpoint(asset_id=str(asset_id)))
-                        pnl = (midpoint - entry) * shares
-                        total += pnl
+                    if midpoint is not None and midpoint > 0:
                         live_price = midpoint
-                    except Exception:
-                        live_price = None
-                        midpoint = None
-                        pnl = None
 
-            current.append({
-                "id": rec.get("id"),
-                "market": q.get("market") or (rec.get("intent") or {}).get("market_url"),
-                "market_url": q.get("market_url") or (rec.get("intent") or {}).get("market_url"),
-                "outcome": q.get("resolved_outcome") or q.get("requested_outcome"),
-                "side": _trade_side(rec),
-                "entry_price": str(entry) if entry else None,
-                "current_price": str(live_price) if live_price is not None else None,
-                "current_sell_price": str(live_price) if live_price is not None else None,
-                "current_midpoint": str(midpoint) if midpoint is not None else None,
-                "shares": str(shares) if shares else None,
-                "budget_usdc": rec.get("budget_usdc"),
-                "estimated_pnl": str(pnl.quantize(Decimal("0.01"))) if pnl is not None else None,
-                "pnl_type": "unrealized" if pnl is not None else None,
-                "submitted_at": rec.get("submitted_at") or rec.get("created_at"),
-                "order_id": (rec.get("execution") or {}).get("order_id"),
-                "status": rec.get("status"),
-                "source": rec.get("source"),
-                "paper": bool(rec.get("paper")),
-                "price_error": price_error,
-            })
+            pnl = None
+            current_value = None
+            pnl_percent = None
+            if live_price is not None and live_price > 0 and shares > 0 and cost > 0:
+                current_value = live_price * shares
+                pnl = current_value - cost
+                pnl_percent = pnl / cost * Decimal("100")
+                total += pnl
+
+            row["side"] = _trade_side(rec)
+            row["current_price"] = str(live_price) if live_price is not None else row.get("current_midpoint")
+            row["current_sell_price"] = str(live_price) if live_price is not None else None
+            row["current_midpoint"] = str(midpoint) if midpoint is not None else row.get("current_midpoint")
+            row["current_value_usdc"] = (
+                str(current_value.quantize(Decimal("0.01"))) if current_value is not None else row.get("current_value_usdc")
+            )
+            row["estimated_pnl"] = (
+                str(pnl.quantize(Decimal("0.01"))) if pnl is not None else row.get("estimated_pnl")
+            )
+            row["pnl_percent"] = (
+                str(pnl_percent.quantize(Decimal("0.01"))) if pnl_percent is not None else row.get("pnl_percent")
+            )
+            row["pnl_type"] = "unrealized" if row.get("estimated_pnl") is not None else None
+            row["paper"] = bool(rec.get("paper"))
+            row["price_error"] = price_error
+
+        # If a row could not be marked at SELL but the reconciler already produced
+        # a P/L, include that fallback rather than dropping it from the portfolio.
+        if total == 0:
+            total = sum((_d(r.get("estimated_pnl")) for r in current), Decimal("0"))
     finally:
         if client:
             try:
                 client.close()
             except Exception:
                 pass
+
     return current, total
 
 
