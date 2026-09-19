@@ -290,3 +290,16 @@ Read-only investigation that produces no code/configuration change does not requ
 ## Future note format
 
 For every future code change, append an entry containing: objective, files changed, behavior change, data/schema impact, configuration impact, safety implications, deployment result, tests/verification, problems found/fixed, and outstanding work. Commit messages should stay concise; this file carries the full operational record.
+
+
+## 2026-09-19 — Fix LIVE stats omission for real Termux executions (#10)
+
+- **Objective:** Fix a real live trade being omitted from the dashboard LIVE statistics/P&L view.
+- **Root cause:** `dashboard_filters_v5._trade_bucket()` and `dashboard_pnl_filters_v6._mode_totals()` treated only `source=slack_live` as LIVE. Real funded `termux_executor` records were therefore omitted from LIVE stats/P&L.
+- **Files changed:** `app/dashboard_filters_v5.py`, `app/dashboard_pnl_filters_v6.py`.
+- **Behavior change:** Actual non-paper, non-dry-run funded executions from both `slack_live` and `termux_executor` are now classified as LIVE. Open positions are counted separately in the stats label and included in LIVE unrealized P/L.
+- **Performance semantics:** W/L, accuracy, graded count, and realized ROI remain closed/graded-trade-only. Open trades do not become wins/losses before closure.
+- **Safety:** Reporting/stat aggregation only. No trade placement, cancellation, closing, sizing, or execution behavior was changed.
+- **Commits:** `a84ad7f` (LIVE classification/open count), `35e3be1` (LIVE P/L inclusion).
+- **Deployment:** Railway production deployment `2c98983a-66ab-4ca6-ae3a-408eb32e357b` reached SUCCESS.
+- **Verification:** Service startup completed, /health passed, and no startup exceptions were introduced by the stats changes.
