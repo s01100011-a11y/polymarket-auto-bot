@@ -265,6 +265,28 @@ The repository contained 140 commits when this retrospective log was created. Th
   - `3c143dc` — Link full engineering history from README.
 - No application behavior, trading configuration, database contents, or runtime secrets were changed by this documentation-only pass.
 
+## GitHub issue requirement for every change
+
+Starting with issue #9, every repository/configuration change must have a GitHub issue created before or at the start of implementation.
+
+Each issue must record:
+- objective and reason for the change
+- files/components changed
+- implementation details
+- database/schema impact
+- environment/configuration impact
+- trading/safety implications
+- commits produced
+- tests and verification performed
+- Railway deployment result when applicable
+- problems found and fixes applied
+- outstanding work
+- final completion/verification before closure
+
+`DEVELOPMENT_NOTES.md` remains the chronological summary, while the GitHub issue is the detailed work record for the individual change.
+
+Read-only investigation that produces no code/configuration change does not require a change issue unless it turns into implementation work.
+
 ## Future note format
 
 For every future code change, append an entry containing: objective, files changed, behavior change, data/schema impact, configuration impact, safety implications, deployment result, tests/verification, problems found/fixed, and outstanding work. Commit messages should stay concise; this file carries the full operational record.
