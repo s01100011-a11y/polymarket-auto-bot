@@ -77,9 +77,9 @@ if _saved_settings:
 # to paper/order-preparation automation. If live trading is enabled, unattended
 # auto execution is forced off and live orders still require explicit approval.
 _saved_auto_state = core._load(AUTO_TRADING_STATE_FILE)
-if core.LIVE_TRADING:
-    core.AUTO_TRADING = False
-elif "enabled" in _saved_auto_state:
+# Railway AUTO_TRADING is authoritative. Persisted dashboard state must never
+# turn automation off when the Railway variable enables it.
+if not core.auto_trading_enabled() and not core.LIVE_TRADING and "enabled" in _saved_auto_state:
     core.AUTO_TRADING = bool(_saved_auto_state.get("enabled"))
 
 
@@ -194,7 +194,7 @@ def _dashboard_snapshot() -> dict:
             "ok": True,
             "version": "0.4.0-dashboard",
             "live_trading": core.LIVE_TRADING,
-            "auto_trading": core.AUTO_TRADING,
+            "auto_trading": core.auto_trading_enabled(),
             "block_political_auto": core.BLOCK_POLITICAL_AUTO,
             "uptime_seconds": int(time.time() - STARTED_AT),
             "poll_seconds": core.AUTO_POLL_SECONDS,
@@ -232,7 +232,7 @@ def dashboard_settings_get():
         "editable": _current_settings(),
         "read_only": {
             "live_trading": core.LIVE_TRADING,
-            "auto_trading": core.AUTO_TRADING,
+            "auto_trading": core.auto_trading_enabled(),
             "block_political_auto": core.BLOCK_POLITICAL_AUTO,
         },
     }
@@ -251,7 +251,7 @@ def dashboard_settings_put(settings: DashboardSettings):
 @app.get("/api/dashboard/auto-trading", dependencies=[Depends(_auth)])
 def dashboard_auto_trading_get():
     return {
-        "enabled": bool(core.AUTO_TRADING),
+        "enabled": bool(core.auto_trading_enabled()),
         "live_trading": bool(core.LIVE_TRADING),
         "can_enable": not bool(core.LIVE_TRADING),
         "scope": "paper_and_order_preparation",
