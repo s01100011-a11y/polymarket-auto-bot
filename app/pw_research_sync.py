@@ -29,6 +29,7 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
 
     enabled = os.getenv("PW_RESEARCH_SYNC_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
     pbp_enabled = os.getenv("PW_RESEARCH_PBP_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    pw_import_enabled = os.getenv("PW_RESEARCH_IMPORT_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
     export_source = os.getenv("PW_RESEARCH_EXPORT_SOURCE", "all").strip() or "all"
     since = os.getenv("PW_RESEARCH_SINCE", "2026-05-01").strip() or "2026-05-01"
     export_url = os.getenv(
@@ -88,16 +89,16 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
                 con.execute("ALTER TABLE alerts ADD COLUMN research_raw_json TEXT")
 
             state = load_state()
-            if int(state.get("research_import_version") or 0) < 2:
+            if int(state.get("research_import_version") or 0) < 3:
                 removed = con.execute(
                     "DELETE FROM alerts WHERE research_source='pw-server'"
                 ).rowcount
-                state["research_import_version"] = 2
+                state["research_import_version"] = 3
                 state["research_import_cleanup_removed"] = int(removed or 0)
                 state["research_import_cleanup_at"] = datetime.now(timezone.utc).isoformat()
                 save_state(state)
                 print(
-                    f"PW_RESEARCH_IMPORT_MIGRATION version=2 removed={int(removed or 0)}",
+                    f"PW_RESEARCH_IMPORT_MIGRATION version=3 removed={int(removed or 0)}",
                     flush=True,
                 )
 
@@ -404,17 +405,20 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
             save_state(state)
             pw_result: dict[str, Any] = {}
             pbp_result: dict[str, Any] = {}
-            try:
-                pw_result = import_missing_pw()
-                print(
-                    "PW_RESEARCH_PW_SYNC "
-                    f"rows={pw_result['server_rows']} inserted={pw_result['inserted']} "
-                    f"duplicates={pw_result['duplicates']} invalid={pw_result['invalid']}",
-                    flush=True,
-                )
-            except Exception as exc:
-                pw_result = {"error": f"{type(exc).__name__}: {exc}"}
-                print(f"PW_RESEARCH_PW_ERROR {pw_result['error']}", flush=True)
+            if pw_import_enabled:
+                try:
+                    pw_result = import_missing_pw()
+                    print(
+                        "PW_RESEARCH_PW_SYNC "
+                        f"rows={pw_result['server_rows']} inserted={pw_result['inserted']} "
+                        f"duplicates={pw_result['duplicates']} invalid={pw_result['invalid']}",
+                        flush=True,
+                    )
+                except Exception as exc:
+                    pw_result = {"error": f"{type(exc).__name__}: {exc}"}
+                    print(f"PW_RESEARCH_PW_ERROR {pw_result['error']}", flush=True)
+            else:
+                pw_result = {"disabled": True, "reason": "canonical 1,921-call history is authoritative"}
 
             if pbp_enabled:
                 try:
@@ -449,6 +453,7 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
         return {
             "enabled": enabled,
             "play_by_play_enabled": pbp_enabled,
+            "pw_import_enabled": pw_import_enabled,
             "export_source": export_source,
             "since": since,
             "summary": summary(),
@@ -496,7 +501,7 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
             # Play-by-play is durable after the first pass. If the private PW
             # server is temporarily offline, retry only the research-only PW
             # backfill so historical calls are never routed through trading.
-            while isinstance((state.get("pw") or {}), dict) and (state.get("pw") or {}).get("error"):
+            while pw_import_enabled and isinstance((state.get("pw") or {}), dict) and (state.get("pw") or {}).get("error"):
                 time.sleep(20.0)
                 try:
                     pw_result = import_missing_pw()
@@ -521,7 +526,7 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
         _THREAD = threading.Thread(target=boot_sync, name="pw-research-sync", daemon=True)
         _THREAD.start()
         print(
-            f"PW_RESEARCH_SYNC_READY enabled=true source={export_source} since={since} pbp={pbp_enabled}",
+            f"PW_RESEARCH_SYNC_READY enabled=true source={export_source} since={since} pbp={pbp_enabled} pw_import={pw_import_enabled}",
             flush=True,
         )
     else:
