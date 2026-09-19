@@ -42,6 +42,8 @@ def auto_trading_enabled() -> bool:
     return os.getenv("AUTO_TRADING", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 AUTO_TRADING = auto_trading_enabled()
+
+WATCH_HEALTH = {"last_started_at": None, "last_completed_at": None, "last_error": None, "cycles": 0}
 SIGNAL_SECRET = os.getenv("SIGNAL_SECRET", "")
 MAX_TRADE_USDC = Decimal(os.getenv("MAX_TRADE_USDC", "100"))
 MAX_AUTO_TRADE_USDC = Decimal(os.getenv("MAX_AUTO_TRADE_USDC", "25"))
@@ -411,6 +413,7 @@ def _try_execute_signal(signal: AutoSignal) -> dict:
 
 
 def _process_watchlist_once() -> None:
+    WATCH_HEALTH["last_started_at"] = datetime.now(timezone.utc).isoformat()
     watch = _load(WATCH_FILE)
     changed = False
     for signal_id, rec in list(watch.items()):
@@ -439,11 +442,17 @@ def _process_watchlist_once() -> None:
             changed = True
     if changed:
         _save(WATCH_FILE, watch)
+    WATCH_HEALTH["last_completed_at"] = datetime.now(timezone.utc).isoformat()
+    WATCH_HEALTH["last_error"] = None
+    WATCH_HEALTH["cycles"] = int(WATCH_HEALTH.get("cycles") or 0) + 1
 
 
 async def _watch_loop() -> None:
     while True:
-        await asyncio.to_thread(_process_watchlist_once)
+        try:
+            await asyncio.to_thread(_process_watchlist_once)
+        except Exception as exc:
+            WATCH_HEALTH["last_error"] = f"{type(exc).__name__}: {exc}"
         await asyncio.sleep(AUTO_POLL_SECONDS)
 
 
@@ -470,6 +479,7 @@ def health():
         "version": "0.3.0",
         "live_trading": live_trading_enabled(),
         "auto_trading": auto_trading_enabled(),
+        "watch_loop": dict(WATCH_HEALTH),
         "poll_seconds": AUTO_POLL_SECONDS,
         "max_trade_usdc": str(MAX_TRADE_USDC),
         "max_auto_trade_usdc": str(MAX_AUTO_TRADE_USDC),
