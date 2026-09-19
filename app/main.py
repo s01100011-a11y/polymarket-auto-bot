@@ -31,7 +31,12 @@ WATCH_FILE = DATA_DIR / "watchlist.json"
 EXECUTIONS_FILE = DATA_DIR / "executions.json"
 FILE_LOCK = Lock()
 
-LIVE_TRADING = os.getenv("LIVE_TRADING", "false").lower() == "true"
+def live_trading_enabled() -> bool:
+    """Railway LIVE_TRADING is the authoritative live-mode switch."""
+    return os.getenv("LIVE_TRADING", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+LIVE_TRADING = live_trading_enabled()
+
 def auto_trading_enabled() -> bool:
     """Railway AUTO_TRADING is the authoritative automation switch."""
     return os.getenv("AUTO_TRADING", "false").strip().lower() in {"1", "true", "yes", "on"}
@@ -285,7 +290,7 @@ def _quote(intent: TradeIntent, *, auto: bool = False) -> dict:
         "would_cross_now": bool(best_ask is not None and best_ask <= intent.max_price),
         "geo_country": geo.get("country"),
         "geo_region": geo.get("region"),
-        "live_trading_enabled": LIVE_TRADING,
+        "live_trading_enabled": live_trading_enabled(),
         "auto_trading_enabled": auto_trading_enabled(),
         "note": intent.note,
     }
@@ -331,7 +336,7 @@ def _execute_limit(intent: TradeIntent, quote: dict, *, auto: bool, signal_id: s
         "auto": auto,
     }
 
-    if not LIVE_TRADING or (auto and not auto_trading_enabled()):
+    if not live_trading_enabled() or (auto and not auto_trading_enabled()):
         base.update({
             "status": "AUTO_DRY_RUN" if auto else "APPROVED_DRY_RUN",
             "submitted_at": _now().isoformat(),
@@ -463,7 +468,7 @@ def health():
     return {
         "ok": True,
         "version": "0.3.0",
-        "live_trading": LIVE_TRADING,
+        "live_trading": live_trading_enabled(),
         "auto_trading": auto_trading_enabled(),
         "poll_seconds": AUTO_POLL_SECONDS,
         "max_trade_usdc": str(MAX_TRADE_USDC),
@@ -567,7 +572,7 @@ def list_executions(x_signal_secret: str | None = Header(default=None)):
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    mode = "LIVE" if LIVE_TRADING else "DRY RUN"
+    mode = "LIVE" if live_trading_enabled() else "DRY RUN"
     auto = "ON" if auto_trading_enabled() else "OFF"
     return f"""
 <!doctype html>
