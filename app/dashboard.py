@@ -182,8 +182,11 @@ def _dashboard_snapshot() -> dict:
             "market": q.get("market") or (rec.get("intent") or {}).get("market_url"),
             "market_url": q.get("market_url") or (rec.get("intent") or {}).get("market_url"),
             "outcome": q.get("resolved_outcome") or q.get("requested_outcome"),
+            "entry_price": q.get("entry_price") or q.get("paper_entry_price"),
             "limit_price": q.get("limit_price"),
-            "budget_usdc": rec.get("budget_usdc"),
+            "shares": rec.get("remaining_shares") or rec.get("filled_shares") or q.get("shares"),
+            "budget_usdc": rec.get("actual_cost_usdc") or rec.get("budget_usdc"),
+            "fill_transaction_hashes": q.get("fill_transaction_hashes") or [],
             "auto": bool(rec.get("auto")),
             "submitted_at": rec.get("submitted_at") or rec.get("created_at"),
             "order_id": (rec.get("execution") or {}).get("order_id"),
@@ -204,7 +207,7 @@ def _dashboard_snapshot() -> dict:
             "daily_budget_used": str(today_used),
             "max_daily_budget_usdc": str(core.MAX_DAILY_BUDGET_USDC),
             "estimated_total_pnl": str(total_pnl.quantize(Decimal("0.01"))),
-            "pnl_note": "Live positions use Polymarket wallet cost basis and unrealized P/L when available; paper positions use their captured entry snapshot.",
+            "pnl_note": "Live positions are reconciled against Polymarket executed trades and wallet positions. Limit/Max is never treated as the fill price.",
         },
         "watching": watching,
         "live_trades": live_trades,
@@ -311,7 +314,7 @@ a{color:#8bc4ff;text-decoration:none}.wrap{max-width:1260px;margin:auto;padding:
   </div>
 
   <section class="panel active" id="current">
-    <h2>Current watches & trades</h2><p class="note">Price watches refresh in the bot loop. Live positions show Polymarket wallet cost basis and unrealized P/L when available.</p>
+    <h2>Current watches & trades</h2><p class="note">Price watches refresh in the bot loop. Live positions reconcile against Polymarket executed trades and wallet positions; the submitted limit is shown separately from actual entry.</p>
     <div id="currentBody"></div>
   </section>
   <section class="panel" id="history">
@@ -352,10 +355,10 @@ async function load(){
   document.getElementById('roLive').textContent=s.live_trading?'ENABLED':'DISABLED'; document.getElementById('roAuto').textContent=s.auto_trading?'ENABLED':'DISABLED'; document.getElementById('roPolitics').textContent=s.block_political_auto?'BLOCKED':'UNBLOCKED';
   const autoBtn=document.getElementById('autoTradingBtn'),autoNote=document.getElementById('autoTradingNote'); autoBtn.dataset.enabled=s.auto_trading?'1':'0'; autoBtn.textContent=s.auto_trading?'AUTO TRADING ON':'AUTO TRADING OFF'; autoBtn.classList.toggle('active',!!s.auto_trading); autoBtn.disabled=!!(s.live_trading&&!s.auto_trading); autoNote.textContent=s.live_trading?'Live mode is active: this control cannot enable unattended real-money execution.':'Controls paper trading and automatic order preparation.';
   const wr=d.watching.map(x=>`<tr><td><span class="status">${esc(x.status)}</span></td><td class="market">${link(x.market_url,x.outcome||x.market_url)}</td><td>${esc(x.market_type||'—')}</td><td>${price(x.best_ask||x.current_buy_price)}</td><td>${price(x.max_price)}</td><td>${money(x.budget_usdc)}</td><td>${when(x.expires_at)}</td><td class="muted">${esc(x.last_error||'')}</td></tr>`);
-  const lr=d.live_trades.map(x=>`<tr><td><span class="status">LIVE</span></td><td class="market">${link(x.market_url,x.market)}</td><td>${esc(x.outcome||'—')}</td><td>${price(x.entry_price)}</td><td>${price(x.current_midpoint)}</td><td>${money(x.budget_usdc)}</td><td class="${Number(x.estimated_pnl)>0?'green':Number(x.estimated_pnl)<0?'red':''}">${money(x.estimated_pnl)}</td><td>${when(x.submitted_at)}</td></tr>`);
-  document.getElementById('currentBody').innerHTML=(d.watching.length?'<div class="label" style="margin:8px 0">Price watches</div>':'')+table(['Status','Outcome / market','Type','Current','Limit','Budget','Expires','Error'],wr)+(d.live_trades.length?'<div class="label" style="margin:18px 0 8px">Submitted live trades</div>':'')+table(['Status','Market','Outcome','Entry','Current','Cost','Live P/L','Submitted'],lr);
-  const hr=d.history.map(x=>`<tr><td><span class="status">${esc(x.status||'—')}</span></td><td class="market">${link(x.market_url,x.market)}</td><td>${esc(x.outcome||'—')}</td><td>${price(x.limit_price)}</td><td>${money(x.budget_usdc)}</td><td>${x.auto?'Auto':'Manual'}</td><td>${when(x.submitted_at)}</td><td class="muted">${esc(x.order_id||'—')}</td></tr>`);
-  document.getElementById('historyBody').innerHTML=table(['Status','Market','Outcome','Limit','Budget','Source','Time','Order ID'],hr);
+  const lr=d.live_trades.map(x=>`<tr><td><span class="status">LIVE</span></td><td class="market">${link(x.market_url,x.market)}</td><td>${esc(x.outcome||'—')}</td><td>${price(x.entry_price)}</td><td>${price(x.limit_price)}</td><td>${price(x.current_midpoint)}</td><td>${x.shares===null||x.shares===undefined?'—':Number(x.shares).toFixed(4)}</td><td>${money(x.budget_usdc)}</td><td>${money(x.current_value_usdc)}</td><td class="${Number(x.estimated_pnl)>0?'green':Number(x.estimated_pnl)<0?'red':''}">${money(x.estimated_pnl)} ${x.pnl_percent===null||x.pnl_percent===undefined?'':('('+Number(x.pnl_percent).toFixed(1)+'%)')}</td><td class="muted">${esc(x.entry_source||'—')}</td><td>${when(x.submitted_at)}</td></tr>`);
+  document.getElementById('currentBody').innerHTML=(d.watching.length?'<div class="label" style="margin:8px 0">Price watches</div>':'')+table(['Status','Outcome / market','Type','Current','Limit','Budget','Expires','Error'],wr)+(d.live_trades.length?'<div class="label" style="margin:18px 0 8px">Submitted live trades</div>':'')+table(['Status','Market','Outcome','Actual entry','Limit','Current','Shares','Actual cost','Current value','Live P/L','Source','Submitted'],lr);
+  const hr=d.history.map(x=>`<tr><td><span class="status">${esc(x.status||'—')}</span></td><td class="market">${link(x.market_url,x.market)}</td><td>${esc(x.outcome||'—')}</td><td>${price(x.entry_price)}</td><td>${price(x.limit_price)}</td><td>${x.shares===null||x.shares===undefined?'—':Number(x.shares).toFixed(4)}</td><td>${money(x.budget_usdc)}</td><td>${x.auto?'Auto':'Manual'}</td><td>${when(x.submitted_at)}</td><td class="muted">${esc(x.order_id||'—')}</td></tr>`);
+  document.getElementById('historyBody').innerHTML=table(['Status','Market','Outcome','Actual entry','Limit','Shares','Actual cost','Source','Time','Order ID'],hr);
   Object.entries(d.settings).forEach(([k,v])=>{const e=document.getElementById(k);if(e&&!e.dataset.dirty)e.value=v});
  }catch(e){document.getElementById('serviceState').textContent='Dashboard error';document.getElementById('updated').textContent=String(e)}
 }
