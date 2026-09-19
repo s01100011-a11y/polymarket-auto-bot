@@ -358,12 +358,13 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
                     "tailscale",
                     f"--socket={ts_socket}",
                     "ping",
-                    "--timeout=4s",
+                    "--timeout=2s",
+                    "--c=1",
                     tailnet_peer,
                 ],
                 capture_output=True,
                 text=True,
-                timeout=6,
+                timeout=3,
                 check=False,
             )
             if proc.returncode != 0:
@@ -395,8 +396,8 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
         target_port = target.port or 443
         connect_host = tailnet_peer or target.hostname
 
-        raw = socket.create_connection((proxy_host, proxy_port), timeout=12.0)
-        raw.settimeout(12.0)
+        raw = socket.create_connection((proxy_host, proxy_port), timeout=6.0)
+        raw.settimeout(6.0)
         try:
             authority = f"{connect_host}:{target_port}"
             raw.sendall(
@@ -419,7 +420,7 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
 
             context = ssl.create_default_context()
             tls = context.wrap_socket(raw, server_hostname=target.hostname)
-            tls.settimeout(12.0)
+            tls.settimeout(6.0)
             connection["tls"] = tls
             return tls
         except Exception:
@@ -552,6 +553,10 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
         state.setdefault("no_trade", 0)
         state.setdefault("invalid", 0)
         state.setdefault("errors", 0)
+
+        # Give tailscaled/control-plane state a brief settling window after
+        # container startup; Railway /health is already available independently.
+        stop.wait(3.0)
 
         while not stop.is_set():
             started = time.time()
