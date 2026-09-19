@@ -340,41 +340,98 @@ def _save_alert(event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 # Include paper positions in the dashboard's current-trade/P&L calculation.
+# For real live positions, prefer Polymarket's authoritative wallet-position
+# cost basis and P/L instead of treating an order limit as the fill price.
 def _estimate_pnl_with_paper(records: list[dict]) -> tuple[list[dict], Decimal]:
     current: list[dict] = []
     total = Decimal("0")
     active = [r for r in records if r.get("status") in {"ORDER_SUBMITTED", "PAPER_OPEN"}]
     if not active:
         return current, total
+
     try:
         client = PublicClient()
     except Exception:
         client = None
+
+    positions_by_asset: dict[str, Any] = {}
+    wallet = os.getenv("POLYMARKET_DEPOSIT_WALLET", "").strip()
+    if client and wallet:
+        try:
+            positions_by_asset = {
+                str(getattr(p, "asset_id", "")): p
+                for p in client.list_positions(user=wallet, page_size=100).iter_items()
+                if getattr(p, "asset_id", None)
+            }
+        except Exception:
+            positions_by_asset = {}
+
     try:
         for rec in active:
             q = rec.get("quote") or {}
-            asset_id = q.get("asset_id")
+            asset_id = str(q.get("asset_id") or "")
+            is_paper = bool(rec.get("paper")) or rec.get("status") == "PAPER_OPEN"
             shares = dashboard._safe_decimal(q.get("shares"))
-            entry = dashboard._safe_decimal(q.get("paper_entry_price") or q.get("limit_price"))
-            midpoint = None
+            entry = dashboard._safe_decimal(
+                q.get("paper_entry_price") or q.get("entry_price") or q.get("limit_price")
+            )
+            current_price = None
+            cost_basis = None
+            current_value = None
             pnl = None
-            if client and asset_id and shares > 0 and entry > 0:
+            pnl_percent = None
+            entry_source = "paper_snapshot" if is_paper else "recorded_limit_fallback"
+
+            # Real positions: when this tracked trade started from zero shares,
+            # the wallet position belongs to this trade, so its avg/cost/P&L are authoritative.
+            if not is_paper and asset_id:
+                position = positions_by_asset.get(asset_id)
+                pre_size = dashboard._safe_decimal(rec.get("pre_position_size"))
+                pos_size = dashboard._safe_decimal(
+                    getattr(position, "current_size", None) if position is not None else None
+                )
+                if position is not None and pre_size <= Decimal("0.0001") and pos_size > 0:
+                    shares = pos_size
+                    entry = dashboard._safe_decimal(getattr(position, "avg_price", None))
+                    current_price = dashboard._safe_decimal(getattr(position, "current_price", None))
+                    cost_basis = dashboard._safe_decimal(getattr(position, "entry_cost_usdc", None))
+                    current_value = dashboard._safe_decimal(getattr(position, "current_value", None))
+                    pnl = dashboard._safe_decimal(getattr(position, "unrealized_pnl", None))
+                    pnl_percent = dashboard._safe_decimal(getattr(position, "percent_pnl", None))
+                    entry_source = "polymarket_position"
+                    total += pnl
+
+            # Paper trades, or a live-position fallback when authoritative
+            # position data is unavailable/blended with a pre-existing holding.
+            if pnl is None and client and asset_id and shares > 0 and entry > 0:
                 try:
-                    midpoint = dashboard._safe_decimal(client.get_midpoint(asset_id=str(asset_id)))
-                    pnl = (midpoint - entry) * shares
+                    current_price = dashboard._safe_decimal(client.get_midpoint(asset_id=asset_id))
+                    current_value = current_price * shares
+                    cost_basis = entry * shares
+                    pnl = current_value - cost_basis
+                    pnl_percent = (pnl / cost_basis * Decimal("100")) if cost_basis > 0 else None
                     total += pnl
                 except Exception:
                     pass
+
+            display_cost = cost_basis
+            if display_cost is None or display_cost <= 0:
+                display_cost = dashboard._safe_decimal(rec.get("budget_usdc"))
+
             current.append({
                 "id": rec.get("id"),
                 "market": q.get("market") or (rec.get("intent") or {}).get("market_url"),
                 "market_url": q.get("market_url") or (rec.get("intent") or {}).get("market_url"),
                 "outcome": q.get("resolved_outcome") or q.get("requested_outcome"),
                 "entry_price": str(entry) if entry else None,
-                "current_midpoint": str(midpoint) if midpoint is not None else None,
+                "current_midpoint": str(current_price) if current_price is not None else None,
                 "shares": str(shares) if shares else None,
-                "budget_usdc": rec.get("budget_usdc"),
+                "budget_usdc": str(display_cost.quantize(Decimal("0.01"))) if display_cost is not None else None,
+                "requested_budget_usdc": rec.get("budget_usdc"),
+                "current_value_usdc": str(current_value.quantize(Decimal("0.01"))) if current_value is not None else None,
                 "estimated_pnl": str(pnl.quantize(Decimal("0.01"))) if pnl is not None else None,
+                "pnl_percent": str(pnl_percent.quantize(Decimal("0.01"))) if pnl_percent is not None else None,
+                "entry_source": entry_source,
                 "submitted_at": rec.get("submitted_at") or rec.get("created_at"),
                 "order_id": (rec.get("execution") or {}).get("order_id"),
                 "status": rec.get("status"),
