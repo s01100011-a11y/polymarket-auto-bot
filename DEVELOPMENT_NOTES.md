@@ -316,3 +316,26 @@ For every future code change, append an entry containing: objective, files chang
 - **Commit:** `0f7fb90`.
 - **Deployment:** Railway production deployment `898d6377-1b70-4138-8d00-89d7185cbf54` reached SUCCESS.
 - **Verification:** Startup logged `PW_STRATEGY_TEST_READY enabled=True q3_away=True away_dog=True plus_money=True home_dog=True paper_only=True repeated_alerts=True`. PW database remained 1,921 alerts / 1,362 graded. No historical orders were created by deployment.
+
+
+## 2026-09-19 — PW play-by-play scalping research (#12)
+
+- **Objective:** Join WNBA PW calls to play-by-play and evaluate short-horizon momentum/scalping behavior without touching execution.
+- **Research-only analyzer:** Added `app/pw_scalping_research.py`, wired through `app/wnba_pw_research_v13.py`.
+- **Integrity correction:** A prior research sync imported 1,464 PW-server historical rows after startup, temporarily inflating the canonical database from 1,921 to 3,385 alerts. The sync is now protected with `PW_RESEARCH_IMPORT_ENABLED=false` by default and explicitly in Railway.
+- **Cleanup:** Migration v4 removed the 1,464 research-import alerts (v3) and then removed 61,448 orphan play-by-play rows left from games that were no longer referenced. Canonical startup is restored to 1,921 PW alerts / 1,362 graded.
+- **Current play-by-play:** 60,959 events across 151 canonical WNBA games. Note: the current stored PBP rows are sourced from ESPN via the research sync; the private PW server provides the PW calls. No separate PW-server-native PBP endpoint is configured in this repository.
+- **Alignment:** 1,344 of 1,362 graded PW calls aligned to a PBP state (98.7%).
+- **All aligned calls:** next-120s average PW-side score delta -0.282; average 120s MFE +1.939 and MAE -2.400. Within 180s, +4 favorable occurred before -4 adverse on 27.7% of calls versus 35.5% adverse-first. A -2 adverse move occurred on 66.8%; among those, 61.0% recovered to the original score and 24.9% reached +2 versus the call score within the same window. Final win rate after a -2 dip was 66.4% versus 71.6% overall.
+- **Late Q3 (last 3m):** 181 calls; average 120s delta -0.171; +4 first 31.5%, -4 first 38.1%; -2 dip 66.3%; final win 69.1%.
+- **Early Q4 (first 3m):** 156 calls; average 120s delta -0.641; +4 first 30.1%, -4 first 42.9%; -2 dip 72.4%; final win 68.6%. This is the clearest short-term reversal/fade window in the initial study.
+- **First vs repeated same-side PW calls:** first calls (223) had average 120s delta +0.036 and final win 60.5%; repeated calls (1,121) had average delta -0.345 but final win 73.8%. Repeated calls appear stronger for final direction but weaker for immediate same-direction scalp momentum.
+- **Current top-four filter PBP behavior:**
+  - Away Underdog: 148 aligned calls; delta120 -0.574; +4 first 25.0%; -4 first 44.6%; -2 dip 72.3%; final win 26.4%.
+  - Plus-money: 308; delta120 -0.351; +4 first 25.3%; -4 first 38.6%; -2 dip 69.5%; final win 34.4%.
+  - Q3 Away: 241; delta120 -0.191; +4 first 25.7%; -4 first 37.8%; -2 dip 69.3%; final win 60.6%.
+  - Home Underdog: 160; delta120 -0.144; +4 first 25.6%; -4 first 33.1%; -2 dip 66.9%; final win 41.9%.
+- **Interpretation:** The initial PBP study supports testing (1) short fade scalps immediately after selected PW calls, especially early Q4 / Away Underdog; and (2) a delayed PW-side entry after a short adverse move, particularly on repeated same-side calls. These are score-movement proxies, not measured Polymarket P/L.
+- **Limitation:** True scalp ROI/P&L requires historical Polymarket price ticks or a forward price recorder. Score movement alone cannot establish executable market returns, spreads, or slippage.
+- **Commits:** `30b2d53`, `4231bdc`, `c1a247d`, `21efa5c`, `6ff6d06`.
+- **Verified deployment:** `70d0f960-5489-4a34-8ba5-e7bffa902d7d` SUCCESS.
