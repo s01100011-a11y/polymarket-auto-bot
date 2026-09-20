@@ -827,3 +827,20 @@ Earlier broad Polymarket spread scan remains the higher-volume candidate family:
 - +5.5-or-better <=60c: lower volume but also positive across all four fixed OOS blocks.
 
 However, historical Polymarket prices are still ~1-minute proxy prices. Issue #15 forward executable order-book capture remains required before any live-spread strategy is treated as executable edge.
+
+
+## 2026-09-20 — Vendor NRLMonitor research snapshot (#17)
+
+Created `research/upstream_nrlmonitor/` as a read-only reference snapshot of `bobcheong/NRLMonitor`.
+
+Pinned source commit:
+- `990bcbb37c12c0719112409099063acd6bb07033`
+- Commit message: `Initial commit`
+- Commit date: 2026-05-18
+
+Current upstream contents at that commit:
+- `README.md` only, containing `# NRLMonitor`.
+
+There is currently no NRL monitor/odds/PW/export/backfill implementation in the upstream repository to inspect or copy. `SNAPSHOT.md` records provenance and explicitly notes that the snapshot should be refreshed when source code is added.
+
+The snapshot is isolated under `research/` and is not imported by the live trading path.
