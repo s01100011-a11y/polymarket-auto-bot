@@ -3,6 +3,7 @@ from app import pw_research_sync
 from app import pw_scalping_research
 from app import pw_market_research
 from app import pw_game_reconstruction
+from app import pw_spread_backtest
 
 app = base.app
 history = base.history
@@ -35,5 +36,10 @@ pw_game_reconstruction.install(
     app=app,
     history=history,
     dashboard=dashboard,
+    ingest=ingest,
+)
+
+pw_spread_backtest.install(
+    history=history,
     ingest=ingest,
 )
