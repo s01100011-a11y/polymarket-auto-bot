@@ -419,6 +419,7 @@ def install(*, history: Any, ingest: Any) -> None:
                 live = num(alert.get("live_spread"))
                 rec = {
                     "alert_id": alert.get("id"),
+                    "event_ts": alert.get("event_ts"),
                     "game_id": game_id,
                     "pick": pick,
                     "quarter": str(alert.get("quarter") or "").upper(),
@@ -767,6 +768,225 @@ def install(*, history: Any, ingest: Any) -> None:
             },
         }
         print("PW_SPREAD_ALL_CALLS_AUDIT " + json.dumps(all_pw_price_gap_audit, sort_keys=True), flush=True)
+
+        # Robustness pass: one position per game/team, chronological 70/30
+        # holdout, four expanding walk-forward folds, and adverse entry-price
+        # stress. Candidate configs are the previously discussed +6.5/+7.5/+8.5
+        # rules at <=50c, <=55c, 50-55c, and <=60c.
+        def dedup_config_trades(
+            rows: list[dict[str, Any]],
+            target: float,
+            min_price: float,
+            max_price: float,
+        ) -> list[dict[str, Any]]:
+            trades: list[dict[str, Any]] = []
+            seen_side: set[tuple[str, str]] = set()
+            ordered = sorted(
+                rows,
+                key=lambda r: (
+                    parse_dt(r.get("event_ts")) or datetime.max.replace(tzinfo=timezone.utc),
+                    int(r.get("alert_id") or 0),
+                ),
+            )
+            for r in ordered:
+                side_key = (str(r.get("game_id") or ""), str(r.get("pick") or ""))
+                if side_key in seen_side:
+                    continue
+                eligible = [
+                    x for x in (r.get("available_spreads") or [])
+                    if num(x.get("line")) is not None
+                    and float(x["line"]) >= target
+                    and min_price <= float(x["price"]) <= max_price
+                ]
+                if not eligible:
+                    continue
+                chosen = sorted(
+                    eligible,
+                    key=lambda x: (-float(x["line"]), float(x["price"])),
+                )[0]
+                price = float(chosen["price"])
+                won = bool(chosen["win"])
+                trades.append({
+                    "game_id": side_key[0],
+                    "pick": side_key[1],
+                    "event_ts": r.get("event_ts"),
+                    "price": price,
+                    "line": float(chosen["line"]),
+                    "won": won,
+                    "pnl": pnl(price, won),
+                })
+                seen_side.add(side_key)
+            return trades
+
+        def settlement_summary(trades: list[dict[str, Any]], adverse_entry_cents: float = 0.0) -> dict[str, Any]:
+            if not trades:
+                return {"trades": 0}
+            delta = float(adverse_entry_cents) / 100.0
+            pnls: list[float] = []
+            wins = 0
+            equity = peak = max_dd = 0.0
+            for trade in sorted(
+                trades,
+                key=lambda t: parse_dt(t.get("event_ts")) or datetime.max.replace(tzinfo=timezone.utc),
+            ):
+                price = min(0.999, float(trade["price"]) + delta)
+                won = bool(trade["won"])
+                trade_pnl = pnl(price, won)
+                pnls.append(trade_pnl)
+                if won:
+                    wins += 1
+                equity += trade_pnl
+                peak = max(peak, equity)
+                max_dd = max(max_dd, peak - equity)
+            return {
+                "trades": len(trades),
+                "wins": wins,
+                "losses": len(trades) - wins,
+                "win_pct": round(100.0 * wins / len(trades), 2),
+                "pnl_100": round(sum(pnls), 2),
+                "roi_pct": round(100.0 * sum(pnls) / (stake * len(trades)), 2),
+                "avg_entry": round(mean(min(0.999, float(t["price"]) + delta) for t in trades), 4),
+                "avg_line": round(mean(float(t["line"]) for t in trades), 2),
+                "max_drawdown_100": round(max_dd, 2),
+            }
+
+        core_bands = {
+            "cap50": (0.0, 0.50),
+            "cap55": (0.0, 0.55),
+            "near110_50_55": (0.50, 0.55),
+            "cap60": (0.0, 0.60),
+        }
+        config_runs: list[dict[str, Any]] = []
+        for target in (6.5, 7.5, 8.5):
+            for band_name, (min_price, max_price) in core_bands.items():
+                trades = dedup_config_trades(records, target, min_price, max_price)
+                config_runs.append({
+                    "name": f"plus{target}_{band_name}",
+                    "target": target,
+                    "band": band_name,
+                    "min_price": min_price,
+                    "max_price": max_price,
+                    "trades": trades,
+                })
+
+        game_first_ts: dict[str, datetime] = {}
+        for r in records:
+            gid = str(r.get("game_id") or "")
+            dt = parse_dt(r.get("event_ts"))
+            if not gid or dt is None:
+                continue
+            if gid not in game_first_ts or dt < game_first_ts[gid]:
+                game_first_ts[gid] = dt
+        ordered_games = [
+            gid for gid, _ in sorted(game_first_ts.items(), key=lambda item: item[1])
+        ]
+        split_at = (
+            max(1, min(len(ordered_games) - 1, int(len(ordered_games) * 0.70)))
+            if len(ordered_games) > 1 else len(ordered_games)
+        )
+        train_games = set(ordered_games[:split_at])
+        test_games = set(ordered_games[split_at:])
+
+        fixed_results: list[dict[str, Any]] = []
+        for cfg in config_runs:
+            tr = [t for t in cfg["trades"] if t["game_id"] in train_games]
+            te = [t for t in cfg["trades"] if t["game_id"] in test_games]
+            fixed_results.append({
+                "name": cfg["name"],
+                "target": cfg["target"],
+                "band": cfg["band"],
+                "all": settlement_summary(cfg["trades"]),
+                "train_70": settlement_summary(tr),
+                "test_30": settlement_summary(te),
+                "test_stress_0_5c": settlement_summary(te, 0.5),
+                "test_stress_1c": settlement_summary(te, 1.0),
+            })
+
+        eligible_train = [
+            (cfg, row)
+            for cfg, row in zip(config_runs, fixed_results)
+            if int((row.get("train_70") or {}).get("trades") or 0) >= 10
+        ]
+        selected_holdout = None
+        if eligible_train:
+            selected_cfg, selected_row = max(
+                eligible_train,
+                key=lambda item: (
+                    float((item[1].get("train_70") or {}).get("roi_pct") or -999),
+                    int((item[1].get("train_70") or {}).get("trades") or 0),
+                ),
+            )
+            selected_holdout = {
+                "selected": {
+                    "name": selected_cfg["name"],
+                    "target": selected_cfg["target"],
+                    "band": selected_cfg["band"],
+                },
+                "train": selected_row["train_70"],
+                "test": selected_row["test_30"],
+                "test_stress_0_5c": selected_row["test_stress_0_5c"],
+                "test_stress_1c": selected_row["test_stress_1c"],
+            }
+
+        folds: list[dict[str, Any]] = []
+        walk_oos: list[dict[str, Any]] = []
+        n_games = len(ordered_games)
+        for fold_no, start_frac in enumerate((0.60, 0.70, 0.80, 0.90), start=1):
+            train_end = int(n_games * start_frac)
+            test_end = n_games if fold_no == 4 else int(n_games * (start_frac + 0.10))
+            if train_end <= 0 or test_end <= train_end:
+                continue
+            fold_train = set(ordered_games[:train_end])
+            fold_test = set(ordered_games[train_end:test_end])
+            choices: list[tuple[dict[str, Any], dict[str, Any]]] = []
+            for cfg in config_runs:
+                train_slice = [t for t in cfg["trades"] if t["game_id"] in fold_train]
+                train_stats = settlement_summary(train_slice)
+                if int(train_stats.get("trades") or 0) >= 10:
+                    choices.append((cfg, train_stats))
+            if not choices:
+                continue
+            chosen_cfg, chosen_train = max(
+                choices,
+                key=lambda item: (
+                    float(item[1].get("roi_pct") or -999),
+                    int(item[1].get("trades") or 0),
+                ),
+            )
+            test_slice = [
+                t for t in chosen_cfg["trades"] if t["game_id"] in fold_test
+            ]
+            test_stats = settlement_summary(test_slice)
+            walk_oos.extend(test_slice)
+            folds.append({
+                "fold": fold_no,
+                "train_games": len(fold_train),
+                "test_games": len(fold_test),
+                "selected": {
+                    "name": chosen_cfg["name"],
+                    "target": chosen_cfg["target"],
+                    "band": chosen_cfg["band"],
+                },
+                "train": chosen_train,
+                "test": test_stats,
+                "test_stress_0_5c": settlement_summary(test_slice, 0.5),
+                "test_stress_1c": settlement_summary(test_slice, 1.0),
+            })
+
+        robustness_audit = {
+            "method": "first qualifying PW signal per game/team; chronological game-level validation",
+            "candidate_configs": len(config_runs),
+            "games": len(ordered_games),
+            "train_games": len(train_games),
+            "test_games": len(test_games),
+            "fixed_configs": fixed_results,
+            "holdout_selected_on_train": selected_holdout,
+            "walk_forward_folds": folds,
+            "walk_forward_oos": settlement_summary(walk_oos),
+            "walk_forward_oos_stress_0_5c": settlement_summary(walk_oos, 0.5),
+            "walk_forward_oos_stress_1c": settlement_summary(walk_oos, 1.0),
+        }
+        print("PW_SPREAD_ROBUSTNESS " + json.dumps(robustness_audit, sort_keys=True), flush=True)
 
         best = sorted(
             [
