@@ -636,6 +636,83 @@ def install(*, history: Any, ingest: Any) -> None:
         }
         print("PW_SPREAD_UNDERDOG_LOSS_AUDIT " + json.dumps(loss_audit, sort_keys=True), flush=True)
 
+        # Ex-ante test across every matched PW underdog signal, including the
+        # outright moneyline winners and losers. This models an executable rule:
+        # when a target-or-better positive spread is offered at or below the price
+        # cap, buy the LARGEST cushion available under that cap and hold to settlement.
+        all_dogs = filt(lambda r: r.get("bk_ml") is not None and float(r["bk_ml"]) > 0)
+
+        def dog_strategy(rows: list[dict[str, Any]], target: float, max_price: float, min_price: float = 0.0) -> dict[str, Any]:
+            trades: list[dict[str, Any]] = []
+            for r in rows:
+                eligible = [
+                    x for x in (r.get("available_spreads") or [])
+                    if num(x.get("line")) is not None
+                    and float(x["line"]) >= target
+                    and min_price <= float(x["price"]) <= max_price
+                ]
+                if not eligible:
+                    continue
+                # Real-time deterministic selection rule: take the largest cushion
+                # that satisfies the price cap; for equal lines prefer the cheaper share.
+                chosen = sorted(eligible, key=lambda x: (-float(x["line"]), float(x["price"])))[0]
+                price = float(chosen["price"])
+                won = bool(chosen["win"])
+                profit = pnl(price, won)
+                trades.append({
+                    "game_id": r.get("game_id"),
+                    "quarter": r.get("quarter"),
+                    "bk_ml": r.get("bk_ml"),
+                    "bk_spread": r.get("bk_spread"),
+                    "pw_result": r.get("pw_result"),
+                    "line": float(chosen["line"]),
+                    "price": price,
+                    "lag_s": chosen.get("lag_s"),
+                    "won": won,
+                    "pnl": profit,
+                })
+
+            wins = sum(1 for x in trades if x["won"])
+            total_pnl = sum(float(x["pnl"]) for x in trades)
+            stake_total = stake * len(trades)
+            avg_price = mean(float(x["price"]) for x in trades) if trades else None
+            avg_line = mean(float(x["line"]) for x in trades) if trades else None
+            return {
+                "target_plus": target,
+                "min_price": min_price,
+                "max_price": max_price,
+                "signals_total": len(rows),
+                "trades": len(trades),
+                "unique_games": len({str(x["game_id"]) for x in trades}),
+                "wins": wins,
+                "losses": len(trades) - wins,
+                "win_pct": round(100.0 * wins / len(trades), 2) if trades else None,
+                "pnl_100": round(total_pnl, 2),
+                "roi_pct": round(100.0 * total_pnl / stake_total, 2) if stake_total else None,
+                "avg_entry": round(avg_price, 4) if avg_price is not None else None,
+                "avg_line": round(avg_line, 2) if avg_line is not None else None,
+                "pw_ml_winners_in_trades": sum(1 for x in trades if x["pw_result"] == "W"),
+                "pw_ml_losers_in_trades": sum(1 for x in trades if x["pw_result"] == "L"),
+                "examples": trades[:12],
+            }
+
+        all_dog_audit = {
+            "signals": len(all_dogs),
+            "unique_games": len({str(r.get("game_id")) for r in all_dogs}),
+            "pw_ml_wins": sum(1 for r in all_dogs if r.get("pw_result") == "W"),
+            "pw_ml_losses": sum(1 for r in all_dogs if r.get("pw_result") == "L"),
+            "targets": {
+                str(t): {
+                    "cap_55c": dog_strategy(all_dogs, t, 0.55, 0.0),
+                    "near_minus110_50_55c": dog_strategy(all_dogs, t, 0.55, 0.50),
+                    "tight_minus110_51_5_53_5c": dog_strategy(all_dogs, t, 0.535, 0.515),
+                    "cap_60c": dog_strategy(all_dogs, t, 0.60, 0.0),
+                }
+                for t in (6.5, 7.5, 8.5)
+            },
+        }
+        print("PW_SPREAD_ALL_UNDERDOG_AUDIT " + json.dumps(all_dog_audit, sort_keys=True), flush=True)
+
         best = sorted(
             [
                 (name, aggregate(rows, side))
