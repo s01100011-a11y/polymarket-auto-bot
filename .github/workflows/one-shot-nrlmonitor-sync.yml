@@ -1,0 +1,41 @@
+name: One-shot NRLMonitor snapshot sync
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-shot-nrlmonitor-sync.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone upstream NRLMonitor
+        run: |
+          rm -rf /tmp/NRLMonitor
+          git clone --depth 1 --branch master https://github.com/bobcheong/NRLMonitor.git /tmp/NRLMonitor
+
+      - name: Copy full source snapshot
+        run: |
+          rm -rf research/upstream_nrlmonitor
+          mkdir -p research/upstream_nrlmonitor
+          rm -rf /tmp/NRLMonitor/.git
+          cp -a /tmp/NRLMonitor/. research/upstream_nrlmonitor/
+
+      - name: Commit snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A research/upstream_nrlmonitor
+          if git diff --cached --quiet; then
+            echo "No snapshot changes to commit"
+            exit 0
+          fi
+          git commit -m "research: copy full NRLMonitor master snapshot"
+          git push
