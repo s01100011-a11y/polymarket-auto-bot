@@ -693,6 +693,26 @@ def install(*, history: Any, ingest: Any) -> None:
                 "avg_line": round(avg_line, 2) if avg_line is not None else None,
                 "pw_ml_winners_in_trades": sum(1 for x in trades if x["pw_result"] == "W"),
                 "pw_ml_losers_in_trades": sum(1 for x in trades if x["pw_result"] == "L"),
+                "bk_spread_present": sum(1 for x in trades if x.get("bk_spread") is not None),
+                "bk_spread_higher_than_poly": sum(
+                    1 for x in trades
+                    if x.get("bk_spread") is not None and float(x["bk_spread"]) > float(x["line"])
+                ),
+                "bk_spread_equal_poly": sum(
+                    1 for x in trades
+                    if x.get("bk_spread") is not None and abs(float(x["bk_spread"]) - float(x["line"])) < 0.01
+                ),
+                "bk_spread_lower_than_poly": sum(
+                    1 for x in trades
+                    if x.get("bk_spread") is not None and float(x["bk_spread"]) < float(x["line"])
+                ),
+                "avg_bk_minus_poly_gap": round(
+                    mean(
+                        float(x["bk_spread"]) - float(x["line"])
+                        for x in trades if x.get("bk_spread") is not None
+                    ),
+                    2,
+                ) if any(x.get("bk_spread") is not None for x in trades) else None,
                 "examples": trades[:12],
             }
 
@@ -703,6 +723,10 @@ def install(*, history: Any, ingest: Any) -> None:
             "pw_ml_losses": sum(1 for r in all_dogs if r.get("pw_result") == "L"),
             "targets": {
                 str(t): {
+                    "cap_50c_plus_money": dog_strategy(all_dogs, t, 0.50, 0.0),
+                    "cap_40c_plus150_or_better": dog_strategy(all_dogs, t, 0.40, 0.0),
+                    "cap_33_33c_plus200_or_better": dog_strategy(all_dogs, t, 1.0 / 3.0, 0.0),
+                    "cap_25c_plus300_or_better": dog_strategy(all_dogs, t, 0.25, 0.0),
                     "cap_55c": dog_strategy(all_dogs, t, 0.55, 0.0),
                     "near_minus110_50_55c": dog_strategy(all_dogs, t, 0.55, 0.50),
                     "tight_minus110_51_5_53_5c": dog_strategy(all_dogs, t, 0.535, 0.515),
