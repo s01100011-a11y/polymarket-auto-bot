@@ -1140,6 +1140,65 @@ def install(*, history: Any, ingest: Any) -> None:
         }
         print("PW_SPREAD_BROAD_SCAN " + json.dumps(broad_audit, sort_keys=True), flush=True)
 
+        # Fixed-rule expanding OOS check. No rule selection inside folds: each
+        # candidate is evaluated unchanged on the 60-70, 70-80, 80-90 and
+        # 90-100% chronological game blocks, then aggregated.
+        def fixed_walkforward(configs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            out: list[dict[str, Any]] = []
+            n = len(ordered_games)
+            for cfg in configs:
+                fold_rows: list[dict[str, Any]] = []
+                aggregate: list[dict[str, Any]] = []
+                for fold_no, start_frac in enumerate((0.60, 0.70, 0.80, 0.90), start=1):
+                    start = int(n * start_frac)
+                    end = n if fold_no == 4 else int(n * (start_frac + 0.10))
+                    test_set = set(ordered_games[start:end])
+                    test_slice = [t for t in cfg["trades"] if t["game_id"] in test_set]
+                    aggregate.extend(test_slice)
+                    fold_rows.append({
+                        "fold": fold_no,
+                        "test_games": len(test_set),
+                        "stats": settlement_summary(test_slice),
+                    })
+                row = {
+                    "family": cfg["family"],
+                    "name": cfg["name"],
+                    "oos": settlement_summary(aggregate),
+                    "oos_stress_0_5c": settlement_summary(aggregate, 0.5),
+                    "oos_stress_1c": settlement_summary(aggregate, 1.0),
+                    "folds": fold_rows,
+                }
+                for key in ("target", "max_sacrifice", "max_price"):
+                    if key in cfg:
+                        row[key] = cfg[key]
+                out.append(row)
+            return out
+
+        broad_wf = fixed_walkforward(broad_configs)
+        gap_wf = fixed_walkforward(gap_configs)
+
+        def stable_oos(rows: list[dict[str, Any]], min_oos: int) -> list[dict[str, Any]]:
+            eligible = [
+                row for row in rows
+                if int((row.get("oos") or {}).get("trades") or 0) >= min_oos
+                and float((row.get("oos") or {}).get("roi_pct") or -999) > 0
+                and float((row.get("oos_stress_1c") or {}).get("roi_pct") or -999) > 0
+            ]
+            eligible.sort(
+                key=lambda row: (
+                    int((row.get("oos") or {}).get("trades") or 0),
+                    float((row.get("oos") or {}).get("roi_pct") or -999),
+                ),
+                reverse=True,
+            )
+            return eligible[:15]
+
+        broad_wf_audit = {
+            "absolute_stable_oos": stable_oos(broad_wf, 15),
+            "gap_stable_oos": stable_oos(gap_wf, 10),
+        }
+        print("PW_SPREAD_BROAD_WALKFORWARD " + json.dumps(broad_wf_audit, sort_keys=True), flush=True)
+
         best = sorted(
             [
                 (name, aggregate(rows, side))
