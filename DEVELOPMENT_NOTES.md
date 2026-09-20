@@ -559,3 +559,57 @@ Implementation:
 - Commit `a985cbb54fc4c311172ed0482de3d9a00fe4f5d6`: add plus-money price bands and BK-vs-Polymarket live-spread comparisons.
 - Research deployment `d24d0841-0072-4dfe-9c12-6454f3d9f795` reached SUCCESS.
 - One-off `PW_SPREAD_BACKTEST_ENABLED` returned to `false`.
+
+
+## 2026-09-20 — Full PW feed spread/price backtest (#14)
+
+Corrected methodology scope from underdog-only to the full matched graded PW feed.
+
+Scope:
+- 1,361 matched graded PW calls with usable Polymarket spread history.
+- 970 PW moneyline winners / 391 losers.
+- 313 underdog calls / 1,048 favorite calls.
+- 147 unique games represented in the matched full-feed audit.
+- Same deterministic rule: for each target (+6.5/+7.5/+8.5), buy the largest listed positive Polymarket spread at or above target that satisfies the price cap, then hold to settlement.
+- Flat $100 stake per signal.
+
+Full-feed results:
++6.5 or better:
+- <=50c: 51 trades, 26-25, +$638.08, +12.51% ROI, avg entry 46.00c, avg line +8.58.
+- <=55c: 87 trades, 57-30, +$2,848.61, +32.74% ROI, avg entry 49.67c, avg line +8.63.
+- 50-55c: 57 trades, 40-17, +$1,939.98, +34.03% ROI, avg entry 52.40c, avg line +8.71.
+- <=60c: 110 trades, 77-33, +$3,794.21, +34.49% ROI, avg entry 52.21c, avg line +8.89.
+- <=40c (~+150+): 16 trades, 6-10, +5.22% ROI.
+- <=33.33c (~+200+): 4 trades, 0-4, -100% ROI.
+
++7.5 or better:
+- <=50c: 42 trades, 19-23, -$213.02, -5.07% ROI.
+- <=55c: 69 trades, 41-28, +$1,184.42, +17.17% ROI.
+- 50-55c: 47 trades, 31-16, +$1,226.89, +26.10% ROI.
+- <=60c: 93 trades, 63-30, +$2,427.85, +26.11% ROI.
+- <=40c (~+150+): 11 trades, 2-9, -47.25% ROI.
+- <=33.33c (~+200+): 4 trades, 0-4, -100% ROI.
+
++8.5 or better:
+- <=50c: 28 trades, 17-11, +$778.77, +27.81% ROI, avg entry 46.96c, avg line +9.79.
+- <=55c: 48 trades, 32-16, +$1,542.74, +32.14% ROI, avg entry 50.07c, avg line +9.92.
+- 50-55c: 32 trades, 23-9, +$1,191.40, +37.23% ROI, avg entry 52.41c, avg line +9.97.
+- <=60c: 64 trades, 46-18, +$2,230.06, +34.84% ROI, avg entry 52.70c, avg line +10.16.
+- <=40c (~+150+): 2 trades, 2-0, +190.1% ROI; sample too small.
+- <=33.33c (~+200+): 0 trades.
+
+Important contrast with underdog-only test:
+- The full-feed 50-55c results improved materially because some favorite PW calls also had positive-spread Polymarket markets at attractive prices.
+- +6.5 50-55c: underdog-only +19.98% ROI (46 trades) -> all-PW +34.03% (57 trades).
+- +7.5 50-55c: underdog-only +5.72% (36) -> all-PW +26.10% (47).
+- +8.5 50-55c: underdog-only +27.24% (27) -> all-PW +37.23% (32).
+
+Caveats:
+- Repeated PW calls in the same game are correlated and count as separate trades.
+- Historical prices-history is approximate ~1-minute proxy pricing, not reconstructed executable bid/ask/depth.
+- These are in-sample results; next robustness work should deduplicate to one trade per game/side and run chronological holdout/walk-forward plus friction stress.
+
+Implementation:
+- Commit `7ebc896864b14ee96fa274e499af6086a56fc958`: full-feed spread/price rules.
+- Research deployment `2a444968-3a94-4ebe-8710-3fe21b8cf3f2` reached SUCCESS.
+- One-off `PW_SPREAD_BACKTEST_ENABLED` returned to false.
