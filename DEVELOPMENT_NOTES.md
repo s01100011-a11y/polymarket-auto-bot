@@ -737,3 +737,93 @@ Copied research-relevant files:
 The snapshot is isolated under `research/` and is not imported by the live trading path. `SNAPSHOT.md` records provenance and the pinned upstream revision.
 
 Initial source inspection confirms the upstream system explicitly stores `bk_spread`, `bk_spread_price`, `bk_spread_source`, and `bk_ts`, and `odds_api.py` describes `fetch_live_game_odds()` as capturing real-time spread and moneyline when a PW call fires. These fields will be used to tighten the DK-vs-Polymarket timing analysis in #14/#15.
+
+
+## 2026-09-20 — NBAMonitor source review: implications for PW/Polymarket research (#16, #14, #15)
+
+Reviewed pinned upstream source `bobcheong/NBAMonitor@7fc3285823eb7190b737edd8580ec69229e4b5ae`.
+
+### PW fire ordering / timing
+
+Live PW path in `monitor.py`:
+1. Compute PW final-winner score and apply adaptive favorite/underdog threshold.
+2. Apply Q3/Q4/OT hard stop when predicted team trails by configured large margin (default 20).
+3. Apply per-game/per-team cooldown (default 5 minutes).
+4. Capture score, active conditions and pregame context.
+5. Call `odds_api.fetch_live_game_odds(..., context="pw_fire", quarter=quarter)`.
+6. Extract `bk_spread`, `bk_spread_price`, `bk_moneyline`, `bk_name`, `bk_ml_source`, `bk_spread_source`, `bk_ts`.
+7. Build/send Slack PW message including BK Odds and BK Spread.
+8. Persist PW call record with timestamp and all BK metadata.
+
+This means the Slack alert timestamp used in the canonical WNBA archive occurs after the PW-side BK fetch and should normally be within seconds of the quote fetch.
+
+### Odds freshness nuance
+
+`odds_api.py` has a 120-second in-process event cache, but production polling launches a fresh `monitor.py` subprocess every ~30 seconds (via systemd or `monitor_loop.py` subprocess), so the cache does not persist between ticks. It can only be reused within one monitor invocation.
+
+Important caveat: `fetched_ts` is stamped when `fetch_live_game_odds()` returns, even if the underlying event response came from that same-run cache. It is therefore a local fetch/return timestamp, not necessarily the sportsbook's own market last-update timestamp. The raw Odds API event/bookmaker payload may carry more precise update metadata, but that is not persisted on the PW call.
+
+### BK Spread is DraftKings-preferred, not guaranteed DraftKings
+
+`BOOKMAKER_PRIORITY` is:
+`draftkings -> fanduel -> betmgm -> caesars -> bet365`, then any bookmaker with a spreads market.
+
+`extract_odds()` can also source spread and moneyline from different fallback books. Therefore historical `bk_spread` must be described as **live bookmaker spread (DraftKings preferred)** unless `bk_spread_source` confirms DraftKings.
+
+The Slack-derived canonical archive preserves `bk_spread` but not `bk_spread_source`, `bk_spread_price` or `bk_ts`. Those richer fields are present in upstream `/api/pw-export`.
+
+### Live vs synthetic backfill
+
+Upstream `backfill_pw_calls.py` synthetic calls contain `source="backfill"`, `synthetic=True` and do **not** populate `bk_spread`/`bk_moneyline`/live BK timestamp metadata. The canonical 1,921-call bot archive is reconstructed from actual Slack PW messages with real alert timestamps; calls that include BK Spread therefore originate from the live PW alert format, not the synthetic backfill call schema.
+
+### Repeat calls
+
+Current live code uses a per-game/per-team default 5-minute cooldown. Repeated same-side calls are confirmations at least ~5 minutes apart, not independent observations. If the predicted side flips, the other team's separate cooldown key can allow an alert without waiting for the first team's cooldown. Suppressed calls use an approximately 2-minute dedup cooldown and are not sent as ordinary PW Slack alerts.
+
+This reinforces the research choice to count one independent position per game/team while using repeats as timing/confirmation features.
+
+### PW objective vs spread strategy
+
+PW chooses the top **final game winner** probability (historical/Bayesian/ML blend). It is not directly trained to maximize ATS/spread cover. Our Polymarket spread strategy is therefore a second-stage market strategy:
+- PW supplies directional/final-winner information.
+- Positive spread protection converts that directional signal into a higher cover probability.
+- Price/line selection determines whether the extra protection is worth the cost.
+
+This explains why a fixed PW ML rule and a PW + positive-spread rule can have very different profitability.
+
+### New state segmentation from canonical WNBA data
+
+Among 1,362 graded calls, 571 have both pregame handicap and live `bk_spread` available.
+
+Signal-level:
+- Pregame favorite still live favorite: 286 calls, 89.51% PW outright win, 39.16% cover of live BK spread.
+- Pregame favorite flipped to live dog: 5 calls / 4 games, 60.00% outright win, 80.00% BK-spread cover. Too small for inference.
+- Pregame dog still live dog: 144 calls / 45 games, 27.78% outright win, 60.42% BK-spread cover.
+- Pregame dog flipped to live favorite: 136 calls / 29 games, 62.50% outright win, 40.44% BK-spread cover.
+
+First call per game/team:
+- Favorite still favorite: 60, 81.67% outright, 43.33% BK cover.
+- Favorite -> live dog: 4, 75.00% outright, 100% BK cover (tiny sample).
+- Dog still dog: 45, 24.44% outright, 62.22% BK cover.
+- Dog -> live favorite: 29, 58.62% outright, 44.83% BK cover.
+
+Interpretation: for meaningful samples, positive live spread protection is most useful when the team remains a live underdog; negative live favorite spreads cover much less often even though outright PW accuracy is high. This supports researching positive Polymarket alternate spreads as protection on strong PW directions rather than treating the BK live spread itself as the desired betting line.
+
+### Research-data gap discovered in bot
+
+`app/pw_research_sync.py` can fetch full upstream `/api/pw-export` rows and has a `research_raw_json` column, but `PW_RESEARCH_IMPORT_ENABLED` defaults false because the canonical Slack 1,921-call history is authoritative. Even when enabled, natural duplicates are currently skipped rather than enriching the existing canonical row with upstream raw metadata.
+
+Recommended next research-data change:
+- match upstream live export rows onto existing canonical alerts;
+- enrich existing rows (do not insert duplicates) with `bk_spread_price`, `bk_spread_source`, `bk_ml_source`, `bk_ts`, `bk_name`, source/live flags, active conditions, consensus/basis and raw record;
+- then rerun DK-vs-PM gap analysis using only source-confirmed live bookmaker quotes and known juice.
+
+This should precede strong conclusions from the historical BK-gap strategy.
+
+### Current strategy interpretation
+
+Earlier broad Polymarket spread scan remains the higher-volume candidate family:
+- +2.5-or-better <=55-60c: 68-76 independent positions with positive train, final holdout and fixed walk-forward in the historical proxy-price test.
+- +5.5-or-better <=60c: lower volume but also positive across all four fixed OOS blocks.
+
+However, historical Polymarket prices are still ~1-minute proxy prices. Issue #15 forward executable order-book capture remains required before any live-spread strategy is treated as executable edge.
