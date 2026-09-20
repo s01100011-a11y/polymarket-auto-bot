@@ -613,3 +613,67 @@ Implementation:
 - Commit `7ebc896864b14ee96fa274e499af6086a56fc958`: full-feed spread/price rules.
 - Research deployment `2a444968-3a94-4ebe-8710-3fe21b8cf3f2` reached SUCCESS.
 - One-off `PW_SPREAD_BACKTEST_ENABLED` returned to false.
+
+
+## 2026-09-20 — Deduplicated chronological spread robustness validation (#14)
+
+Added a stricter robustness pass after the full-feed in-sample spread results.
+
+Method:
+- Universe: all 1,361 matched graded PW calls with usable historical Polymarket spread history.
+- Candidate rules: +6.5/+7.5/+8.5 targets crossed with <=50c, <=55c, 50-55c, and <=60c price bands (12 configs).
+- Deduplication: for each candidate rule, only the FIRST qualifying PW signal for each game/team can create a position. Repeated PW calls on the same team in the same game do not create additional trades.
+- Game-level chronology: 147 games with usable event timestamps, first 70% (102 games) train, final 30% (45 games) untouched holdout.
+- Walk-forward: expanding 60/10, 70/10, 80/10, 90/10 chronological folds; each fold chooses the highest-training-ROI candidate with at least 10 training trades, then evaluates only the next unseen game block.
+- Settlement strategy: hold spread share to resolution.
+- Entry-friction stress: reprice holdout entries 0.5c and 1.0c worse; no exit friction because the simulated strategy settles rather than sells.
+- Historical price source remains approximate Polymarket prices-history (~1-minute proxy), not historical executable bid/ask/depth.
+
+Key fixed-config 70/30 results after one-position-per-game/team dedup:
+
++6.5:
+- <=50c: 23 all trades, +14.95% all-sample ROI; train 16 trades -8.19%; holdout 7 trades +67.85%.
+- <=55c: 34 all, +24.43%; train 26 +19.38%; holdout 8 +40.86%; stress +39.24% at +0.5c and +37.65% at +1c.
+- 50-55c: 28 all, +29.49%; train 21 +36.28%; holdout 7 +9.13%; stress +8.10% / +7.08%.
+- <=60c: 39 all, +28.58%; train 28 +20.58%; holdout 11 +48.92%; stress +47.34% / +45.80%.
+
++7.5:
+- <=50c: 18 all, +3.89%; train 13 -4.10%; holdout 5 +24.65%.
+- <=55c: 27 all, +14.09%; train 22 +13.16%; holdout 5 +18.19%.
+- 50-55c: 23 all, +24.11%; train 19 +29.99%; holdout 4 -3.81%.
+- <=60c: 32 all, +20.32%; train 25 +18.17%; holdout 7 +27.99%; stress +26.85% / +25.73%.
+
++8.5:
+- <=50c: 13 all, +12.45%; train 10 +24.68%; holdout 3 -28.32%.
+- <=55c: 18 all, +29.74%; train 14 +39.32%; holdout 4 -3.81%.
+- 50-55c: 16 all, +42.77%; train 12 +58.30%; holdout 4 -3.81%.
+- <=60c: 23 all, +35.28%; train 17 +40.55%; holdout 6 +20.34%; stress +19.26% / +18.20%.
+
+Train-selected holdout:
+- The rule selected solely from the first 70% was +8.5 at 50-55c.
+- Training: 12 trades, 10-2, +58.30% ROI.
+- Untouched final 30%: 4 trades, 2-2, -$15.24, -3.81% ROI.
+- Stress: -4.73% at +0.5c adverse entry; -5.63% at +1c.
+- This candidate therefore FAILED the train-selected holdout test despite its strong in-sample/full-feed result.
+
+Expanding walk-forward:
+- Every fold selected +8.5 at 50-55c from prior training data.
+- Fold 1: 2 OOS trades, 1-1, -9.09%.
+- Fold 2: 1 OOS trade, 0-1, -100%.
+- Fold 3: 1 OOS trade, 0-1, -100%.
+- Fold 4: 2 OOS trades, 2-0, +92.38%.
+- Aggregate OOS: 6 trades, 3-3, -$33.42, -5.57% ROI.
+- Entry stress: -6.45% at +0.5c and -7.32% at +1c.
+
+Interpretation:
+- Repeated-call correlation materially inflated the apparent sample sizes in the earlier signal-level results.
+- The headline +8.5 / 50-55c rule did not survive chronological selection and OOS validation.
+- Several fixed wider-cap rules remain positive on both train and final holdout, especially +6.5 <=55c/<=60c, +7.5 <=60c, and +8.5 <=60c. However, final holdout samples are only 5-11 trades, so these are promising hypotheses, not established executable edges.
+- The strongest fixed holdout by sample size was +6.5 <=60c: train 28 trades +20.58%, holdout 11 trades +48.92%, with positive 0.5c/1c stress. This rule was NOT selected by the train-only optimizer because +8.5 / 50-55c had a much higher training ROI, demonstrating selection-overfit risk.
+- More forward data / natural executable order-book captures are needed before live automation.
+
+Implementation / ops:
+- Commit `9deef3112bffcf415206175fa74caba2b45b7d9d`: add event timestamps, game/team dedup, fixed-config chronological split, train-selected holdout, expanding walk-forward, and settlement entry-friction stress.
+- Research deployment `09fb33e6-099d-4352-916a-236e94788049` reached SUCCESS and completed the 151-game scan.
+- One-off `PW_SPREAD_BACKTEST_ENABLED` returned to `false`.
+- Research only. No live execution path, sizing, routing, dashboard live-control, or real-money setting was changed.
