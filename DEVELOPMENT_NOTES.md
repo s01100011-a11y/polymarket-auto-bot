@@ -510,3 +510,52 @@ Implementation:
 - Commit `6cce44cc6aa3bacf899093e98667a4969e8d89c2`: add all-underdog target/price-cap strategy audit.
 - Research deployment `a4309b00-0ed5-4e6e-aec0-bf67226bbddd` reached SUCCESS.
 - One-off `PW_SPREAD_BACKTEST_ENABLED` returned to `false`.
+
+
+## 2026-09-20 — Plus-money Polymarket spread audit vs BK live spread (#14)
+
+Extended the all-underdog spread audit to explicitly test plus-money spread prices and compare them with the stored DraftKings BK live spread at the PW signal time.
+
+Scope:
+- 313 matched PW underdog signals across 88 unique games.
+- Targets: +6.5 or better, +7.5 or better, +8.5 or better.
+- Price bands: <=50c (plus money), <=40c (~+150 or better), <=33.33c (~+200 or better), <=25c (~+300 or better).
+- Strategy selection remains deterministic: buy the largest eligible positive spread at/above target under the price cap and hold to settlement.
+- BK comparison uses the alert's stored `bk_spread` field.
+
+Key results:
+
++6.5 or better:
+- <=50c: 50 trades / 22 games, 25-25, +$538.08, +10.76% ROI, avg entry 45.92c, avg line +8.50.
+- <=40c (~+150+): 16 trades / 10 games, 6-10, +$83.54, +5.22% ROI, avg entry 35.16c, avg line +7.38.
+  - BK spread present on 6; BK live spread was higher than Polymarket line on 5, equal on 1, lower on 0; avg BK-minus-Poly gap +2.5 points.
+- <=33.33c (~+200+): 4 trades / 3 games, 0-4, -$400, -100% ROI, avg entry 29.5c, avg line +7.5.
+  - BK spread present on 2; BK higher than Poly on 1, equal on 1.
+- <=25c (~+300+): 0 trades.
+
++7.5 or better:
+- <=50c: 41 trades / 17 games, 18-23, -$313.02, -7.63% ROI, avg entry 47.05c, avg line +8.94.
+- <=40c (~+150+): 11 trades / 7 games, 2-9, -$519.80, -47.25% ROI, avg entry 34.59c, avg line +7.77.
+  - BK spread present on 4; BK higher than Poly on 3, equal on 1, lower on 0; avg gap +1.75 points.
+- <=33.33c (~+200+): 4 trades / 3 games, 0-4, -$400, -100% ROI, avg entry 29.5c, avg line +7.5.
+  - Same four signals as the +6.5 target because the selected line was +7.5.
+- <=25c (~+300+): 0 trades.
+
++8.5 or better:
+- <=50c: 27 trades / 12 games, 16-11, +$678.77, +25.14% ROI, avg entry 46.85c, avg line +9.69.
+- <=40c (~+150+): only 2 trades / 2 games, 2-0, +$380.20, +190.1% ROI, avg entry 34.5c, avg line +9.0.
+  - BK spread present on 1; BK live spread was 3 points higher than the selected Polymarket spread.
+- <=33.33c (~+200+): 0 trades.
+- <=25c (~+300+): 0 trades.
+
+Interpretation:
+- True +200-or-better spread opportunities were extremely rare: 4 PW signals total, all at +7.5, across only 3 games; all four lost in-sample.
+- The more interesting market-dislocation zone is around +150-or-better (<=40c), where BK live spread was usually higher than the selected Polymarket spread when BK data existed. That supports the user's intuition that the smaller Polymarket cushion can pay materially better odds when DraftKings' live line has moved further out.
+- +8.5-or-better at <=40c occurred only twice, so the 2-0 result is far too small to treat as an edge.
+- At generic plus-money prices <=50c, +8.5-or-better remained the strongest of these tiers in this in-sample backtest, while +7.5-or-better was negative.
+- Historical prices-history is approximate 1-minute proxy pricing, not historical executable bid/ask/depth.
+
+Implementation:
+- Commit `a985cbb54fc4c311172ed0482de3d9a00fe4f5d6`: add plus-money price bands and BK-vs-Polymarket live-spread comparisons.
+- Research deployment `d24d0841-0072-4dfe-9c12-6454f3d9f795` reached SUCCESS.
+- One-off `PW_SPREAD_BACKTEST_ENABLED` returned to `false`.
