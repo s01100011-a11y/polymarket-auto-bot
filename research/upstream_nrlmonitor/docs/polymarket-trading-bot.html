@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polymarket Trading Bot — Requirements &amp; Investigation</title>
+<style>
+:root{
+  --paper:#F1F3EE;--paper-2:#E7EAE4;--ink:#16211C;--ink-2:#33423A;
+  --muted:#5D6B62;--rule:#CBD2C8;
+  --critical:#A3231C;--high:#C98A00;--medium:#2C6E8F;--low:#6B7A6F;
+  --green:#2E7D32;--accent:#C97D1A;
+  --display:-apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  --body:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);font-size:17px;line-height:1.62}
+.wrap{max-width:64rem;margin:0 auto;padding:0 1.5rem 6rem}
+.mast{border-bottom:3px solid var(--ink);padding:3rem 0 1.2rem;margin-bottom:2rem}
+.eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin:0 0 .8rem}
+h1{font-family:var(--display);font-weight:800;letter-spacing:-.035em;line-height:.98;font-size:clamp(2.2rem,6vw,3.6rem);margin:0 0 .5rem}
+.sub{font-size:1.05rem;color:var(--ink-2);margin:0;max-width:54ch}
+.meta{font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-top:1.2rem;display:flex;flex-wrap:wrap;gap:.4rem 1.6rem}
+h2{font-family:var(--display);font-weight:800;letter-spacing:-.025em;font-size:clamp(1.4rem,3.4vw,2rem);line-height:1.1;margin:3.5rem 0 .3rem;padding-top:1.2rem;border-top:1px solid var(--rule)}
+h2 .num{font-family:var(--mono);font-size:.66rem;font-weight:400;letter-spacing:.16em;color:var(--muted);display:block;margin-bottom:.6rem}
+.lede{color:var(--ink-2);margin:.4rem 0 1.8rem;max-width:56ch}
+h3{font-family:var(--display);font-weight:700;font-size:1.05rem;letter-spacing:-.01em;margin:2rem 0 .5rem}
+h4{font-family:var(--display);font-weight:700;font-size:.95rem;margin:1.4rem 0 .4rem}
+p{margin:0 0 1rem}
+ul,ol{padding-left:1.25rem;margin:.5rem 0 1.2rem}
+li{margin-bottom:.45rem}
+code{font-family:var(--mono);font-size:.85em;background:var(--paper-2);padding:.08em .32em;border-radius:2px}
+pre{font-family:var(--mono);font-size:.76rem;line-height:1.5;background:var(--ink);color:#DCE4DC;padding:.9rem 1rem;overflow-x:auto;margin:.8rem 0;border-radius:2px}
+pre code{background:none;padding:0;color:inherit;font-size:1em}
+table{width:100%;border-collapse:collapse;margin:1rem 0 1.8rem;font-size:.88rem}
+th,td{text-align:left;padding:.5rem .65rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--mono);font-size:.63rem;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);font-weight:400;border-bottom:2px solid var(--ink)}
+td.k{font-family:var(--mono);font-size:.76rem;white-space:nowrap}
+td.num{font-family:var(--mono);font-size:.78rem;text-align:right}
+tbody tr:hover{background:var(--paper-2)}
+a{color:var(--medium)}
+
+.sev{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;padding:.15rem .45rem;border:1px solid currentColor;border-radius:2px;display:inline-block;margin-right:.4rem}
+.sev.critical{color:var(--critical)}.sev.high{color:var(--high)}.sev.medium{color:var(--medium)}.sev.low{color:var(--low)}.sev.done{color:var(--green);border-color:var(--green)}
+.phase{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;padding:.15rem .45rem;border:1px solid var(--accent);color:var(--accent);border-radius:2px;display:inline-block;margin-right:.4rem}
+
+.finding{border:1px solid var(--rule);background:#fff;margin:0 0 1.2rem;display:grid;grid-template-columns:5px 1fr}
+.finding .bar{background:var(--low)}
+.finding.critical .bar{background:var(--critical)}
+.finding.high .bar{background:var(--high)}
+.finding.medium .bar{background:var(--medium)}
+.finding .body{padding:1rem 1.2rem}
+.finding h4{font-family:var(--display);font-weight:700;font-size:1rem;margin:0 0 .4rem}
+.finding p{margin:0 0 .6rem;font-size:.94rem}
+.finding p:last-child{margin-bottom:0}
+.finding .fix{border-top:1px dashed var(--rule);padding-top:.6rem;margin-top:.7rem;font-size:.92rem;color:var(--ink-2)}
+
+.ledger{display:grid;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);margin:0 0 2.5rem}
+.ledger div{background:var(--paper);padding:.8rem 1rem}
+.ledger .n{font-family:var(--display);font-weight:800;font-size:2rem;line-height:1;display:block}
+.ledger .l{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);display:block;margin-top:.35rem}
+
+.toc{background:var(--paper-2);border:1px solid var(--rule);padding:1.2rem 1.4rem;margin:0 0 1rem}
+.toc ol{columns:2;column-gap:2rem;margin:0;padding-left:1rem;font-size:.92rem}
+.toc li{margin-bottom:.3rem;break-inside:avoid}
+.toc a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
+
+.note{border:1px solid var(--rule);border-left:5px solid var(--high);background:#fff;padding:1rem 1.2rem;margin:1.5rem 0;font-size:.94rem}
+.note h4{font-family:var(--display);font-weight:700;font-size:.95rem;margin:0 0 .4rem}
+.note.ok{border-left-color:var(--green)}
+.note.critical{border-left-color:var(--critical)}
+
+.arch{background:var(--ink);color:#DCE4DC;font-family:var(--mono);font-size:.74rem;line-height:1.6;padding:1.2rem 1.5rem;overflow-x:auto;margin:1rem 0 1.5rem;border-radius:2px;white-space:pre}
+
+footer{margin-top:4rem;padding-top:1rem;border-top:3px solid var(--ink);font-family:var(--mono);font-size:.68rem;color:var(--muted)}
+
+@media(max-width:620px){body{font-size:16px}.toc ol{columns:1}.ledger{grid-template-columns:repeat(2,1fr)}}
+@media print{
+  @page{margin:14mm 12mm}html,body{background:#fff;color:#000;font-size:10.5pt}
+  .wrap{max-width:none;padding:0}.mast{padding-top:0}h1{font-size:24pt}h2{font-size:13pt;margin-top:1.4rem}
+  .finding,.note,table,pre,.ledger{page-break-inside:avoid;break-inside:avoid}
+  .finding{border:.5pt solid #000}.finding .bar{background:#000!important}
+  .ledger div,.toc,.note{background:#fff}pre{background:#fff;color:#000;border:.5pt solid #666}
+  a{color:#000}.toc{display:none}footer{border-top-width:2pt}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ═══════════════════════════════════════════════ MASTHEAD ═══ -->
+<header class="mast">
+<p class="eyebrow">NBA Monitor &middot; Investigation &amp; Requirements</p>
+<h1>Automated Polymarket Trading Bot for PW Calls</h1>
+<p class="sub">A signal-to-execution pipeline that converts Predicted Winner calls into Polymarket game-winner positions, with edge-gated sizing, risk controls, and full P&amp;L tracking.</p>
+<div class="meta">
+  <span>Issue: <a href="https://github.com/bobcheong/NBAMonitor/issues/214">#214</a></span>
+  <span>Status: Investigation</span>
+  <span>Document: Rev 1</span>
+  <span>Date: 2026-07-27</span>
+  <span>Leagues: NBA, WNBA</span>
+</div>
+</header>
+
+<!-- ═══════════════════════════════════════════ TOC ═══ -->
+<nav class="toc">
+<ol>
+  <li><a href="#s1">Executive Summary</a></li>
+  <li><a href="#s2">PW Signal Quality Assessment</a></li>
+  <li><a href="#s3">Polymarket Platform Analysis</a></li>
+  <li><a href="#s4">System Architecture</a></li>
+  <li><a href="#s5">Signal Relay (Monitor Side)</a></li>
+  <li><a href="#s6">Trading Bot (Remote Side)</a></li>
+  <li><a href="#s7">Edge Evaluation &amp; Sizing</a></li>
+  <li><a href="#s8">Risk Management</a></li>
+  <li><a href="#s9">Hosting &amp; Infrastructure</a></li>
+  <li><a href="#s10">Geo-Restriction &amp; Legal</a></li>
+  <li><a href="#s11">Paper Trading Phase</a></li>
+  <li><a href="#s12">Implementation Phases</a></li>
+  <li><a href="#s13">Open Questions &amp; Risks</a></li>
+  <li><a href="#s14">Dependencies &amp; Costs</a></li>
+</ol>
+</nav>
+
+
+<!-- ═══════════════════════════════════════════ 1. EXECUTIVE SUMMARY ═══ -->
+<h2 id="s1"><span class="num">01</span>Executive Summary</h2>
+<p class="lede">Build an automated trading pipeline that receives PW (Predicted Winner) signals from the NBA/WNBA monitor and places orders on Polymarket game-winner markets when the signal shows positive edge against the market price.</p>
+
+<div class="ledger">
+  <div><span class="n">~70%</span><span class="l">PW call accuracy</span></div>
+  <div><span class="n">2%</span><span class="l">NBA live-priced calls</span></div>
+  <div><span class="n">30s</span><span class="l">Signal latency</span></div>
+  <div><span class="n">5</span><span class="l">Implementation phases</span></div>
+  <div><span class="n">$0&ndash;12</span><span class="l">Monthly infra cost</span></div>
+  <div><span class="n">2</span><span class="l">Leagues (NBA + WNBA)</span></div>
+</div>
+
+<h3>Core Thesis</h3>
+<p>PW calls predict the game winner with ~70% accuracy. Polymarket game-winner markets price outcomes as probabilities. When a PW call fires at 75% confidence and the market prices the same outcome at 60%, there is a theoretical 15-point edge. The bot would buy YES tokens at $0.60 for a predicted $0.75 fair value.</p>
+
+<div class="note">
+<h4>Critical caveat: backfill-derived ROI</h4>
+<p>98% of NBA PW calls (262 of 15,477) have live-priced bookmaker odds. The remaining 98% are backfill-derived with synthetic odds. Historical ROI figures may not reflect achievable live trading returns. WNBA has 37% live-priced calls. A rigorous paper-trading phase is essential before any real capital deployment.</p>
+</div>
+
+
+<!-- ═══════════════════════════════════════════ 2. PW SIGNAL QUALITY ═══ -->
+<h2 id="s2"><span class="num">02</span>PW Signal Quality Assessment</h2>
+<p class="lede">Understanding the signal we would be trading on &mdash; its accuracy, calibration, latency, and known biases.</p>
+
+<h3>Accuracy Profile</h3>
+<table>
+<thead><tr><th>Metric</th><th>NBA</th><th>WNBA</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Overall PW accuracy</td><td class="num">~70%</td><td class="num">~68%</td><td>Game-winner correct rate across all calls</td></tr>
+<tr><td>Live-priced calls</td><td class="num">262 (2%)</td><td class="num">~37%</td><td>Calls with genuine BK odds at fire time</td></tr>
+<tr><td>BK ML ROI (live)</td><td class="num">Needs eval</td><td class="num">Needs eval</td><td>Only meaningful on live-priced subset</td></tr>
+<tr><td>Calls per game</td><td class="num">3&ndash;8</td><td class="num">2&ndash;6</td><td>Multiple fires per game, dedup required</td></tr>
+<tr><td>Avg confidence at fire</td><td class="num">~72%</td><td class="num">~70%</td><td>Blended ML + Bayesian</td></tr>
+</tbody>
+</table>
+
+<h3>Signal Characteristics</h3>
+<ul>
+  <li><strong>Multi-fire deduplication:</strong> PW fires multiple times per game (every poll cycle where conditions are met). The first fire in a game carries the most edge; subsequent fires on the same team are confirmations with diminishing marginal value. Only the first fire per game should trigger a trade.</li>
+  <li><strong>Consensus types:</strong> <code>strong</code> (ML + historical agree), <code>ml_only</code>, <code>historical_only</code>, <code>conflicted</code>. Strong consensus calls have higher accuracy and should receive larger position sizes.</li>
+  <li><strong>Quarter weighting:</strong> Q1 calls (0.85x) are discounted vs Q3/Q4 calls (1.0&ndash;1.10x). Earlier calls have more time for edge to materialise but lower confidence.</li>
+  <li><strong>Margin gates:</strong> PW is suppressed when trailing by &gt;15 (general) or &gt;10 (late game). These gates prevent chasing lost causes.</li>
+  <li><strong>Edge gate:</strong> Average condition edge must exceed <code>pw_edge_gate</code> threshold. Calls with higher edge tend to be more reliable.</li>
+</ul>
+
+<h3>Known Biases &amp; Limitations</h3>
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="sev high">high</span> Backfill contamination in ROI metrics</h4>
+<p>98% of NBA PW calls use synthetic/backfill odds. Historical ROI computed from these calls reflects model fit to historical data, not live trading edge. Polymarket prices will differ from both BK odds and synthetic odds.</p>
+<div class="fix"><strong>Mitigation:</strong> Paper-trade for 50+ games using live Polymarket prices before deploying capital. Only evaluate ROI on the live-priced subset (262 NBA calls) for realistic expectations.</div>
+</div>
+</div>
+
+<div class="finding medium">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="sev medium">medium</span> PW confidence is not a calibrated probability</h4>
+<p>PW's blended confidence percentage is a weighted combination of ML prediction, Bayesian posteriors, quarter weights, and margin boosts. It is not calibrated to true outcome probability. A call at 75% confidence does not mean the team wins 75% of the time.</p>
+<div class="fix"><strong>Mitigation:</strong> During paper trading, build a calibration curve mapping PW confidence bands to observed win rates. Use the calibrated probability (not raw confidence) for edge calculation against Polymarket prices.</div>
+</div>
+</div>
+
+<div class="finding medium">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="sev medium">medium</span> Latency: 30s poll cycle + webhook transit</h4>
+<p>PW signals arrive with ~30s granularity (monitor poll cycle) plus webhook delivery time to the remote bot. Polymarket game-winner markets move slowly (not HFT), but a 30&ndash;60 second delay means the market may have already moved on the same information (score change, momentum shift).</p>
+<div class="fix"><strong>Mitigation:</strong> Fetch Polymarket price at order time and re-evaluate edge. Reject trades where edge has decayed below threshold since signal generation.</div>
+</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════ 3. POLYMARKET PLATFORM ═══ -->
+<h2 id="s3"><span class="num">03</span>Polymarket Platform Analysis</h2>
+<p class="lede">Technical details of the Polymarket CLOB, market structure, and SDK capabilities relevant to automated NBA/WNBA game-winner trading.</p>
+
+<h3>Market Structure</h3>
+<table>
+<thead><tr><th>Aspect</th><th>Detail</th></tr></thead>
+<tbody>
+<tr><td class="k">Market type</td><td>Binary outcome (Team A wins YES/NO). Each game has two complementary markets.</td></tr>
+<tr><td class="k">Slug pattern</td><td><code>nba-{away}-{home}-{YYYY-MM-DD}</code> / <code>wnba-{away}-{home}-{YYYY-MM-DD}</code></td></tr>
+<tr><td class="k">Token price</td><td>$0.00&ndash;$1.00 per share. Price = implied probability. YES at $0.65 = 65% implied.</td></tr>
+<tr><td class="k">Settlement</td><td>Winning tokens pay $1.00. Losing tokens pay $0.00. Settled after game final.</td></tr>
+<tr><td class="k">Currency</td><td>USDC on Polygon (MATIC). Deposits via Polygon bridge or direct funding.</td></tr>
+<tr><td class="k">Fees</td><td>Maker: 0%. Taker: ~2% of notional. Rewards offset fees for active traders.</td></tr>
+<tr><td class="k">Order types</td><td>Limit orders (GTC, FOK, IOC). No market orders &mdash; use aggressive limit with slippage.</td></tr>
+<tr><td class="k">Min order</td><td>$1 USDC notional minimum.</td></tr>
+</tbody>
+</table>
+
+<h3>APIs</h3>
+<table>
+<thead><tr><th>API</th><th>Auth</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td class="k">Gamma API</td><td>None (public)</td><td>Market discovery, metadata, slugs, token IDs, event resolution status</td></tr>
+<tr><td class="k">CLOB REST</td><td>API key + L1/L2 headers</td><td>Order book, price data, order placement, position queries, trade history</td></tr>
+<tr><td class="k">CLOB WebSocket</td><td>None (public)</td><td>Real-time order book updates, trade stream</td></tr>
+</tbody>
+</table>
+
+<h3>SDK: <code>py-clob-client</code></h3>
+<ul>
+  <li>Official Python SDK: <a href="https://github.com/Polymarket/py-clob-client">py-clob-client</a> (v2 available)</li>
+  <li>Pure Python + <code>eth-account</code> for signing &mdash; no native dependencies except <code>bitarray</code> (has ARM wheels)</li>
+  <li>Handles API key generation, order signing (EIP-712), nonce management</li>
+  <li>Supports limit orders with price, size, side (BUY/SELL), time-in-force</li>
+  <li>ARM (aarch64) compatible &mdash; verified for Oracle Cloud free tier</li>
+</ul>
+
+<h3>NBA/WNBA Market Liquidity</h3>
+<div class="note">
+<h4>Liquidity investigation needed</h4>
+<p>Before implementation, a systematic survey of NBA and WNBA game-winner markets is required to establish:</p>
+<ul>
+  <li>Typical bid-ask spread for NBA games (expected: 1&ndash;3 cents)</li>
+  <li>Typical order book depth at various price levels</li>
+  <li>WNBA market liquidity (expected: significantly thinner than NBA)</li>
+  <li>How quickly prices move after tip-off vs pre-game</li>
+  <li>Whether in-game (live) trading is supported or markets close at tip-off</li>
+</ul>
+</div>
+
+
+<!-- ═══════════════════════════════════════════ 4. ARCHITECTURE ═══ -->
+<h2 id="s4"><span class="num">04</span>System Architecture</h2>
+<p class="lede">Two-node architecture: the existing AU-based monitor generates signals; a remote trading bot in an unrestricted jurisdiction executes trades.</p>
+
+<div class="arch">
+AU Server (monitor.py)                        Remote VPS (trading bot)
+&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;                   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+&#9474; PW call fires                      &#9474;                   &#9474; 1. Webhook listener (HTTPS)         &#9474;
+&#9474;   predicted_team, game_id          &#9474;&#9472;&#9472;&#9472;HTTPS POST&#9472;&#9472;&#9472;&#9654; &#9474; 2. Market resolver (Gamma API)       &#9474;
+&#9474;   confidence_pct, quarter          &#9474;   (HMAC-signed)    &#9474; 3. Price check (CLOB orderbook)      &#9474;
+&#9474;   margin, consensus, edge          &#9474;                   &#9474; 4. Edge evaluation (calibrated)      &#9474;
+&#9474;   home_team, away_team, date       &#9474;                   &#9474; 5. Order placement (py-clob-client)  &#9474;
+&#9474;                                    &#9474;                   &#9474; 6. Position tracking + P&amp;L           &#9474;
+&#9474; save_state() &#9472;&#9654; .alert_state.json &#9474;                   &#9474; 7. Auto-exit at game end            &#9474;
+&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;                   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
+                                                            &#9474;
+                                                   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9524;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+                                                   &#9474;  Polymarket CLOB API         &#9474;
+                                                   &#9474;  (Polygon / USDC)             &#9474;
+                                                   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</div>
+
+<h3>Design Principles</h3>
+<ol>
+  <li><strong>Separation of concerns:</strong> Monitor generates signals; bot evaluates and executes. Monitor has zero knowledge of trading state or wallet.</li>
+  <li><strong>Fail-safe defaults:</strong> If the bot is unreachable, signals are dropped (no queuing). If edge evaluation fails, no trade is placed. If Polymarket is unreachable, position is held to settlement.</li>
+  <li><strong>Idempotent signals:</strong> Multiple PW fires for the same team in the same game produce duplicate webhooks. Bot must deduplicate by <code>(game_id, predicted_team)</code> and only trade on the first signal.</li>
+  <li><strong>No shared state:</strong> The trading bot is a standalone service. It does not read monitor state files. All context arrives via the webhook payload.</li>
+  <li><strong>Audit trail:</strong> Every signal received, edge evaluation, order placed, fill received, and P&amp;L outcome is logged with full context for post-hoc analysis.</li>
+</ol>
+
+
+<!-- ═══════════════════════════════════════════ 5. SIGNAL RELAY ═══ -->
+<h2 id="s5"><span class="num">05</span>Signal Relay (Monitor Side)</h2>
+<p class="lede">Changes required in <code>monitor.py</code> to emit PW signals to the trading bot.</p>
+
+<h3>Webhook Payload</h3>
+<p>On every PW call fire (after <code>save_state()</code>), POST to the configured webhook URL:</p>
+
+<pre><code>{
+  "signal_id": "pw_401810887_Q2_1722038400",
+  "game_id": "401810887",
+  "league": "nba",
+  "home_team": "Boston Celtics",
+  "away_team": "Los Angeles Lakers",
+  "home_team_abbr": "BOS",
+  "away_team_abbr": "LAL",
+  "game_date": "2026-11-15",
+  "predicted_team": "Boston Celtics",
+  "predicted_team_id": "2",
+  "confidence_pct": 74.2,
+  "consensus": "strong",
+  "blended": true,
+  "quarter": "Q2",
+  "game_minute": 18,
+  "score_margin_at_fire": 8,
+  "home_score_at_fire": 48,
+  "away_score_at_fire": 40,
+  "spread_role": "favorite",
+  "moneyline": "-150",
+  "spread": "-3.5",
+  "avg_edge": 12.4,
+  "polarity_net": 2,
+  "active_conditions_count": 3,
+  "bk_moneyline": "-180",
+  "bk_spread": "-5.5",
+  "ts": "2026-11-15T02:30:00Z",
+  "hmac": "sha256=abcdef1234567890..."
+}</code></pre>
+
+<h3>Config Fields</h3>
+<table>
+<thead><tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td class="k">polymarket_webhook_url</td><td>string</td><td><code>""</code></td><td>HTTPS endpoint on trading bot. Empty = disabled.</td></tr>
+<tr><td class="k">polymarket_webhook_secret</td><td>string</td><td><code>""</code></td><td>HMAC-SHA256 shared secret for payload signing.</td></tr>
+<tr><td class="k">polymarket_webhook_timeout</td><td>int</td><td><code>5</code></td><td>HTTP timeout in seconds. Must not block monitor cycle.</td></tr>
+<tr><td class="k">polymarket_min_confidence</td><td>float</td><td><code>65.0</code></td><td>Minimum PW confidence to relay. Below this, signal is not sent.</td></tr>
+<tr><td class="k">polymarket_consensus_filter</td><td>list</td><td><code>["strong","blended"]</code></td><td>Only relay signals with these consensus types.</td></tr>
+</tbody>
+</table>
+
+<h3>Implementation Notes</h3>
+<ul>
+  <li>Webhook POST is fire-and-forget with a short timeout. Failures are logged but do not retry (next poll cycle will fire again if conditions persist).</li>
+  <li>HMAC signature covers the full JSON body: <code>hmac = HMAC-SHA256(secret, json_body)</code>, sent as <code>X-Signature</code> header.</li>
+  <li>The <code>signal_id</code> is deterministic: <code>pw_{game_id}_{quarter}_{unix_ts}</code>. The bot uses <code>(game_id, predicted_team)</code> for dedup.</li>
+  <li>Webhook URL and secret are git-ignored (in <code>config.json</code>).</li>
+</ul>
+
+
+<!-- ═══════════════════════════════════════════ 6. TRADING BOT ═══ -->
+<h2 id="s6"><span class="num">06</span>Trading Bot (Remote Side)</h2>
+<p class="lede">The trading bot is a separate service that receives PW signals, evaluates edge against Polymarket prices, and places orders.</p>
+
+<h3>Components</h3>
+<table>
+<thead><tr><th>Component</th><th>Responsibility</th></tr></thead>
+<tbody>
+<tr><td class="k">Webhook listener</td><td>HTTPS endpoint (Flask/FastAPI). Validates HMAC signature, parses payload, enqueues signal.</td></tr>
+<tr><td class="k">Market resolver</td><td>Constructs Polymarket slug from game metadata. Queries Gamma API for token IDs. Caches per game date.</td></tr>
+<tr><td class="k">Price fetcher</td><td>Queries CLOB orderbook for current best bid/ask on the predicted team's YES token.</td></tr>
+<tr><td class="k">Edge evaluator</td><td>Compares calibrated PW probability against Polymarket implied probability. Computes expected value.</td></tr>
+<tr><td class="k">Order manager</td><td>Places limit BUY orders via <code>py-clob-client</code>. Tracks order status (open/filled/cancelled).</td></tr>
+<tr><td class="k">Position tracker</td><td>Maintains current positions per game. Computes unrealised P&amp;L from current prices.</td></tr>
+<tr><td class="k">Settlement monitor</td><td>Polls Gamma API for game resolution. Records final P&amp;L on settlement.</td></tr>
+<tr><td class="k">Trade logger</td><td>JSONL append-only log of all signals, evaluations, orders, fills, and settlements.</td></tr>
+</tbody>
+</table>
+
+<h3>Market Resolution Logic</h3>
+<pre><code># Slug construction
+def polymarket_slug(league, home_team, away_team, game_date):
+    """
+    Polymarket slug pattern:
+      nba-{away_slug}-{home_slug}-{YYYY-MM-DD}
+      wnba-{away_slug}-{home_slug}-{YYYY-MM-DD}
+
+    Team slugs: lowercase, hyphens for spaces,
+    drop "the" prefix, handle edge cases (76ers, trail-blazers)
+    """
+    away_slug = slugify(away_team)
+    home_slug = slugify(home_team)
+    return f"{league}-{away_slug}-{home_slug}-{game_date}"
+
+# Query Gamma API for token IDs
+GET https://gamma-api.polymarket.com/markets?slug={slug}
+  -> condition_id, token_ids (YES token for each team)</code></pre>
+
+<h3>Order Placement Flow</h3>
+<ol>
+  <li>Receive webhook &rarr; validate HMAC &rarr; parse signal</li>
+  <li>Dedup check: skip if <code>(game_id, predicted_team)</code> already traded</li>
+  <li>Resolve market: slug &rarr; Gamma API &rarr; token ID for predicted team YES</li>
+  <li>Fetch orderbook: CLOB API &rarr; best ask price for YES token</li>
+  <li>Edge evaluation: calibrated PW probability vs ask price (see Section 7)</li>
+  <li>If edge &ge; threshold: compute position size (see Section 8)</li>
+  <li>Place limit BUY at best ask + slippage allowance (e.g., +$0.01)</li>
+  <li>Monitor fill status. If unfilled after 60s, cancel and log.</li>
+  <li>On fill: record position in state file. Begin settlement monitoring.</li>
+</ol>
+
+
+<!-- ═══════════════════════════════════════════ 7. EDGE EVALUATION ═══ -->
+<h2 id="s7"><span class="num">07</span>Edge Evaluation &amp; Sizing</h2>
+<p class="lede">How to determine whether a PW signal has genuine edge against the Polymarket price, and how much to wager.</p>
+
+<h3>Edge Calculation</h3>
+<pre><code># Raw PW confidence is NOT a calibrated probability.
+# Must map through calibration curve built during paper trading.
+calibrated_prob = calibration_curve.transform(pw_confidence_pct / 100)
+
+# Polymarket implied probability = ask price
+market_prob = polymarket_ask_price  # e.g., 0.62
+
+# Edge = calibrated probability - market probability
+edge = calibrated_prob - market_prob  # e.g., 0.73 - 0.62 = 0.11
+
+# Expected value per $1 risked
+ev = calibrated_prob * (1.0 / market_prob - 1) - (1 - calibrated_prob)
+   # = 0.73 * (1/0.62 - 1) - 0.27
+   # = 0.73 * 0.613 - 0.27
+   # = 0.447 - 0.27 = +0.177 (+17.7% EV)</code></pre>
+
+<h3>Minimum Edge Thresholds</h3>
+<table>
+<thead><tr><th>Parameter</th><th>Recommended</th><th>Rationale</th></tr></thead>
+<tbody>
+<tr><td class="k">min_edge</td><td class="num">0.08 (8pp)</td><td>Covers Polymarket taker fee (~2%) + calibration uncertainty + slippage</td></tr>
+<tr><td class="k">min_ev</td><td class="num">0.05 (5%)</td><td>Minimum expected value to justify the position</td></tr>
+<tr><td class="k">max_price</td><td class="num">0.90</td><td>Don't buy YES tokens above $0.90 (too little upside for the risk)</td></tr>
+<tr><td class="k">min_price</td><td class="num">0.15</td><td>Don't buy YES tokens below $0.15 (likely thin liquidity, high variance)</td></tr>
+</tbody>
+</table>
+
+<h3>Calibration Curve</h3>
+<p>During paper trading, collect (PW confidence, actual outcome) pairs. Fit isotonic regression or Platt scaling to produce a monotonic mapping from raw PW confidence to true win probability. Re-calibrate weekly as more data accumulates.</p>
+
+<div class="note ok">
+<h4>Existing infrastructure</h4>
+<p>The <code>evaluate_model.py</code> module already computes ECE (Expected Calibration Error) and Brier scores. These can be extended to produce the calibration curve. The PW trend system tracks accuracy by confidence band, providing the raw data for calibration.</p>
+</div>
+
+<h3>Position Sizing</h3>
+<p>Use fractional Kelly criterion (half-Kelly recommended for conservative sizing):</p>
+<pre><code># Kelly fraction
+f_kelly = edge / (1 / market_prob - 1)
+         = (calibrated_prob - market_prob) / (1 - market_prob)
+
+# Half-Kelly for safety
+f_half_kelly = f_kelly / 2
+
+# Position size
+position_usd = bankroll * f_half_kelly
+
+# Apply caps
+position_usd = min(position_usd, max_bet_per_game)
+position_usd = min(position_usd, max_total_exposure - current_exposure)</code></pre>
+
+<h3>Consensus-Based Multipliers</h3>
+<table>
+<thead><tr><th>Consensus</th><th>Multiplier</th><th>Rationale</th></tr></thead>
+<tbody>
+<tr><td class="k">strong</td><td class="num">1.0x</td><td>ML + historical agree. Full Kelly fraction.</td></tr>
+<tr><td class="k">blended</td><td class="num">0.8x</td><td>Weighted blend. Slightly reduced.</td></tr>
+<tr><td class="k">ml_only</td><td class="num">0.5x</td><td>Only ML model predicts. Historical disagrees or insufficient data.</td></tr>
+<tr><td class="k">historical_only</td><td class="num">0.5x</td><td>Only Bayesian predicts. ML disagrees.</td></tr>
+<tr><td class="k">conflicted</td><td class="num">0.0x</td><td>Do not trade. ML and historical actively disagree.</td></tr>
+</tbody>
+</table>
+
+
+<!-- ═══════════════════════════════════════════ 8. RISK MANAGEMENT ═══ -->
+<h2 id="s8"><span class="num">08</span>Risk Management</h2>
+<p class="lede">Controls to prevent catastrophic loss and ensure the bot operates within defined risk boundaries.</p>
+
+<h3>Position Limits</h3>
+<table>
+<thead><tr><th>Limit</th><th>Recommended</th><th>Configurable</th></tr></thead>
+<tbody>
+<tr><td class="k">max_bet_per_game</td><td class="num">$50</td><td>Yes</td></tr>
+<tr><td class="k">max_total_exposure</td><td class="num">$500</td><td>Yes</td></tr>
+<tr><td class="k">max_daily_loss</td><td class="num">$200</td><td>Yes</td></tr>
+<tr><td class="k">max_concurrent_positions</td><td class="num">10</td><td>Yes</td></tr>
+<tr><td class="k">max_wnba_exposure_pct</td><td class="num">30%</td><td>Yes (WNBA markets thinner)</td></tr>
+</tbody>
+</table>
+
+<h3>Liquidity Guards</h3>
+<ul>
+  <li><strong>Minimum volume:</strong> Skip markets with &lt;$5,000 total volume (likely too thin for reliable execution).</li>
+  <li><strong>Maximum spread:</strong> Skip if bid-ask spread &gt;$0.05 (5 cents). Wide spreads indicate illiquid markets.</li>
+  <li><strong>Depth check:</strong> Ensure sufficient depth at the ask to fill the intended position size without significant slippage.</li>
+  <li><strong>Slippage cap:</strong> Maximum acceptable slippage of $0.02 from quoted ask at signal time.</li>
+</ul>
+
+<h3>Kill Switch</h3>
+<ul>
+  <li><code>trading_enabled: false</code> in bot config &rarr; signals are received, evaluated, and logged, but no orders are placed.</li>
+  <li>Dashboard integration: button to toggle kill switch remotely via Tailscale API.</li>
+  <li>Automatic kill: triggered when daily loss exceeds <code>max_daily_loss</code> or wallet balance falls below <code>min_wallet_balance</code>.</li>
+</ul>
+
+<h3>Failure Modes</h3>
+<table>
+<thead><tr><th>Failure</th><th>Behaviour</th></tr></thead>
+<tbody>
+<tr><td>Webhook delivery fails</td><td>Signal dropped. Next poll cycle retries if conditions persist.</td></tr>
+<tr><td>Market not found on Polymarket</td><td>Log warning, skip trade. Common for pre-season or special games.</td></tr>
+<tr><td>Order rejected by CLOB</td><td>Log error with rejection reason. Do not retry (likely insufficient funds or invalid price).</td></tr>
+<tr><td>Order unfilled after timeout</td><td>Cancel order. Log as "expired". Do not chase.</td></tr>
+<tr><td>Polymarket API down</td><td>Bot enters read-only mode. Existing positions held to settlement. Alert operator.</td></tr>
+<tr><td>Bot process crashes</td><td>Systemd auto-restarts. State file persists open positions. Resumes settlement monitoring.</td></tr>
+<tr><td>Wallet drained (hack/bug)</td><td>Auto-kill triggered by <code>min_wallet_balance</code> check. Alert operator immediately.</td></tr>
+</tbody>
+</table>
+
+
+<!-- ═══════════════════════════════════════════ 9. HOSTING ═══ -->
+<h2 id="s9"><span class="num">09</span>Hosting &amp; Infrastructure</h2>
+<p class="lede">The trading bot must run from a jurisdiction where Polymarket is accessible. Three viable options investigated.</p>
+
+<h3>Option Comparison</h3>
+<table>
+<thead><tr><th>Option</th><th>Spec</th><th>Cost</th><th>Pros</th><th>Cons</th></tr></thead>
+<tbody>
+<tr>
+  <td class="k">Oracle Cloud Free<br>(Singapore)</td>
+  <td>4 ARM / 24GB / 200GB</td>
+  <td class="num">$0/mo</td>
+  <td>Massively overkill specs. Genuinely free forever. ARM compatible (verified).</td>
+  <td>Availability spotty. May reclaim idle instances. ARM not x86.</td>
+</tr>
+<tr>
+  <td class="k">Vultr Singapore<br>(4GB plan)</td>
+  <td>2 vCPU / 4GB / 100GB</td>
+  <td class="num">$12/mo</td>
+  <td>Reliable. Instant provisioning. x86. Can consolidate all services.</td>
+  <td>Monthly cost. Single point of failure if consolidating.</td>
+</tr>
+<tr>
+  <td class="k">Vultr Singapore<br>(2GB plan)</td>
+  <td>1 vCPU / 2GB / 55GB</td>
+  <td class="num">$6/mo</td>
+  <td>Cheapest paid option. Sufficient for bot-only deployment.</td>
+  <td>Tight on RAM if consolidating dashboards. Swap required.</td>
+</tr>
+</tbody>
+</table>
+
+<h3>Recommendation</h3>
+<p><strong>Start with Oracle Cloud free tier (Singapore)</strong>. Fall back to Vultr $12/month if provisioning fails or ARM issues arise. For initial deployment, run only the trading bot on the remote VPS &mdash; keep monitor and dashboards on the existing AU server.</p>
+
+<h3>Consolidated Deployment (Future)</h3>
+<p>All services (NBA/WNBA monitor, dashboards, trading bot) can run on a single $12/month Vultr or free Oracle instance. Measured resource usage:</p>
+<table>
+<thead><tr><th>Component</th><th>RAM</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>NBA dashboard</td><td class="num">~710MB</td><td>Largest consumer (game_history parse)</td></tr>
+<tr><td>WNBA dashboard</td><td class="num">~125MB</td><td>Smaller history</td></tr>
+<tr><td>Monitor (per tick)</td><td class="num">~50&ndash;100MB</td><td>Burst, not sustained</td></tr>
+<tr><td>Trading bot</td><td class="num">~50&ndash;100MB</td><td>Estimated</td></tr>
+<tr><td><strong>Total</strong></td><td class="num"><strong>~1.1GB</strong></td><td>4GB VPS provides comfortable headroom</td></tr>
+</tbody>
+</table>
+
+
+<!-- ═══════════════════════════════════════════ 10. GEO / LEGAL ═══ -->
+<h2 id="s10"><span class="num">10</span>Geo-Restriction &amp; Legal Considerations</h2>
+
+<div class="note critical">
+<h4>Legal compliance is the operator's responsibility</h4>
+<p>This document describes technical architecture only. The operator must independently verify compliance with all applicable laws in their jurisdiction before deploying. Polymarket is a prediction market operating on blockchain infrastructure; regulatory treatment varies by jurisdiction and is evolving rapidly.</p>
+</div>
+
+<h3>Polymarket Geo-Restrictions (as of mid-2026)</h3>
+<table>
+<thead><tr><th>Jurisdiction</th><th>Status</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Australia</td><td style="color:var(--critical)">Blocked</td><td>ACMA directive Aug 2025. ISP-level block. Bot cannot run from AU.</td></tr>
+<tr><td>United States</td><td style="color:var(--critical)">Blocked</td><td>International exchange restriction.</td></tr>
+<tr><td>Singapore</td><td style="color:var(--green)">Accessible</td><td>Not on restricted list. Recommended VPS location.</td></tr>
+<tr><td>Malaysia</td><td style="color:var(--green)">Accessible</td><td>Not on restricted list. Alternative for physical hosting.</td></tr>
+<tr><td>EU (Ireland)</td><td style="color:var(--green)">Accessible</td><td>~1&ndash;5ms to Polymarket infra. Popular for trading bots.</td></tr>
+</tbody>
+</table>
+
+<h3>Important Constraints</h3>
+<ul>
+  <li><strong>VPN/proxy usage violates Polymarket ToS</strong> (Section 2.1.4). Device fingerprinting and behavioral analysis are enforced. The bot must run natively from an unrestricted jurisdiction, not via VPN tunnel from a restricted one.</li>
+  <li><strong>Account setup and USDC funding</strong> must originate from the unrestricted jurisdiction.</li>
+  <li><strong>Polymarket has been tightening restrictions</strong> throughout 2025&ndash;2026 (33+ countries blocked as of Feb 2026). Monitor their <a href="https://docs.polymarket.com/api-reference/geoblock">geographic restrictions page</a> for changes.</li>
+  <li><strong>Malaysian timezone advantage:</strong> UTC+8 aligns well with NBA/WNBA game windows (US evening = MY morning). Bot runs unattended overnight US time.</li>
+</ul>
+
+
+<!-- ═══════════════════════════════════════════ 11. PAPER TRADING ═══ -->
+<h2 id="s11"><span class="num">11</span>Paper Trading Phase</h2>
+<p class="lede">Mandatory simulation period before any real capital deployment. Minimum 50 games recommended.</p>
+
+<h3>Paper Trading Requirements</h3>
+<ol>
+  <li><strong>Full pipeline execution:</strong> Receive real PW signals, resolve real Polymarket markets, fetch real prices, evaluate edge, simulate order placement &mdash; everything except the actual CLOB order.</li>
+  <li><strong>Realistic fill simulation:</strong> Assume fill at ask price + 1 cent slippage. Record simulated position.</li>
+  <li><strong>Settlement tracking:</strong> Monitor real game outcomes. Compute P&amp;L as if positions were real.</li>
+  <li><strong>Calibration curve construction:</strong> Build the PW confidence &rarr; true probability mapping from paper trade data.</li>
+  <li><strong>Edge decay measurement:</strong> Track how much Polymarket price moves between signal generation (PW fire) and simulated order placement. Quantify typical edge decay.</li>
+</ol>
+
+<h3>Success Criteria to Go Live</h3>
+<table>
+<thead><tr><th>Criterion</th><th>Threshold</th></tr></thead>
+<tbody>
+<tr><td>Minimum paper trades</td><td class="num">&ge; 50 games</td></tr>
+<tr><td>Simulated ROI</td><td class="num">&gt; 0% (profitable after fees)</td></tr>
+<tr><td>Calibration ECE</td><td class="num">&lt; 0.05 (well calibrated)</td></tr>
+<tr><td>Edge decay &lt; threshold</td><td class="num">Avg edge at execution &ge; 5pp</td></tr>
+<tr><td>Market availability</td><td class="num">&ge; 80% of PW games have Polymarket markets</td></tr>
+<tr><td>Fill rate</td><td class="num">&ge; 90% of simulated orders would fill at acceptable prices</td></tr>
+</tbody>
+</table>
+
+<h3>Backtesting Opportunity</h3>
+<p>Historical PW calls (15,477 NBA, ~3,000 WNBA) can be paired with historical Polymarket price data (if available via Gamma API historical endpoint) to run a larger-scale backtest. However, this has the same backfill contamination risk as BK odds ROI &mdash; treat results as directional, not definitive.</p>
+
+
+<!-- ═══════════════════════════════════════════ 12. IMPLEMENTATION PHASES ═══ -->
+<h2 id="s12"><span class="num">12</span>Implementation Phases</h2>
+<p class="lede">Five phases from investigation to live trading, each with clear deliverables and go/no-go gates.</p>
+
+<h3>Phase 1: Market Investigation</h3>
+<div class="finding">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="phase">phase 1</span> Polymarket market survey &amp; liquidity assessment</h4>
+<p>Before writing any code, survey NBA and WNBA game-winner markets on Polymarket to validate assumptions about market availability, liquidity, and pricing.</p>
+<div class="fix">
+<strong>Deliverables:</strong>
+<ul>
+  <li>Script to query Gamma API for all NBA/WNBA game-winner markets for a given date range</li>
+  <li>Report: market availability rate, average volume, typical bid-ask spread, depth at key price levels</li>
+  <li>Confirm whether markets remain open for in-game trading or close at tip-off</li>
+  <li>WNBA liquidity assessment &mdash; determine if WNBA markets are tradeable or too thin</li>
+</ul>
+<strong>Go/no-go:</strong> If &lt;60% of NBA games have tradeable markets (volume &gt;$5K, spread &lt;$0.05), reassess viability.
+</div>
+</div>
+</div>
+
+<h3>Phase 2: Signal Relay</h3>
+<div class="finding">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="phase">phase 2</span> Webhook emission from monitor.py</h4>
+<p>Add webhook POST to <code>monitor.py</code> triggered on PW call fire. Includes HMAC signing, configurable filters, and timeout handling.</p>
+<div class="fix">
+<strong>Deliverables:</strong>
+<ul>
+  <li>Config fields: <code>polymarket_webhook_url</code>, <code>polymarket_webhook_secret</code>, <code>polymarket_min_confidence</code></li>
+  <li>Webhook POST with full PW call context (see Section 5 payload)</li>
+  <li>Fire-and-forget with configurable timeout (default 5s)</li>
+  <li>Dashboard log entry on webhook send/fail</li>
+</ul>
+<strong>Go/no-go:</strong> Webhook delivers reliably to test endpoint with &lt;2s latency.
+</div>
+</div>
+</div>
+
+<h3>Phase 3: Trading Bot Core</h3>
+<div class="finding">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="phase">phase 3</span> Bot deployment with paper trading</h4>
+<p>Deploy the trading bot on remote VPS. Receives signals, resolves markets, evaluates edge, simulates trades. No real orders.</p>
+<div class="fix">
+<strong>Deliverables:</strong>
+<ul>
+  <li>Webhook listener with HMAC validation</li>
+  <li>Market resolver (slug &rarr; Gamma API &rarr; token ID)</li>
+  <li>Price fetcher (CLOB orderbook query)</li>
+  <li>Edge evaluator (initially using raw PW confidence; calibration added iteratively)</li>
+  <li>Paper trade logger (JSONL with full signal + market context + simulated P&amp;L)</li>
+  <li>Systemd service with auto-restart</li>
+  <li>Settlement monitor (poll Gamma for resolution, compute final P&amp;L)</li>
+</ul>
+<strong>Go/no-go:</strong> 50+ paper trades completed. Simulated ROI &gt; 0%. Calibration curve constructed.
+</div>
+</div>
+</div>
+
+<h3>Phase 4: Live Trading (Small Stakes)</h3>
+<div class="finding">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="phase">phase 4</span> Real orders with minimal capital</h4>
+<p>Enable real order placement with conservative limits: $10 max per game, $100 max total exposure. Validate execution quality against paper trade assumptions.</p>
+<div class="fix">
+<strong>Deliverables:</strong>
+<ul>
+  <li>Order placement via <code>py-clob-client</code></li>
+  <li>Position tracking with real fill prices</li>
+  <li>Execution quality report: actual slippage vs simulated, fill rate, latency</li>
+  <li>Kill switch (config toggle + auto-kill on daily loss)</li>
+  <li>All risk management controls active (Section 8)</li>
+  <li>Wallet balance monitoring with alerts</li>
+</ul>
+<strong>Go/no-go:</strong> 20+ live trades. Execution quality within 2 cents of simulation. No unexpected failures.
+</div>
+</div>
+</div>
+
+<h3>Phase 5: Scale Up</h3>
+<div class="finding">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="phase">phase 5</span> Increase position sizes and add features</h4>
+<p>Raise limits to production levels based on Phase 4 results. Add Kelly sizing, consensus multipliers, and dashboard integration.</p>
+<div class="fix">
+<strong>Deliverables:</strong>
+<ul>
+  <li>Half-Kelly position sizing with consensus multipliers</li>
+  <li>Raised limits: $50/game, $500 total exposure</li>
+  <li>Dashboard panel: open positions, P&amp;L history, edge distribution, execution quality</li>
+  <li>Weekly calibration curve refresh</li>
+  <li>WNBA market support (if Phase 1 shows adequate liquidity)</li>
+  <li>Monthly performance review process</li>
+</ul>
+</div>
+</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════ 13. OPEN QUESTIONS ═══ -->
+<h2 id="s13"><span class="num">13</span>Open Questions &amp; Risks</h2>
+
+<h3>Open Questions</h3>
+<table>
+<thead><tr><th>#</th><th>Question</th><th>Impact</th><th>Resolution Path</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td>Do Polymarket NBA/WNBA game-winner markets stay open for in-game trading?</td><td class="sev high">high</td><td>Phase 1 investigation. If markets close at tip-off, only pre-game PW signals are tradeable (much less useful).</td></tr>
+<tr><td class="num">2</td><td>What is the typical Polymarket price for the team that PW predicts, at the time PW fires?</td><td class="sev high">high</td><td>Phase 1 data collection. If Polymarket already prices the team at 80%+ when PW fires at 75%, there is no edge.</td></tr>
+<tr><td class="num">3</td><td>How does Polymarket handle overtime, suspended, or postponed games?</td><td class="sev medium">medium</td><td>Review Polymarket resolution rules for NBA/WNBA markets.</td></tr>
+<tr><td class="num">4</td><td>Can the bot sell positions before settlement (e.g., lock in profit mid-game)?</td><td class="sev medium">medium</td><td>Test with paper trading. CLOB supports SELL orders on held tokens.</td></tr>
+<tr><td class="num">5</td><td>Is historical Polymarket price data available via API for backtesting?</td><td class="sev low">low</td><td>Check Gamma API historical endpoints.</td></tr>
+<tr><td class="num">6</td><td>What happens to open orders during Polymarket maintenance/downtime?</td><td class="sev low">low</td><td>Review CLOB order persistence guarantees.</td></tr>
+</tbody>
+</table>
+
+<h3>Key Risks</h3>
+<div class="finding critical">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="sev critical">critical</span> No edge may exist</h4>
+<p>Polymarket prices may already incorporate the same information that PW uses (score, momentum, public sentiment). If the market is efficient for NBA game winners, PW signals offer no edge over market prices. This is the fundamental risk.</p>
+<div class="fix"><strong>Mitigation:</strong> Phase 1 investigation + Phase 3 paper trading will determine whether edge exists before any capital is risked.</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="sev high">high</span> Geo-restriction tightening</h4>
+<p>Polymarket has been expanding its restricted country list. Singapore or Malaysia could be added, requiring VPS migration. Account could be flagged for unusual trading patterns.</p>
+<div class="fix"><strong>Mitigation:</strong> Monitor Polymarket geo-restriction changes. Maintain ability to migrate to alternative jurisdiction (EU/Ireland). Keep position sizes small enough that a sudden account freeze is not catastrophic.</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="sev high">high</span> Smart contract / wallet risk</h4>
+<p>USDC held in a Polygon wallet is subject to smart contract bugs, wallet compromise, or bridge failures. Unlike a bank account, there is no recourse for lost funds.</p>
+<div class="fix"><strong>Mitigation:</strong> Use a dedicated wallet with only trading capital (not savings). Hardware wallet for signing if supported. Keep wallet balance at operating minimum &mdash; top up in small increments.</div>
+</div>
+</div>
+
+<div class="finding medium">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="sev medium">medium</span> PW model drift degrades signal quality</h4>
+<p>The ML model retrains weekly on a schedule with no drift detection (see ML training investigation). If model quality degrades, the bot continues trading on stale signals until the next retrain.</p>
+<div class="fix"><strong>Mitigation:</strong> Weekly calibration curve refresh detects accuracy drift. Auto-kill if rolling 20-trade accuracy drops below 55%.</div>
+</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════ 14. DEPENDENCIES ═══ -->
+<h2 id="s14"><span class="num">14</span>Dependencies &amp; Costs</h2>
+
+<h3>Software Dependencies</h3>
+<table>
+<thead><tr><th>Package</th><th>Purpose</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td class="k">py-clob-client</td><td>Polymarket CLOB API SDK</td><td>Official. Pure Python. ARM compatible.</td></tr>
+<tr><td class="k">eth-account</td><td>Ethereum transaction signing</td><td>Transitive via py-clob-client.</td></tr>
+<tr><td class="k">web3</td><td>Polygon chain interaction</td><td>For wallet management and USDC transfers.</td></tr>
+<tr><td class="k">flask / fastapi</td><td>Webhook listener</td><td>Lightweight HTTPS server.</td></tr>
+<tr><td class="k">requests</td><td>Gamma API queries</td><td>Already in use by monitor.</td></tr>
+</tbody>
+</table>
+
+<h3>Infrastructure Costs</h3>
+<table>
+<thead><tr><th>Item</th><th>Cost</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>VPS (Oracle free tier)</td><td class="num">$0/mo</td><td>Preferred. May require retry for provisioning.</td></tr>
+<tr><td>VPS (Vultr fallback)</td><td class="num">$6&ndash;12/mo</td><td>Reliable alternative.</td></tr>
+<tr><td>Domain + TLS cert</td><td class="num">$0</td><td>Let's Encrypt. Or Tailscale for webhook delivery.</td></tr>
+<tr><td>Polygon gas fees</td><td class="num">&lt;$0.01/tx</td><td>Negligible on Polygon.</td></tr>
+<tr><td>Initial trading capital</td><td class="num">$100&ndash;500</td><td>USDC on Polygon. Phase 4 starts at $100.</td></tr>
+</tbody>
+</table>
+
+<h3>Wallet Setup Requirements</h3>
+<ul>
+  <li>Ethereum wallet (MetaMask or programmatic via <code>eth-account</code>)</li>
+  <li>USDC on Polygon network (bridge from Ethereum mainnet or buy on Polygon DEX)</li>
+  <li>Polymarket API key (generated from wallet signature)</li>
+  <li>Dedicated wallet &mdash; do not commingle trading funds with other crypto holdings</li>
+</ul>
+
+
+<!-- ═══════════════════════════════════════════ FOOTER ═══ -->
+<footer>
+<p>Generated 2026-07-27 &middot; NBA Monitor #214 &middot; Rev 1</p>
+<p>This document describes technical architecture for investigation purposes. Legal and regulatory compliance is the operator's responsibility.</p>
+</footer>
+
+</div><!-- .wrap -->
+</body>
+</html>

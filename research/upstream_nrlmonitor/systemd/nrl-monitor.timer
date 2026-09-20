@@ -1,0 +1,13 @@
+[Unit]
+Description=NRL Monitor timer — poll every 30s during game windows
+
+[Timer]
+# NRL games: AEST 14:00–23:00 = UTC 04:00–13:00
+# Run every 30 seconds (NBA #400)
+OnCalendar=*-*-* 04,05,06,07,08,09,10,11,12:*:00 UTC
+OnCalendar=*-*-* 04,05,06,07,08,09,10,11,12:*:30 UTC
+AccuracySec=1s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

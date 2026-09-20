@@ -1,0 +1,11 @@
+[Unit]
+Description=Cloud backup — NRL sync to Google Drive (02:30 UTC)
+Requires=cloud-backup.service
+
+[Timer]
+# Run daily at 02:30 UTC, after NRL (02:00) local backup
+OnCalendar=*-*-* 02:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

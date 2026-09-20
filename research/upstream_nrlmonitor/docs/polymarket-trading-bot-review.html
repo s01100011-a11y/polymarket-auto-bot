@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polymarket Trading Bot — Technical Review &amp; Revised Design (Rev 2)</title>
+<style>
+:root{
+  --paper:#F1F3EE;--paper-2:#E7EAE4;--ink:#16211C;--ink-2:#33423A;
+  --muted:#5D6B62;--rule:#CBD2C8;
+  --critical:#A3231C;--high:#C98A00;--medium:#2C6E8F;--low:#6B7A6F;
+  --green:#2E7D32;--accent:#C97D1A;
+  --display:-apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  --body:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);font-size:17px;line-height:1.62}
+.wrap{max-width:64rem;margin:0 auto;padding:0 1.5rem 6rem}
+.mast{border-bottom:3px solid var(--ink);padding:3rem 0 1.2rem;margin-bottom:2rem}
+.eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin:0 0 .8rem}
+h1{font-family:var(--display);font-weight:800;letter-spacing:-.035em;line-height:.98;font-size:clamp(2.2rem,6vw,3.6rem);margin:0 0 .5rem}
+.sub{font-size:1.05rem;color:var(--ink-2);margin:0;max-width:54ch}
+.meta{font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-top:1.2rem;display:flex;flex-wrap:wrap;gap:.4rem 1.6rem}
+h2{font-family:var(--display);font-weight:800;letter-spacing:-.025em;font-size:clamp(1.4rem,3.4vw,2rem);line-height:1.1;margin:3.5rem 0 .3rem;padding-top:1.2rem;border-top:1px solid var(--rule)}
+h2 .num{font-family:var(--mono);font-size:.66rem;font-weight:400;letter-spacing:.16em;color:var(--muted);display:block;margin-bottom:.6rem}
+.lede{color:var(--ink-2);margin:.4rem 0 1.8rem;max-width:56ch}
+h3{font-family:var(--display);font-weight:700;font-size:1.05rem;letter-spacing:-.01em;margin:2rem 0 .5rem}
+h4{font-family:var(--display);font-weight:700;font-size:.95rem;margin:1.4rem 0 .4rem}
+p{margin:0 0 1rem}
+ul,ol{padding-left:1.25rem;margin:.5rem 0 1.2rem}
+li{margin-bottom:.45rem}
+code{font-family:var(--mono);font-size:.85em;background:var(--paper-2);padding:.08em .32em;border-radius:2px}
+pre{font-family:var(--mono);font-size:.76rem;line-height:1.5;background:var(--ink);color:#DCE4DC;padding:.9rem 1rem;overflow-x:auto;margin:.8rem 0;border-radius:2px}
+pre code{background:none;padding:0;color:inherit;font-size:1em}
+table{width:100%;border-collapse:collapse;margin:1rem 0 1.8rem;font-size:.88rem}
+th,td{text-align:left;padding:.5rem .65rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--mono);font-size:.63rem;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);font-weight:400;border-bottom:2px solid var(--ink)}
+td.k{font-family:var(--mono);font-size:.76rem;white-space:nowrap}
+td.num{font-family:var(--mono);font-size:.78rem;text-align:right}
+tbody tr:hover{background:var(--paper-2)}
+a{color:var(--medium)}
+
+.sev{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;padding:.15rem .45rem;border:1px solid currentColor;border-radius:2px;display:inline-block;margin-right:.4rem}
+.sev.critical{color:var(--critical)}.sev.high{color:var(--high)}.sev.medium{color:var(--medium)}.sev.low{color:var(--low)}.sev.done{color:var(--green);border-color:var(--green)}
+.phase{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;padding:.15rem .45rem;border:1px solid var(--accent);color:var(--accent);border-radius:2px;display:inline-block;margin-right:.4rem}
+.id{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;color:var(--muted);float:right;padding-top:.2rem}
+
+.finding{border:1px solid var(--rule);background:#fff;margin:0 0 1.2rem;display:grid;grid-template-columns:5px 1fr}
+.finding .bar{background:var(--low)}
+.finding.critical .bar{background:var(--critical)}
+.finding.high .bar{background:var(--high)}
+.finding.medium .bar{background:var(--medium)}
+.finding .body{padding:1rem 1.2rem}
+.finding h4{font-family:var(--display);font-weight:700;font-size:1rem;margin:0 0 .4rem}
+.finding p{margin:0 0 .6rem;font-size:.94rem}
+.finding p:last-child{margin-bottom:0}
+.finding .fix{border-top:1px dashed var(--rule);padding-top:.6rem;margin-top:.7rem;font-size:.92rem;color:var(--ink-2)}
+.finding pre{font-size:.72rem;margin:.6rem 0}
+
+.ledger{display:grid;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);margin:0 0 2.5rem}
+.ledger div{background:var(--paper);padding:.8rem 1rem}
+.ledger .n{font-family:var(--display);font-weight:800;font-size:2rem;line-height:1;display:block}
+.ledger .l{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);display:block;margin-top:.35rem}
+.ledger .n.crit{color:var(--critical)}.ledger .n.hi{color:var(--high)}
+
+.toc{background:var(--paper-2);border:1px solid var(--rule);padding:1.2rem 1.4rem;margin:0 0 1rem}
+.toc ol{columns:2;column-gap:2rem;margin:0;padding-left:1rem;font-size:.92rem}
+.toc li{margin-bottom:.3rem;break-inside:avoid}
+.toc a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
+
+.note{border:1px solid var(--rule);border-left:5px solid var(--high);background:#fff;padding:1rem 1.2rem;margin:1.5rem 0;font-size:.94rem}
+.note h4{font-family:var(--display);font-weight:700;font-size:.95rem;margin:0 0 .4rem}
+.note.ok{border-left-color:var(--green)}
+.note.critical{border-left-color:var(--critical)}
+
+.arch{background:var(--ink);color:#DCE4DC;font-family:var(--mono);font-size:.74rem;line-height:1.6;padding:1.2rem 1.5rem;overflow-x:auto;margin:1rem 0 1.5rem;border-radius:2px;white-space:pre}
+
+.ba{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--rule);border:1px solid var(--rule);margin:1rem 0 1.5rem}
+.ba>div{background:#fff;padding:.9rem 1rem}
+.ba h5{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;margin:0 0 .5rem;font-weight:400}
+.ba .was h5{color:var(--critical)}
+.ba .now h5{color:var(--green)}
+.ba pre{margin:0;font-size:.71rem}
+@media(max-width:620px){.ba{grid-template-columns:1fr}}
+
+footer{margin-top:4rem;padding-top:1rem;border-top:3px solid var(--ink);font-family:var(--mono);font-size:.68rem;color:var(--muted)}
+
+@media(max-width:620px){body{font-size:16px}.toc ol{columns:1}.ledger{grid-template-columns:repeat(2,1fr)}}
+@media print{
+  @page{margin:14mm 12mm}html,body{background:#fff;color:#000;font-size:10.5pt}
+  .wrap{max-width:none;padding:0}.mast{padding-top:0}h1{font-size:24pt}h2{font-size:13pt;margin-top:1.4rem}
+  .finding,.note,table,pre,.ledger,.ba{page-break-inside:avoid;break-inside:avoid}
+  .finding{border:.5pt solid #000}.finding .bar{background:#000!important}
+  .ledger div,.toc,.note{background:#fff}pre{background:#fff;color:#000;border:.5pt solid #666}
+  a{color:#000}.toc{display:none}footer{border-top-width:2pt}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ═══════════════════════════════════════════════ MASTHEAD ═══ -->
+<header class="mast">
+<p class="eyebrow">NBA Monitor &middot; Design Review &amp; Revision</p>
+<h1>Polymarket Trading Bot — Technical Review</h1>
+<p class="sub">A defect-level review of Rev 1, with corrected financial mathematics, a revised architecture, and a set of capability additions aimed at establishing whether an edge exists before capital is committed.</p>
+<div class="meta">
+  <span>Issue: <a href="https://github.com/bobcheong/NBAMonitor/issues/214">#214</a></span>
+  <span>Reviews: Rev 1 (2026-07-27)</span>
+  <span>Document: Rev 2.3</span>
+  <span>Date: 2026-07-27</span>
+  <span>Operator: AU resident, temp. MY</span>
+  <span>Status: Revise before Phase 2</span>
+</div>
+</header>
+
+<!-- ═══════════════════════════════════════════ TOC ═══ -->
+<nav class="toc">
+<ol>
+  <li><a href="#s0">Review Verdict</a></li>
+  <li><a href="#s1">Critical Defects</a></li>
+  <li><a href="#s2">High-Severity Defects</a></li>
+  <li><a href="#s3">Medium &amp; Low Findings</a></li>
+  <li><a href="#s4">Factual Corrections</a></li>
+  <li><a href="#s5">The Measurement Problem</a></li>
+  <li><a href="#s6">Corrected Edge &amp; Sizing Model</a></li>
+  <li><a href="#s7">Execution Strategy</a></li>
+  <li><a href="#s8">Market Resolution Redesign</a></li>
+  <li><a href="#s9">Revised Architecture</a></li>
+  <li><a href="#s10">Reliability &amp; Operations</a></li>
+  <li><a href="#s11">Risk Management Gaps</a></li>
+  <li><a href="#s12">Security</a></li>
+  <li><a href="#s13">New Capabilities &amp; ROI Levers</a></li>
+  <li><a href="#s14">Revised Roadmap</a></li>
+  <li><a href="#s15">Revised Open Questions</a></li>
+  <li><a href="#s16">Legal &amp; Capital Position</a></li>
+</ol>
+</nav>
+
+
+<!-- ═══════════════════════════════════════════ 0. VERDICT ═══ -->
+<h2 id="s0"><span class="num">00</span>Review Verdict</h2>
+<p class="lede">Rev 1 is a strong piece of systems thinking with correct instincts on phasing, risk gating and separation of concerns. It is not yet safe to implement, because the financial mathematics contain errors that would silently mis-size every position, and the validation plan cannot detect whether the strategy works.</p>
+
+<div class="ledger">
+  <div><span class="n">38</span><span class="l">Findings raised</span></div>
+  <div><span class="n crit">6</span><span class="l">Critical</span></div>
+  <div><span class="n hi">11</span><span class="l">High</span></div>
+  <div><span class="n">~1,350</span><span class="l">Trades for ROI signal</span></div>
+  <div><span class="n">1.2&cent;</span><span class="l">True fee at 62&cent;</span></div>
+  <div><span class="n">24%</span><span class="l">False kill rate</span></div>
+</div>
+
+<h3>What Rev 1 gets right</h3>
+<ul>
+  <li><strong>Phase gating with go/no-go criteria.</strong> The instinct to survey markets before writing code, and to paper trade before funding, is the correct order of operations and is often skipped.</li>
+  <li><strong>Naming the fundamental risk explicitly.</strong> Section 13 leads with "no edge may exist." Most trading-bot specifications bury this. It belongs at the front, and it does drive the phase design.</li>
+  <li><strong>Recognising that PW confidence is not a probability.</strong> This is the single most common category error in model-to-market pipelines, and Rev 1 identifies it unprompted.</li>
+  <li><strong>Stateless signal relay.</strong> The monitor knowing nothing about wallets or positions is a good boundary and should be preserved through the redesign.</li>
+  <li><strong>Honesty about backfill contamination.</strong> Flagging that 15,215 of 15,477 calls carry synthetic odds, rather than quoting a headline ROI, is intellectually disciplined.</li>
+</ul>
+
+<h3>What must change before implementation</h3>
+<table>
+<thead><tr><th>Area</th><th>Rev 1 status</th><th>Required change</th></tr></thead>
+<tbody>
+<tr><td class="k">Kelly sizing</td><td class="sev critical">broken</td><td>Two contradictory formulas given; one is wrong by a factor of the price. Pick the canonical form.</td></tr>
+<tr><td class="k">Fee model</td><td class="sev critical">wrong</td><td>Flat "~2% of notional" replaced by the published price-dependent formula. Fees changed twice in 2026.</td></tr>
+<tr><td class="k">Validation</td><td class="sev critical">insufficient</td><td>50 paper trades cannot distinguish +10% ROI from &minus;10%. Move the primary KPI to closing-line value.</td></tr>
+<tr><td class="k">Edge input</td><td class="sev critical">wrong</td><td>Edge computed against top-of-book ask, not the size-weighted price actually payable.</td></tr>
+<tr><td class="k">Date handling</td><td class="sev critical">defective</td><td>Example payload demonstrates an off-by-one-day error between UTC and US venue date.</td></tr>
+<tr><td class="k">Execution</td><td class="sev high">costly</td><td>Always-cross design pays a fee that a maker-first ladder avoids entirely, and forfeits rebates.</td></tr>
+<tr><td class="k">Exit logic</td><td class="sev high">absent</td><td>Markets trade live and sells are fee-free. Hold-to-settlement forgoes the cheapest lever available.</td></tr>
+<tr><td class="k">Reconciliation</td><td class="sev high">absent</td><td>No mechanism ties the internal ledger to exchange or on-chain truth. Mandatory for any trading system.</td></tr>
+<tr><td class="k">Hosting</td><td class="sev critical">invalid</td><td>All three proposed VPS options are in Singapore, which has blocked the platform since January 2025.</td></tr>
+</tbody>
+</table>
+
+<div class="note critical">
+<h4>Recommended disposition</h4>
+<p>Do not proceed to Phase 2 as written. Insert a <strong>Phase 0 (data capture)</strong> that begins recording order-book snapshots and decision context immediately &mdash; that data cannot be reconstructed later and everything downstream depends on it. Re-issue Sections 7, 8 and 11 of Rev 1 with the corrections in this review, then resume.</p>
+</div>
+
+
+<!-- ═══════════════════════════════════════════ 1. CRITICAL ═══ -->
+<h2 id="s1"><span class="num">01</span>Critical Defects</h2>
+<p class="lede">Defects that would cause incorrect trading behaviour, misstate results, or invalidate the decision to deploy capital.</p>
+
+<div class="finding critical">
+<div class="bar"></div>
+<div class="body">
+<span class="id">C-01</span>
+<h4><span class="sev critical">critical</span> Kelly sizing gives two contradictory formulas</h4>
+<p>Section 7 presents the Kelly fraction as a single derivation across two lines, but the lines are not equal. The second is correct; the first is wrong by a factor of the market price.</p>
+<pre><code>f_kelly = edge / (1 / market_prob - 1)          # = edge * q / (1 - q)   WRONG
+        = (calibrated_prob - market_prob) / (1 - market_prob)   # = edge / (1 - q)   CORRECT</code></pre>
+<p>At a price of $0.62 with an 11-point edge, the first line yields 0.180 and the second 0.289 &mdash; a 38% difference. Because the discrepancy is proportional to price, the error is not a constant scaling: a bot implementing line 1 would run at 0.31&times; Kelly on a 62&cent; contract and 0.45&times; Kelly on a 90&cent; contract, so the risk profile silently varies with entry price.</p>
+<div class="fix"><strong>Fix:</strong> State one canonical form only. For a binary contract bought at cost <code>c</code> with true probability <code>p</code>, the growth-optimal fraction is <code>f* = (p - c) / (1 - c)</code>. Derivation and fee-adjusted version in Section 06. Delete the alternate expression &mdash; ambiguity in a sizing formula is itself the defect.</div>
+</div>
+</div>
+
+<div class="finding critical">
+<div class="bar"></div>
+<div class="body">
+<span class="id">C-02</span>
+<h4><span class="sev critical">critical</span> Fee model is wrong in both magnitude and shape</h4>
+<p>Rev 1 states "Maker: 0%. Taker: ~2% of notional." Polymarket's fee schedule changed twice during 2026 and is not a flat percentage. The international taker fee follows the formula fee = shares &times; &theta; &times; price &times; (1 &minus; price), which peaks at the 50&cent; midpoint and falls toward both extremes. Sports carries &theta; = 0.05 as of July 2026, a maximum of $1.25 per 100 shares at 50&cent;, updated upward from &theta; = 0.03. Separately, sell orders are never charged a taker fee, and resting limit orders pay approximately zero and can earn a daily rebate.</p>
+<table>
+<thead><tr><th>Entry price</th><th>Fee per share</th><th>As % of notional</th><th>Rev 1 assumption</th></tr></thead>
+<tbody>
+<tr><td class="num">$0.50</td><td class="num">1.25&cent;</td><td class="num">2.50%</td><td class="num">2.0%</td></tr>
+<tr><td class="num">$0.62</td><td class="num">1.18&cent;</td><td class="num">1.90%</td><td class="num">2.0%</td></tr>
+<tr><td class="num">$0.75</td><td class="num">0.94&cent;</td><td class="num">1.25%</td><td class="num">2.0%</td></tr>
+<tr><td class="num">$0.85</td><td class="num">0.64&cent;</td><td class="num">0.75%</td><td class="num">2.0%</td></tr>
+</tbody>
+</table>
+<p>The error runs in both directions and is largest exactly where PW fires most often. More importantly, the whole framing is wrong: fees should be handled in <em>probability points</em>, not percent of notional, because that is the unit edge is measured in. The fee is <code>&theta;&middot;p&middot;(1&minus;p)</code> dollars per share, which subtracts directly from edge.</p>
+<div class="fix"><strong>Fix:</strong> Implement the published formula with &theta; loaded from configuration and verified against the live schedule at start-up, not hard-coded. Subtract the fee from edge in probability space. Treat the schedule as volatile &mdash; it moved twice this year &mdash; and alert if the observed fee on a fill deviates from the predicted fee by more than a tolerance.</div>
+</div>
+</div>
+
+<div class="finding critical">
+<div class="bar"></div>
+<div class="body">
+<span class="id">C-03</span>
+<h4><span class="sev critical">critical</span> The paper-trading gate cannot detect whether the strategy works</h4>
+<p>Section 11 requires "&ge; 50 games" and "simulated ROI &gt; 0%". Betting returns are extremely high-variance and 50 samples carries almost no information. For a contract bought at $0.62 with a true win probability of 0.70, the standard deviation of return per unit staked is 0.739. Over 50 trades the standard error of measured ROI is 10.5 percentage points, so the 95% interval spans roughly &plusmn;21 points.</p>
+<p>Put plainly: after 50 paper trades, a strategy with a true ROI of &minus;8% and one with +12% produce indistinguishable results most of the time. The gate as written is close to a coin flip on whether real money gets deployed.</p>
+<div class="fix"><strong>Fix:</strong> Two changes. First, keep ROI as a monitoring metric but demote it as a gate. Second, adopt <strong>closing-line value</strong> as the primary decision KPI &mdash; it is one to two orders of magnitude more sample-efficient because it measures a price difference rather than a binary outcome. Full treatment in Section 05.</div>
+</div>
+</div>
+
+<div class="finding critical">
+<div class="bar"></div>
+<div class="body">
+<span class="id">C-04</span>
+<h4><span class="sev critical">critical</span> Edge is evaluated against a price the bot cannot actually get</h4>
+<p>Section 6 step 4 fetches "best ask price for YES token" and Section 7 computes edge against it. Best ask is the price of the <em>first</em> share only. A $50 order at 62&cent; is roughly 80 shares; if the top level holds 25 shares and the next two levels sit at 63&cent; and 65&cent;, the realised average cost is materially above the quoted ask. In thin WNBA books the divergence will be much larger, and the liquidity guard in Section 8 ("ensure sufficient depth") is stated as an intention with no formula attached.</p>
+<p>The consequence is systematic overstatement of edge on precisely the trades where edge is thinnest &mdash; an adverse-selection pattern that biases the whole P&amp;L record upward during paper trading and then disappears in live results.</p>
+<div class="fix"><strong>Fix:</strong> Compute a size-weighted sweep price across the visible book to the intended order size, and evaluate edge against that. If the sweep cannot be filled within the slippage cap, reduce size until it can, or skip. Implementation in Section 06.</div>
+</div>
+</div>
+
+<div class="finding critical">
+<div class="bar"></div>
+<div class="body">
+<span class="id">C-05</span>
+<h4><span class="sev critical">critical</span> Game-date handling has an off-by-one-day defect</h4>
+<p>The example payload in Section 5 is internally inconsistent and demonstrates the bug:</p>
+<pre><code>"game_date": "2026-11-15",
+"ts":         "2026-11-15T02:30:00Z"    &lt;-- 21:30 ET on Nov 14</code></pre>
+<p>A signal firing at 02:30 UTC during a game belongs to the US venue date of 14 November, not 15 November. Since the market slug is built from <code>game_date</code>, every evening US game &mdash; which is nearly all of them &mdash; would resolve to a slug one day in the future and return no market. On an AU-hosted monitor at UTC+10/11 the local date is wrong in the other direction. Roughly 90% of the NBA slate is affected.</p>
+<div class="fix"><strong>Fix:</strong> Never derive game date from wall-clock time on any host. Carry the scheduled date in the venue's local timezone from the schedule source through the payload, and set every process to UTC internally with explicit conversion at the boundary. Better still, remove date arithmetic from the resolution path entirely (Section 08).</div>
+</div>
+</div>
+
+<div class="finding critical">
+<div class="bar"></div>
+<div class="body">
+<span class="id">C-06</span>
+<h4><span class="sev critical">critical</span> Every hosting option in Rev 1 is in a blocked jurisdiction</h4>
+<p>Section 9 evaluates three options &mdash; Oracle Cloud Free Singapore, Vultr Singapore 4GB, Vultr Singapore 2GB &mdash; and recommends Singapore as the VPS location. Section 10's geo table lists Singapore as accessible and not on the restricted list.</p>
+<p>Singapore has blocked Polymarket since 12 January 2025. The Gambling Regulatory Authority ordered ISPs to implement DNS-level blocking, classifying the platform as an illegal gambling site under the Gambling Control Act 2022, and this was reported by Bloomberg and others at the time. Some restriction trackers now list Singapore under close-only status, meaning no new positions. The GRA's own notice is framed as covering unlicensed remote gambling provided "in or from Singapore" &mdash; language that speaks to activity originating there, not just to consumers receiving it.</p>
+<p>Rev 1's hosting section is therefore not merely sub-optimal; all three options fail outright, and the recommendation has been wrong for eighteen months. This is the clearest illustration of the point made in Section 04: platform and regulatory facts in this space age fast and must be verified rather than carried forward.</p>
+<div class="fix"><strong>Fix:</strong> Discard the Singapore options entirely. Revised hosting analysis in Section 16, which also accounts for the corrected operator jurisdiction. Add a start-up check that asserts the deployment region is not on the current restricted list, and re-check it on a schedule rather than at design time.</div>
+</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════ 2. HIGH ═══ -->
+<h2 id="s2"><span class="num">02</span>High-Severity Defects</h2>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">H-01</span>
+<h4><span class="sev high">high</span> The <code>min_ev</code> gate can never fire</h4>
+<p>Expected value per dollar staked on a binary contract is <code>(p &minus; q) / q</code>, which is exactly <code>edge / price</code>. With <code>min_edge = 0.08</code> and <code>max_price = 0.90</code>, the lowest EV any passing trade can have is 0.08 / 0.90 = 0.089, already above the 0.05 threshold. The gate is unreachable configuration &mdash; it looks like a safety control on the config page and does nothing.</p>
+<div class="fix"><strong>Fix:</strong> Remove one of the two gates. Prefer keeping EV as the primary gate (it is the economically meaningful quantity and correctly penalises expensive contracts) and derive the edge floor from it, or keep edge and delete <code>min_ev</code>. Add a start-up assertion that no configured gate is dominated by another.</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">H-02</span>
+<h4><span class="sev high">high</span> The webhook signature scheme is circular and replayable</h4>
+<p>Section 5 places <code>"hmac": "sha256=..."</code> inside the JSON body while also stating the HMAC covers the full JSON body. A payload cannot contain a digest of itself. Beyond the contradiction, the scheme has no replay protection: a captured request can be resent indefinitely, and while the bot's <code>(game_id, predicted_team)</code> dedup limits the damage, the dedup cache is the only thing standing between a replayed packet and an order.</p>
+<div class="fix"><strong>Fix:</strong> Move the signature to the <code>X-Signature</code> header and sign the exact raw bytes received, not a re-serialised object. Include the timestamp in the signed material, reject anything outside a &plusmn;120s window, keep a short-lived nonce cache, and compare with <code>hmac.compare_digest</code>. Require NTP on both hosts. Better again: eliminate the inbound endpoint entirely (Section 09).</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">H-03</span>
+<h4><span class="sev high">high</span> Always-crossing the spread pays a fee that is avoidable</h4>
+<p>Section 6 step 7 places a limit buy at "best ask + $0.01". That is a marketable order: it pays the taker fee, plus a cent of deliberate price concession, and forfeits the maker rebate. On the document's own 8-point minimum edge, the combined cost is roughly 2.2 points &mdash; more than a quarter of the entire edge, given away by execution policy rather than lost to the market.</p>
+<div class="fix"><strong>Fix:</strong> A maker-first ladder. Post inside the spread, reprice on a short timer, and cross only if the edge still clears the gate after the taker fee is subtracted. Full policy in Section 07. This is the highest-value change in the review relative to effort.</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">H-04</span>
+<h4><span class="sev high">high</span> The headline contamination statistic is self-contradictory</h4>
+<p>Section 1 reads: "98% of NBA PW calls (262 of 15,477) have live-priced bookmaker odds. The remaining 98% are backfill-derived." 262 of 15,477 is 1.7%, and the summary panel correctly says 2%. The first figure should read 2%.</p>
+<p>This matters more than a typo: it is the single number that determines how much weight the historical ROI deserves, and it appears in the executive summary where it is most likely to be quoted onward.</p>
+<div class="fix"><strong>Fix:</strong> Correct to "2% of NBA PW calls (262 of 15,477) have live-priced bookmaker odds; the remaining 98% are backfill-derived." Add the corresponding WNBA counts rather than the bare 37%.</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">H-05</span>
+<h4><span class="sev high">high</span> No reconciliation between internal state and exchange truth</h4>
+<p>Section 8 says the state file persists open positions and systemd restarts the process. Nothing verifies that the state file matches reality. Every failure mode that matters lives in that gap: an order submitted but not recorded before a crash, a partial fill, a manual intervention, a settlement the bot missed while offline, a position that exists on-chain but not in the ledger.</p>
+<p>There is one genuinely reassuring property Rev 1 never states explicitly and should: <strong>positions are on-chain tokens held by the wallet</strong>, so losing the VPS does not lose the position &mdash; it settles regardless. The exposure is management, not custody. That deserves to be written down, because it means aggressive recovery behaviour is safe.</p>
+<div class="fix"><strong>Fix:</strong> A reconciliation loop that runs on boot and on a timer: pull positions and trade history from the CLOB, pull USDC balance from chain, diff against the internal ledger, and refuse to trade while a discrepancy is unresolved. Reconcile-before-trade on start-up is non-negotiable for a system that can restart mid-slate.</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">H-06</span>
+<h4><span class="sev high">high</span> The drift auto-kill fires spuriously about a quarter of the time</h4>
+<p>Section 13 proposes "auto-kill if rolling 20-trade accuracy drops below 55%". If the model's true accuracy is 65%, the probability of observing 11 or fewer wins in 20 trades is roughly 24%. The control will halt a perfectly healthy system on nearly one window in four, which trains the operator to override it &mdash; the classic failure path for automated safety controls.</p>
+<div class="fix"><strong>Fix:</strong> Replace threshold-on-a-short-window with a sequential change detector. A CUSUM on per-trade Brier score, or a sequential probability ratio test against the null "calibration unchanged", gives a tunable false-alarm rate and detects real degradation faster than a fixed window. Keep a hard kill for catastrophic thresholds, but set it where a false positive is genuinely unlikely.</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">H-07</span>
+<h4><span class="sev high">high</span> Consensus taxonomy is inconsistent across three sections</h4>
+<p>Section 2 lists consensus values as <code>strong</code>, <code>ml_only</code>, <code>historical_only</code>, <code>conflicted</code>. The payload in Section 5 carries <code>blended</code> as a separate boolean. Section 7 then assigns a multiplier to a consensus value called <code>blended</code>. Meanwhile the relay filter defaults to <code>["strong","blended"]</code>, so the <code>ml_only</code> and <code>historical_only</code> multipliers in Section 7 can never be exercised &mdash; those signals are dropped before they leave the monitor.</p>
+<div class="fix"><strong>Fix:</strong> Publish one enumerated schema for the payload, validate it on both sides, and reject unknown values loudly rather than silently defaulting. Decide deliberately whether <code>ml_only</code> and <code>historical_only</code> are traded at reduced size or filtered out, and make the two sections agree.</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">H-08</span>
+<h4><span class="sev high">high</span> No exit logic, despite live markets and fee-free sells</h4>
+<p>The architecture diagram lists "auto-exit at game end", the failure table says positions are held to settlement, and Section 13 raises selling as an open question. In fact Polymarket supports trading on live sports in real time, and sell orders are not charged a taker fee &mdash; the fee applies on entry, not exit.</p>
+<p>That asymmetry is a gift and Rev 1 leaves it on the table. Exits are the cheapest action available to this system. Holding a position that has run to 95&cent; ties up capital for the remaining nickel while a fresh signal with a 10-point edge goes unfunded, and holding a position after the model's premise has broken is a pure loss.</p>
+<div class="fix"><strong>Fix:</strong> Specify an exit policy as a first-class component: exit on model invalidation, on price reaching a configured fraction of fair value, and on capital pressure when a better-edged signal arrives. Requires the continuous fair-value model in Section 13.</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">H-09</span>
+<h4><span class="sev high">high</span> A synchronous 5-second POST sits inside the 30-second poll loop</h4>
+<p>Section 5 describes fire-and-forget with a 5s timeout, and separately requires that it "must not block monitor cycle". Both cannot be true as specified: a synchronous request with a 5s timeout blocks for up to 5s. With several signals per cycle on a busy slate, a slow or unreachable bot can consume a large fraction of the cycle budget and delay the monitor's primary job.</p>
+<div class="fix"><strong>Fix:</strong> The monitor writes to a local durable outbox and returns immediately. A separate worker delivers with retry, backoff and jitter. Delivery latency is then decoupled from the poll loop entirely, and signals survive a bot outage instead of being dropped.</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">H-10</span>
+<h4><span class="sev high">high</span> JSON state file is not crash-safe</h4>
+<p>A trading ledger held in a JSON file rewritten in place will eventually be truncated by a crash or power loss mid-write, and there is no transaction boundary around "order submitted" and "position recorded". The document's own failure table assumes the file survives a crash; nothing in the design makes that true.</p>
+<div class="fix"><strong>Fix:</strong> SQLite in WAL mode with real transactions, or Postgres if the deployment consolidates. Append-only event table as the source of truth, derived state as projections. Atomic writes and a backup on every slate boundary.</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">H-11</span>
+<h4><span class="sev high">high</span> Concurrent positions are sized as if independent</h4>
+<p>Kelly is derived for sequential, independent bets. Ten simultaneous NBA positions on one evening's slate are none of those things: they share a model, a feature pipeline, a calibration curve and a market regime. If the model is miscalibrated tonight, it is miscalibrated on all ten. Sizing each at half-Kelly independently produces total risk well above the intended half-Kelly.</p>
+<div class="fix"><strong>Fix:</strong> Size against a slate-level budget rather than per-game caps alone. A defensible simple rule is to scale each position by <code>1/&radic;n</code> in the expected number of concurrent positions, with a hard slate exposure cap. The principled version is a portfolio optimisation over the joint outcome distribution (Section 13).</div>
+</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════ 3. MEDIUM / LOW ═══ -->
+<h2 id="s3"><span class="num">03</span>Medium &amp; Low Findings</h2>
+
+<table>
+<thead><tr><th>#</th><th>Severity</th><th>Finding</th><th>Recommended change</th></tr></thead>
+<tbody>
+<tr><td class="k">M-01</td><td class="sev medium">medium</td><td><code>signal_id</code> is described as deterministic but embeds a Unix timestamp, so every fire produces a new ID.</td><td>Either make it deterministic (<code>pw_{game_id}_{predicted_team}</code>) so it works as an idempotency key, or drop the determinism claim and document that dedup is state-based only.</td></tr>
+<tr><td class="k">M-02</td><td class="sev medium">medium</td><td>Slug construction by string formatting is brittle. Gamma exposes structured sports discovery that makes it unnecessary.</td><td>Resolve via sports/series/tag endpoints and a persistent team mapping. See Section 08.</td></tr>
+<tr><td class="k">M-03</td><td class="sev medium">medium</td><td>"Each game has two complementary markets" is imprecise. A moneyline is one market with two complementary outcome tokens summing to $1.</td><td>Correct the description &mdash; the distinction drives both exposure accounting and the best-execution check in Section 07.</td></tr>
+<tr><td class="k">M-04</td><td class="sev low">amended</td><td><strong>This review's initial scepticism was wrong.</strong> The "EU (Ireland) ~1&ndash;5ms" claim was challenged here on the assumption the CLOB sits in US-East. Restriction trackers report primary operations on London <code>eu-west-2</code> with <code>eu-west-1</code> in Ireland as the secondary hub, which would make single-digit latency from Ireland entirely plausible.</td><td>Rev 1 was probably right. Still measure rather than assume &mdash; but Ireland now looks like a strong hosting candidate on latency grounds as well as availability. See Section 16.</td></tr>
+<tr><td class="k">M-05</td><td class="sev high">upgraded</td><td>The geo table is stale in both directions: the US is listed as blocked when a CFTC-regulated US venue now exists, and Singapore is listed as accessible when it has been blocked since January 2025 (C-06). Thailand and Taiwan are also absent.</td><td>Rebuild the table from the live geoblock reference, timestamp it, and re-check on a schedule. Treat every row as perishable.</td></tr>
+<tr><td class="k">M-06</td><td class="sev medium">medium</td><td><code>bankroll</code> is used in the sizing formula but never defined.</td><td>Define as free USDC plus mark-to-market open positions, fixed at slate start to avoid path-dependent sizing within an evening.</td></tr>
+<tr><td class="k">M-07</td><td class="sev medium">medium</td><td>Only monitor-side config is specified. <code>min_wallet_balance</code>, <code>max_bet_per_game</code>, <code>trading_enabled</code> and others are referenced but never given types or defaults.</td><td>Publish the bot-side config schema, validate with a typed model at start-up, and refuse to boot on an invalid or incomplete config.</td></tr>
+<tr><td class="k">M-08</td><td class="sev medium">medium</td><td>Daily loss limit is implicitly realised P&amp;L, but positions settle hours after entry, so the control fires long after the risk was taken.</td><td>Evaluate the limit on mark-to-market including open positions, continuously.</td></tr>
+<tr><td class="k">M-09</td><td class="sev medium">medium</td><td>The CLOB WebSocket is listed as available but the design polls REST throughout.</td><td>Subscribe to books for the active slate and to the user channel for fills. Lower latency, fewer rate-limit problems, and it makes the exit logic in H-08 feasible.</td></tr>
+<tr><td class="k">M-10</td><td class="sev medium">medium</td><td>No observability. If the bot dies at 3am nobody learns until the morning.</td><td>Heartbeat to an external dead-man switch, metrics, and a phone alert on kill-switch activation, reconciliation failure or missed settlement.</td></tr>
+<tr><td class="k">M-11</td><td class="sev medium">medium</td><td>No order idempotency. A crash between submit and record can double-place on restart.</td><td>Client-generated order IDs derived from <code>(signal_id, attempt)</code>, plus reconcile-before-trade.</td></tr>
+<tr><td class="k">M-12</td><td class="sev medium">medium</td><td>Open question 5 asks whether historical price data exists. It does &mdash; the CLOB exposes a prices-history endpoint returning share-price candles per token.</td><td>Close the question and use it, with the caveat that it is one token at a time and needs reconciling against game identity.</td></tr>
+<tr><td class="k">M-13</td><td class="sev medium">medium</td><td>Oracle's free tier is recommended while the same table notes it "may reclaim idle instances" &mdash; with open positions.</td><td>Acceptable given positions are on-chain (H-05), but requires the reconciliation loop and a documented rebuild procedure. Test the rebuild before Phase 4.</td></tr>
+<tr><td class="k">M-14</td><td class="sev medium">medium</td><td>Isotonic regression on ~50 points will overfit badly and produce a step function with near-zero effective resolution.</td><td>Use Platt scaling or beta calibration until several hundred samples exist, with cross-validated selection. Report the calibration standard error, and feed it into sizing (Section 06).</td></tr>
+<tr><td class="k">L-01</td><td class="sev low">low</td><td>Fire-and-forget with no retry is described as self-healing via the next poll cycle, but a single-fire signal is lost outright.</td><td>Resolved by the outbox in H-09.</td></tr>
+<tr><td class="k">L-02</td><td class="sev low">low</td><td>"Only the first fire per game should trigger a trade" conflicts with the retry-by-next-cycle recovery story, which necessarily trades on a later fire.</td><td>State the intended behaviour: first <em>successfully delivered</em> fire, with degraded entry accepted.</td></tr>
+<tr><td class="k">L-03</td><td class="sev low">low</td><td>Rewards are mentioned as offsetting fees but never designed for.</td><td>Maker-first execution (Section 07) captures them as a side effect.</td></tr>
+<tr><td class="k">L-04</td><td class="sev low">low</td><td>Resolution edge cases (overtime, suspension, postponement, disputed oracle outcomes) are an open question with no interim policy.</td><td>Define a default: treat unresolved beyond N hours as an alert, hold, and exclude from performance statistics until settled.</td></tr>
+<tr><td class="k">L-05</td><td class="sev low">low</td><td>Memory figures for consolidated deployment omit the database, WebSocket buffers and the order-book snapshot recorder.</td><td>Re-measure after Phase 0; snapshot recording is the largest new consumer.</td></tr>
+<tr><td class="k">L-06</td><td class="sev low">low</td><td>No log redaction policy; signatures and key material can end up in logs.</td><td>Redact at the formatter, not the call site.</td></tr>
+<tr><td class="k">L-07</td><td class="sev low">low</td><td>Withdrawal costs and the round trip of moving USDC on and off the platform are omitted from the cost model.</td><td>Add to the infrastructure table; on a $100&ndash;500 bankroll these are not negligible relative to expected profit.</td></tr>
+</tbody>
+</table>
+
+
+<!-- ═══════════════════════════════════════════ 4. FACTUAL ═══ -->
+<h2 id="s4"><span class="num">04</span>Factual Corrections</h2>
+<p class="lede">Claims in Rev 1 that are outdated or unverified, with current positions. Several of these close open questions the document had scheduled for Phase 1 investigation.</p>
+
+<table>
+<thead><tr><th>Rev 1 claim</th><th>Status</th><th>Current position</th></tr></thead>
+<tbody>
+<tr>
+  <td>"Maker: 0%. Taker: ~2% of notional."</td>
+  <td class="sev critical">wrong</td>
+  <td>Category-based taker fees, with sports at rate 0.05 and a $1.25 maximum per 100 shares since July 2026; makers pay $0 and earn rebates. The fee is a function of price, not a flat rate. See C-02.</td>
+</tr>
+<tr>
+  <td>Open question 1: do markets stay open for in-game trading?</td>
+  <td class="sev done">resolved</td>
+  <td>Yes. Polymarket runs live in-play sports trading across NBA and other leagues with real-time odds and scores. This is the premise the whole design depends on, and it holds.</td>
+</tr>
+<tr>
+  <td>Open question 5: is historical price data available?</td>
+  <td class="sev done">resolved</td>
+  <td>Yes, via the CLOB price-history endpoint, per token. It returns candles for a single token at a time, which is workable for one market but laborious across a full backtest. Budget for the reconciliation work.</td>
+</tr>
+<tr>
+  <td>"Singapore — Accessible. Not on restricted list. Recommended VPS location."</td>
+  <td class="sev critical">wrong</td>
+  <td>Blocked since 12 January 2025 by GRA order under the Gambling Control Act 2022, with ISP-level DNS blocking. All three of Rev 1's hosting options are in Singapore. See C-06.</td>
+</tr>
+<tr>
+  <td>"Malaysia — Accessible. Not on restricted list."</td>
+  <td class="sev high">incomplete</td>
+  <td>Accurate as a statement about platform access, and misleading as a statement about legality. Malaysia is not on the block list, but no regulator has ruled on prediction markets and the surrounding gambling law is restrictive. See Section 16.</td>
+</tr>
+<tr>
+  <td>"United States — Blocked."</td>
+  <td class="sev medium">outdated</td>
+  <td>A separate CFTC-regulated US venue exists following the QCEX acquisition, with its own flat fee schedule and maker rebate. Not relevant to this operator, but the table should be accurate.</td>
+</tr>
+<tr>
+  <td>Slug pattern <code>nba-{away}-{home}-{date}</code> as the resolution mechanism.</td>
+  <td class="sev medium">fragile</td>
+  <td>Gamma exposes structured discovery &mdash; sports metadata, series, tag IDs and team endpoints &mdash; which is a far more robust path than constructing strings. Note also that the events endpoint does not support free-text search; filtering must be by slug or tag.</td>
+</tr>
+<tr>
+  <td>"EU (Ireland) ~1&ndash;5ms to Polymarket infra."</td>
+  <td class="sev medium">unverified</td>
+  <td>Implausible unless the CLOB is in the same region. Measure before choosing on this basis.</td>
+</tr>
+<tr>
+  <td>NBA/WNBA market liquidity assumed adequate pending survey.</td>
+  <td class="sev high">caution</td>
+  <td>Third-party analysis notes that Polymarket depth on routine fixtures is thin and often inactive, with volume concentrating on headline games. Expect the Phase 1 survey to disqualify a meaningful share of the slate, and expect WNBA to be worse.</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">
+<h4>Treat platform facts as runtime configuration, not documentation</h4>
+<p>The fee schedule moved twice in 2026 and the sports rate rose within the last month. Anything in this class &mdash; fee rates, geo lists, minimum order sizes, endpoint shapes &mdash; should be loaded from config, asserted against observed behaviour at run time, and alerted on when reality and assumption diverge. A bot that hard-codes a fee constant will quietly trade at negative edge the day the schedule changes.</p>
+</div>
+
+
+<!-- ═══════════════════════════════════════════ 5. MEASUREMENT ═══ -->
+<h2 id="s5"><span class="num">05</span>The Measurement Problem</h2>
+<p class="lede">The most consequential weakness in Rev 1 is not a coding error. It is that the plan cannot answer its own central question &mdash; does this edge exist? &mdash; within any realistic number of trades.</p>
+
+<h3>Why 50 trades tells you nothing</h3>
+<p>For a contract bought at price <code>q</code> with true win probability <code>p</code>, the return per unit staked is <code>(1&minus;q)/q</code> on a win and <code>&minus;1</code> on a loss. At <code>q = 0.62, p = 0.70</code> the mean return is 12.9% and the standard deviation is 0.739. The minimum ROI detectable at 80% power with a one-sided 5% test scales as <code>2.49 &times; &sigma; / &radic;n</code>:</p>
+
+<table>
+<thead><tr><th>Trades</th><th>Std. error of ROI</th><th>Smallest detectable true ROI</th><th>Verdict</th></tr></thead>
+<tbody>
+<tr><td class="num">50</td><td class="num">10.5 pp</td><td class="num">26.0%</td><td>Uninformative</td></tr>
+<tr><td class="num">100</td><td class="num">7.4 pp</td><td class="num">18.4%</td><td>Uninformative</td></tr>
+<tr><td class="num">250</td><td class="num">4.7 pp</td><td class="num">11.6%</td><td>Weak</td></tr>
+<tr><td class="num">500</td><td class="num">3.3 pp</td><td class="num">8.2%</td><td>Weak</td></tr>
+<tr><td class="num">1,000</td><td class="num">2.3 pp</td><td class="num">5.8%</td><td>Marginal</td></tr>
+<tr><td class="num">2,000</td><td class="num">1.7 pp</td><td class="num">4.1%</td><td>Usable</td></tr>
+<tr><td class="num">4,000</td><td class="num">1.2 pp</td><td class="num">2.9%</td><td>Good</td></tr>
+</tbody>
+</table>
+
+<p>A realistic post-fee edge for this kind of system is in the low single digits. Detecting a 5% true ROI takes roughly 1,350 trades. At three to eight PW calls per game, deduplicated to one trade per game, and a fraction of games passing the edge gate, that is one to three full seasons. <strong>ROI is not a viable primary gate on any timeline the project cares about.</strong></p>
+
+<h3>The alternative: closing-line value</h3>
+<p>Closing-line value measures the price you paid against the price the market settled at just before resolution. It works because the closing price is the market's most informed estimate, so beating it consistently is direct evidence of informational edge &mdash; and because it is a price difference rather than a binary outcome, its variance is one to two orders of magnitude smaller.</p>
+<p>Empirically CLV per bet has a standard deviation of a few percentage points rather than 74. Detecting a mean CLV of +1pp at 80% power takes on the order of 50&ndash;100 observations rather than 1,350. That brings validation inside a single paper-trading phase.</p>
+
+<div class="note ok">
+<h4>Recommended KPI hierarchy</h4>
+<ol>
+  <li><strong>Primary gate: mean CLV &gt; 0 with a confidence interval excluding zero.</strong> Measured as entry price versus the last traded price before resolution, on the same token.</li>
+  <li><strong>Secondary gate: calibration.</strong> Reliability of the calibrated probability against outcomes, with reported standard error, not a bare ECE threshold on 50 samples.</li>
+  <li><strong>Monitoring only: ROI and hit rate.</strong> Tracked and reported, never used as a go/no-go before four figures of trades.</li>
+  <li><strong>Diagnostic: adverse selection.</strong> Price movement in the 1, 5 and 30 minutes after each fill. Consistent movement against you after entry means the counterparty knew more, and is the earliest warning that the edge is illusory.</li>
+</ol>
+</div>
+
+<p>One caution: CLV on in-play markets is subtler than pre-game CLV because the fair value moves with the game state, not just with information. Measure CLV against the price at a fixed horizon after entry as well as at close, and interpret both.</p>
+
+<h3>Pre-register the analysis</h3>
+<p>With this many dimensions available for slicing &mdash; quarter, consensus type, price band, league, margin, day of week &mdash; some subset will look profitable by chance. Decide in advance which segmentation defines success and how many hypotheses are being tested, and hold to it. Otherwise Phase 3 will find an edge whether or not one exists.</p>
+
+
+<!-- ═══════════════════════════════════════════ 6. EDGE MODEL ═══ -->
+<h2 id="s6"><span class="num">06</span>Corrected Edge &amp; Sizing Model</h2>
+<p class="lede">Replacement mathematics for Section 7 of Rev 1, with fees, book depth and estimation uncertainty handled explicitly.</p>
+
+<div class="ba">
+<div class="was"><h5>Rev 1</h5><pre><code>market_prob = polymarket_ask_price
+edge = calibrated_prob - market_prob
+ev = calibrated_prob * (1/market_prob - 1)
+     - (1 - calibrated_prob)
+
+f_kelly = edge / (1/market_prob - 1)
+f_half  = f_kelly / 2
+position_usd = bankroll * f_half</code></pre></div>
+<div class="now"><h5>Rev 2</h5><pre><code>cost = sweep_price(book, shares)
+       + taker_fee(price, theta)      # 0 if maker
+edge = p_lower - cost                 # p_lower is
+                                      # uncertainty-adjusted
+ev   = edge / cost
+
+f    = (p_lower - cost) / (1 - cost)
+size = bankroll_slate_start
+       * f * KELLY_FRAC * consensus_mult
+       / sqrt(expected_concurrent)</code></pre></div>
+</div>
+
+<h3>Fees in probability space</h3>
+<pre><code>SPORTS_THETA = 0.05        # intl schedule, sports, Jul 2026. Load from config; verify at runtime.
+
+def taker_fee_per_share(price: float, theta: float = SPORTS_THETA) -> float:
+    """Dollars per share. Charged on BUY only -- SELL is fee-free.
+    Denominated per share, so it subtracts directly from edge in probability points."""
+    return theta * price * (1.0 - price)
+
+def effective_cost(price: float, is_taker: bool, theta: float = SPORTS_THETA) -> float:
+    return price + (taker_fee_per_share(price, theta) if is_taker else 0.0)</code></pre>
+
+<h3>Depth-weighted entry price</h3>
+<pre><code>def sweep_price(asks, shares_wanted):
+    """asks: [(price, size), ...] ascending by price.
+    Returns (vwap, shares_fillable, worst_level). Never assume top-of-book is the fill."""
+    remaining, notional, worst = shares_wanted, 0.0, None
+    for price, available in asks:
+        take = min(remaining, available)
+        notional += take * price
+        worst = price
+        remaining -= take
+        if remaining &lt;= 0:
+            return notional / shares_wanted, shares_wanted, worst
+    filled = shares_wanted - remaining
+    return (notional / filled if filled else None), filled, worst</code></pre>
+<p>If the sweep cannot fill the intended size within the slippage cap, reduce size until it can rather than skipping outright &mdash; a smaller position at good prices beats no position, and beats a full position at bad ones.</p>
+
+<h3>Best execution across the complementary token</h3>
+<p>A moneyline market has two outcome tokens that sum to $1. Buying team A is economically identical to selling team B, and the two books do not always agree. Checking both routinely picks up half a cent to a cent, which on an 8-point edge is worth having.</p>
+<pre><code>def best_entry(book_a, book_b):
+    """Buying YES_A == selling YES_B. Compare the direct ask against the synthetic route."""
+    direct    = book_a.best_ask
+    synthetic = 1.0 - book_b.best_bid
+    return ("direct", direct) if direct &lt;= synthetic else ("synthetic_via_b", synthetic)</code></pre>
+
+<h3>Canonical Kelly, with uncertainty</h3>
+<pre><code>def kelly_fraction(p: float, cost: float) -> float:
+    """Growth-optimal fraction for a binary contract.
+    Derivation: maximise p*ln(1 + f*(1-c)/c) + (1-p)*ln(1 - f)  ->  f* = (p - c)/(1 - c).
+    ONE canonical form. Do not reintroduce alternates."""
+    if not 0.0 &lt; cost &lt; 1.0:
+        raise ValueError(f"cost out of range: {cost}")
+    return max(0.0, (p - cost) / (1.0 - cost))
+
+
+def position_size(p_hat, se_p, cost, cfg, bankroll, n_concurrent, consensus):
+    # Size on a lower bound of the probability estimate, not the point estimate.
+    # With a young calibration curve se_p is large and this correctly shrinks size toward zero.
+    p_lower = p_hat - cfg.uncertainty_k * se_p
+
+    f = kelly_fraction(p_lower, cost)
+    f *= cfg.kelly_fraction                      # 0.5 = half-Kelly
+    f *= cfg.consensus_multiplier[consensus]
+    f /= max(1.0, n_concurrent) ** 0.5           # correlation haircut (H-11)
+
+    return min(
+        bankroll * f,
+        cfg.max_bet_per_game,
+        cfg.max_slate_exposure - open_slate_exposure(),
+        cfg.max_total_exposure - open_total_exposure(),
+    )</code></pre>
+
+<div class="note">
+<h4>The uncertainty term is the point, not a refinement</h4>
+<p>Half-Kelly applied to a confidently wrong probability is still ruinous; the fraction protects against variance, not against bias. Sizing on <code>p_hat &minus; k&middot;se</code> means a calibration curve fitted on 50 samples, where the standard error is around 7 points, will wipe out most 8-point edges and size almost nothing. That is the correct behaviour. The system should start out barely able to trade and earn its way to size as the evidence accumulates.</p>
+</div>
+
+<h3>Revised gates</h3>
+<table>
+<thead><tr><th>Parameter</th><th>Rev 1</th><th>Rev 2</th><th>Reason</th></tr></thead>
+<tbody>
+<tr><td class="k">Primary gate</td><td>edge &ge; 0.08 AND ev &ge; 0.05</td><td>ev &ge; configured floor, post-fee, on <code>p_lower</code></td><td>The two gates were redundant; EV is the meaningful one (H-01)</td></tr>
+<tr><td class="k">Price input</td><td>best ask</td><td>sweep price for intended size</td><td>C-04</td></tr>
+<tr><td class="k">Fee</td><td>flat ~2%</td><td>&theta;&middot;p&middot;(1&minus;p), maker = 0</td><td>C-02</td></tr>
+<tr><td class="k">Probability</td><td>calibrated point estimate</td><td>calibrated minus k standard errors</td><td>Sizing must respect estimation error</td></tr>
+<tr><td class="k">max_price</td><td>0.90</td><td>0.90, plus a check that remaining upside exceeds two ticks</td><td>Near the boundary the spread dominates the edge</td></tr>
+<tr><td class="k">min_price</td><td>0.15</td><td>0.15, and require book depth at size</td><td>Depth matters more than price level</td></tr>
+</tbody>
+</table>
+
+<h3>A structural tension worth confronting early</h3>
+<p>Average PW confidence at fire is around 72%. For an 8-point edge to exist, Polymarket must be pricing the same team at or below 64&cent;. But PW fires on teams that are already ahead &mdash; the payload example shows an 8-point lead in Q2 &mdash; and a live market will typically have that team well above 64&cent; already. The edge and the signal are pulling in opposite directions.</p>
+<p>This is open question 2 in Rev 1, and it is the question. Phase 1 should not merely survey liquidity; it should join historical PW fire timestamps to historical token prices and produce the distribution of <code>market_price_at_fire &minus; pw_confidence</code>. That analysis needs no capital, no bot and no VPS, and it can be done this week from the price-history endpoint. If the distribution is centred at or below zero, the project stops there and a great deal of engineering is saved.</p>
+
+
+<!-- ═══════════════════════════════════════════ 7. EXECUTION ═══ -->
+<h2 id="s7"><span class="num">07</span>Execution Strategy</h2>
+<p class="lede">Rev 1 crosses the spread on every entry. Given the current fee schedule, execution policy is one of the largest controllable inputs to returns.</p>
+
+<h3>Cost of the current design</h3>
+<table>
+<thead><tr><th>Component</th><th>Cost at 62&cent; entry</th><th>Avoidable?</th></tr></thead>
+<tbody>
+<tr><td>Taker fee</td><td class="num">1.18 pp</td><td>Yes &mdash; makers pay zero</td></tr>
+<tr><td>Deliberate +$0.01 concession</td><td class="num">1.00 pp</td><td>Yes &mdash; only needed to guarantee a fill</td></tr>
+<tr><td>Maker rebate forgone</td><td class="num">~0.1&ndash;0.2 pp</td><td>Yes</td></tr>
+<tr><td>Half-spread</td><td class="num">0.5&ndash;1.5 pp</td><td>Partly &mdash; capturable by posting</td></tr>
+<tr><td><strong>Total</strong></td><td class="num"><strong>~2.8&ndash;3.9 pp</strong></td><td>Against an 8 pp gate: 35&ndash;49% of edge</td></tr>
+</tbody>
+</table>
+
+<h3>Maker-first ladder</h3>
+<pre><code>PLAN = [
+    # (offset from best bid, seconds to rest, role)
+    (+0.00, 8,  "maker"),   # join the bid
+    (+0.01, 8,  "maker"),   # improve one tick
+    (+0.02, 6,  "maker"),   # improve again, still passive
+    ("cross", 0, "taker"),  # take, only if edge still clears post-fee
+]
+
+for offset, rest, role in PLAN:
+    if not edge_still_clears(role):     # re-price the book, re-check the gate every step
+        return abandon("edge decayed")
+    place_or_amend(offset)
+    if wait_for_fill(rest):
+        return filled()
+return abandon("unfilled")</code></pre>
+
+<p>The critical property is that the gate is re-evaluated at every rung. The taker fee is only incurred at the last step and only if the trade is still worth doing once it is charged. Partial fills are kept, not cancelled &mdash; a half-filled position at a good price is a good outcome.</p>
+
+<h3>Design notes</h3>
+<ul>
+  <li><strong>Rest times must be tuned against edge decay, not guessed.</strong> Phase 3 should measure how fast the price moves after a PW fire; if the market repricess in under ten seconds, patient posting loses more to decay than it saves in fees, and the ladder should compress. This is an empirical question the paper phase can answer directly.</li>
+  <li><strong>Cancel/replace has a rate-limit cost.</strong> Amend rather than cancel-and-repost where the API supports it, and cap repricing frequency.</li>
+  <li><strong>Exits go through the same ladder without the fee branch</strong>, since sells are not charged. Exit orders can be more patient.</li>
+  <li><strong>Log the counterfactual.</strong> For every fill, record what an immediate cross would have cost. This produces a direct measurement of the execution policy's value and settles the question empirically within a few dozen trades.</li>
+</ul>
+
+<div class="note">
+<h4>A caution on maker orders</h4>
+<p>Resting orders get filled preferentially when the market is moving against you &mdash; that is what adverse selection means. A maker-first policy will show excellent average fill prices and a worse fill-conditional win rate than a taker policy. Both effects are real and they partly offset. The adverse-selection diagnostic in Section 05 exists precisely to measure the net, and it should be reported alongside execution savings rather than the savings being claimed alone.</p>
+</div>
+
+
+<!-- ═══════════════════════════════════════════ 8. RESOLUTION ═══ -->
+<h2 id="s8"><span class="num">08</span>Market Resolution Redesign</h2>
+<p class="lede">String-built slugs are the wrong mechanism, and the failure mode is silent: an unmatched slug looks identical to a game with no market.</p>
+
+<h3>Why the current approach breaks</h3>
+<ul>
+  <li><strong>Naming variance:</strong> LA Clippers versus Los Angeles Clippers; Trail Blazers hyphenation; the leading digit in 76ers; WNBA expansion sides such as Toronto Tempo and Portland Fire that post-date any hard-coded map.</li>
+  <li><strong>Date arithmetic:</strong> the off-by-one defect in C-05, plus doubleheaders and rescheduled games.</li>
+  <li><strong>Neutral sites and specials:</strong> international games, in-season tournament fixtures and play-in games frequently carry different naming.</li>
+  <li><strong>Silent failure:</strong> Rev 1 logs a warning and skips. On a bad slate that could be most of the card, and the bot would look healthy.</li>
+</ul>
+
+<h3>Recommended resolver</h3>
+<pre><code>Resolution chain, first match wins, every step logged:
+
+  1. Cached mapping    game_id -> (condition_id, token_ids)     # persisted, survives restart
+  2. Structured lookup Gamma /sports + series + tag_id, filtered to
+                       the venue-local date window, matched on the team pair
+                       via a persisted team-ID map (ESPN id -> Polymarket team)
+  3. Fuzzy fallback    normalised team-name match within the date window,
+                       accepted only above a similarity threshold
+  4. Unresolved        -> ALERT, record for manual mapping, never silently skip</code></pre>
+
+<p>Two properties matter more than the mechanism. First, <strong>pre-resolve the whole slate before games start</strong> &mdash; typically six hours ahead &mdash; so that resolution latency is entirely off the critical path when a signal fires and any unmatched game is surfaced while there is still time to fix it by hand. Second, <strong>track the unresolved rate as a first-class metric</strong>. A resolver that silently degrades from 95% to 60% coverage is indistinguishable from a quiet week unless somebody is counting.</p>
+
+<p>The persisted team map should be seeded once from the Gamma teams endpoint and then treated as data, not code, so a new expansion franchise is a config change rather than a deploy.</p>
+
+
+<!-- ═══════════════════════════════════════════ 9. ARCHITECTURE ═══ -->
+<h2 id="s9"><span class="num">09</span>Revised Architecture</h2>
+<p class="lede">The two-node split is right. The transport, the internal decomposition and the storage layer all need reworking.</p>
+
+<div class="arch">
+AU Server (monitor)                              Remote VPS (trading bot)
+&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;                     &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+&#9474; PW call fires                &#9474;                     &#9474;  INGEST     validate, dedupe,       &#9474;
+&#9474;   &#9500;&#9472; write to signal outbox     &#9474;   bot pulls, with   &#9474;               persist Signal event  &#9474;
+&#9474;   &#9492;&#9472; return immediately (&lt;1ms)  &#9474;&#9668;&#9472;&#9472;cursor + backoff&#9472;&#9472;&#9472;&#9500;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9474;
+&#9474;                              &#9474;                     &#9474;  DECIDE     pure function:         &#9474;
+&#9474; GET /signals?since=&lt;cursor&gt;   &#9474;                     &#9474;               (signal, book, cfg,   &#9474;
+&#9474;   signed, Tailscale-only      &#9474;                     &#9474;                calib) -&gt; Decision    &#9474;
+&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;                     &#9500;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9474;
+                                                      &#9474;  EXECUTE    maker ladder, order    &#9474;
+   No inbound port on the bot.                        &#9474;               lifecycle, reconcile  &#9474;
+   Replay is free: rewind the cursor.                 &#9500;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9474;
+   Outage loses nothing.                              &#9474;  ACCOUNT    settlement, P&amp;L, CLV,  &#9474;
+                                                      &#9474;               chain reconciliation  &#9474;
+                                                      &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
+                                                             &#9474;
+                              &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+                              &#9474;  SQLite (WAL): append-only event log     &#9474;
+                              &#9474;  + projections + L2 book snapshots       &#9474;
+                              &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</div>
+
+<h3>Three structural changes</h3>
+
+<h4>1. Invert the transport: the bot pulls</h4>
+<p>Rev 1 has the monitor push to an internet-facing HTTPS endpoint on the bot. Inverting it so the bot polls a signed, cursor-based feed on the monitor is strictly better on four dimensions: no inbound port on the machine holding the wallet, at-least-once delivery with no bespoke retry logic, free replay by rewinding the cursor, and no signal loss during a bot outage. The monitor's write becomes a local append that returns in microseconds, which also fixes H-09.</p>
+<p>If push is preferred for latency, keep it but back it with the outbox and a reconciling pull, so the push is an optimisation rather than the delivery guarantee.</p>
+
+<h4>2. Separate decide from execute</h4>
+<p>Rev 1 describes eight components but a single linear pipeline. Splitting the decision into a pure function &mdash; <code>(signal, book snapshot, config, calibration) &rarr; Decision</code>, no I/O, no clock, no randomness &mdash; buys an enormous amount:</p>
+<ul>
+  <li>Every decision is unit-testable against a fixture.</li>
+  <li>Every historical day can be replayed under different parameters, exactly, without touching the network.</li>
+  <li>Paper mode and live mode run identical decision code, so paper results actually predict live behaviour. In Rev 1 they are separate paths, which is how paper-to-live discrepancies get born.</li>
+  <li>Champion/challenger becomes trivial: run N configurations over the same snapshot stream.</li>
+</ul>
+
+<h4>3. Event-sourced storage</h4>
+<p>An append-only event log (<code>SignalReceived</code>, <code>MarketResolved</code>, <code>DecisionMade</code>, <code>OrderSubmitted</code>, <code>OrderFilled</code>, <code>PositionSettled</code>, <code>ReconciliationRun</code>) with derived projections gives the audit trail design principle 5 asks for, as a property of the storage model rather than as a logging convention that drifts. Each <code>DecisionMade</code> event stores the full input snapshot including the L2 book, the calibration model version and a hash of the config, so any trade can be explained months later.</p>
+
+<h3>Latency budget</h3>
+<table>
+<thead><tr><th>Stage</th><th>Rev 1</th><th>Rev 2</th><th>How</th></tr></thead>
+<tbody>
+<tr><td>Signal generation</td><td class="num">0&ndash;30 s</td><td class="num">0&ndash;30 s</td><td>Unchanged; dominated by the poll cycle</td></tr>
+<tr><td>Delivery</td><td class="num">up to 5 s</td><td class="num">&lt;200 ms</td><td>Local append plus short-poll cursor</td></tr>
+<tr><td>Market resolution</td><td class="num">200&ndash;800 ms</td><td class="num">~0 ms</td><td>Pre-resolved at slate load</td></tr>
+<tr><td>Price fetch</td><td class="num">200&ndash;500 ms</td><td class="num">~0 ms</td><td>WebSocket book held in memory</td></tr>
+<tr><td>Decision</td><td class="num">&mdash;</td><td class="num">&lt;5 ms</td><td>Pure function, no I/O</td></tr>
+<tr><td>Order submit</td><td class="num">1 RTT</td><td class="num">1 RTT</td><td>Irreducible</td></tr>
+<tr><td><strong>Signal to order</strong></td><td class="num"><strong>~3&ndash;6 s</strong></td><td class="num"><strong>&lt;1 s</strong></td><td></td></tr>
+</tbody>
+</table>
+
+<p>Whether this matters depends on which regime the strategy is in, and that is worth determining before optimising. If the edge is informational &mdash; PW knows something the market has not priced &mdash; then several seconds are irrelevant and the effort belongs elsewhere. If the edge comes from reacting to a score change faster than the market reprices, then the 30-second poll cycle dominates everything else and the right fix is event-driven scoring on score change rather than latency work downstream. Phase 3's edge-decay measurement answers this directly, and the answer should redirect the engineering.</p>
+
+
+<!-- ═══════════════════════════════════════════ 10. RELIABILITY ═══ -->
+<h2 id="s10"><span class="num">10</span>Reliability &amp; Operations</h2>
+
+<h3>Additions to the failure-mode table</h3>
+<table>
+<thead><tr><th>Failure</th><th>Rev 1</th><th>Required behaviour</th></tr></thead>
+<tbody>
+<tr><td>Crash between submit and record</td><td>not covered</td><td>Client order ID from <code>(signal_id, attempt)</code>; reconcile against CLOB order history before any new order on boot.</td></tr>
+<tr><td>Partial fill</td><td>not covered</td><td>Keep the fill, recompute remaining size against current edge, decide whether to continue working the balance.</td></tr>
+<tr><td>WebSocket disconnects mid-slate</td><td>not covered</td><td>Reconnect with backoff; refuse to trade on a stale book beyond N seconds; fall back to REST with an explicit staleness flag on the decision.</td></tr>
+<tr><td>Ledger disagrees with chain</td><td>not covered</td><td>Halt trading, alert, require operator acknowledgement. Never auto-resolve a discrepancy in the direction of trading.</td></tr>
+<tr><td>Settlement never arrives</td><td>not covered</td><td>Alert after a configured window; exclude from statistics until resolved; hold the position.</td></tr>
+<tr><td>Clock skew between hosts</td><td>not covered</td><td>NTP required; refuse signals outside the signature time window and alert rather than silently dropping.</td></tr>
+<tr><td>Config changed without restart</td><td>not covered</td><td>Hash config into every decision event; reject hot edits to risk parameters mid-slate.</td></tr>
+<tr><td>VPS terminated with open positions</td><td>implied</td><td>Positions are on-chain and settle regardless. Document the rebuild procedure and test it before Phase 4.</td></tr>
+</tbody>
+</table>
+
+<h3>Observability</h3>
+<ul>
+  <li><strong>Dead-man switch:</strong> external heartbeat that alerts if the bot stops checking in. This is the single most valuable operational addition &mdash; the worst failure is one nobody notices.</li>
+  <li><strong>Metrics:</strong> signals received, decisions by outcome, unresolved-market rate, orders by terminal state, fill rate, realised versus predicted slippage, book staleness, reconciliation lag, wallet balance.</li>
+  <li><strong>Alerts to a phone, not a log:</strong> kill switch activated, reconciliation mismatch, balance below floor, unresolved rate above threshold, fee deviating from prediction.</li>
+  <li><strong>Daily digest:</strong> trades, CLV, execution quality, open risk. If it is not readable in thirty seconds on a phone it will not be read.</li>
+</ul>
+
+
+<!-- ═══════════════════════════════════════════ 11. RISK ═══ -->
+<h2 id="s11"><span class="num">11</span>Risk Management Gaps</h2>
+
+<h3>Revised limit structure</h3>
+<table>
+<thead><tr><th>Limit</th><th>Rev 1</th><th>Rev 2</th><th>Reason</th></tr></thead>
+<tbody>
+<tr><td class="k">max_bet_per_game</td><td class="num">$50</td><td class="num">$50</td><td>Retained</td></tr>
+<tr><td class="k">max_slate_exposure</td><td>&mdash;</td><td class="num">$150</td><td>New. Concurrent positions are correlated (H-11); the per-game cap does not bound an evening.</td></tr>
+<tr><td class="k">max_total_exposure</td><td class="num">$500</td><td class="num">$500</td><td>Retained</td></tr>
+<tr><td class="k">max_daily_loss</td><td class="num">$200 realised</td><td class="num">$150 mark-to-market</td><td>Must include open positions or it fires after the fact (M-08)</td></tr>
+<tr><td class="k">max_drawdown_from_peak</td><td>&mdash;</td><td class="num">25%</td><td>New. Bounds the slow bleed that daily limits never catch.</td></tr>
+<tr><td class="k">loss_streak_derisk</td><td>&mdash;</td><td class="num">halve size after 5</td><td>New. Graduated response before the hard stop.</td></tr>
+<tr><td class="k">max_concurrent_positions</td><td class="num">10</td><td class="num">10</td><td>Retained, now secondary to the slate cap</td></tr>
+<tr><td class="k">max_wnba_exposure_pct</td><td class="num">30%</td><td class="num">15% until proven</td><td>Thin books; raise once the WNBA survey supports it</td></tr>
+<tr><td class="k">profit_sweep_threshold</td><td>&mdash;</td><td class="num">bankroll + 50%</td><td>New. Move profit off-platform; platform risk is real and uninsured</td></tr>
+</tbody>
+</table>
+
+<h3>Risks Rev 1 does not name</h3>
+<ul>
+  <li><strong>Resolution and oracle risk.</strong> Outcomes are settled by an oracle process that can be disputed or delayed. A correct prediction can still fail to pay on time. Hold a reserve and exclude disputed markets from performance statistics rather than booking them as wins.</li>
+  <li><strong>Platform custody risk.</strong> Rev 1 covers wallet compromise but not the simpler case of funds being inaccessible &mdash; account restriction, withdrawal delay, platform outage during settlement. The profit sweep above is the mitigation.</li>
+  <li><strong>Overfitting to the paper phase.</strong> If parameters are tuned against the same 50 games used to validate, the validation is meaningless. Hold out a segment of the paper period and do not look at it until the parameters are frozen.</li>
+  <li><strong>Correlated model failure across leagues.</strong> NBA and WNBA share a pipeline. A bug in feature construction hits both simultaneously, so league diversification provides less protection than the exposure split implies.</li>
+  <li><strong>Operator override risk.</strong> Every automated trading system eventually has a night where the operator disables a control that is behaving correctly. Make overrides logged, time-boxed and auto-expiring rather than a config toggle that stays flipped.</li>
+</ul>
+
+
+<!-- ═══════════════════════════════════════════ 12. SECURITY ═══ -->
+<h2 id="s12"><span class="num">12</span>Security</h2>
+<p class="lede">Rev 1 covers wallet risk in one paragraph. A machine holding a signing key and reachable from the internet needs more than that.</p>
+
+<table>
+<thead><tr><th>Area</th><th>Requirement</th></tr></thead>
+<tbody>
+<tr><td class="k">Key separation</td><td>The VPS holds a trading key only. Funding and withdrawal authority live elsewhere, offline. The hot key should not be able to move funds off-platform.</td></tr>
+<tr><td class="k">Balance discipline</td><td>Keep on-platform balance near the operating minimum. Automated top-ups with a hard daily ceiling, so a compromise or a runaway bug drains a bounded amount.</td></tr>
+<tr><td class="k">Secrets</td><td>Environment or systemd credentials, never <code>config.json</code> in the working tree. Rev 1's "git-ignored" is not a security control &mdash; it prevents an accidental commit, nothing more.</td></tr>
+<tr><td class="k">Network exposure</td><td>No public inbound port. Tailscale or WireGuard only, default-deny egress with an allowlist for the CLOB, Gamma and the Polygon RPC.</td></tr>
+<tr><td class="k">Signature handling</td><td>Constant-time comparison, timestamp window, nonce cache, body size limit, rate limit. Sign raw bytes, never a re-serialised object.</td></tr>
+<tr><td class="k">Host hardening</td><td>Key-only SSH, unattended security upgrades, non-root service account, read-only filesystem where practical.</td></tr>
+<tr><td class="k">Logging</td><td>Redaction at the formatter. Keys, signatures and full payloads never reach disk in the clear.</td></tr>
+<tr><td class="k">Dependencies</td><td>Pin and hash-verify. A trading bot's dependency tree is an attractive supply-chain target, and <code>py-clob-client</code> pulls in signing code.</td></tr>
+</tbody>
+</table>
+
+
+<!-- ═══════════════════════════════════════════ 13. NEW CAPABILITIES ═══ -->
+<h2 id="s13"><span class="num">13</span>New Capabilities &amp; ROI Levers</h2>
+<p class="lede">Ordered by expected value per unit of effort. The first tier costs little and should begin before any trading code is written.</p>
+
+<h3>Tier 1 — Do these first</h3>
+
+<div class="finding">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="phase">tier 1</span> Record everything, starting now</h4>
+<p>L2 order-book snapshots for every game on the slate, at fixed intervals and on every PW fire, plus the full decision context. This data cannot be reconstructed later and every subsequent capability depends on it: backtesting, replay, parameter tuning, execution analysis, adverse-selection measurement.</p>
+<div class="fix">Zero risk, no capital, no trading. Should start before Phase 2. If nothing else in this review is adopted, adopt this.</div>
+</div>
+</div>
+
+<div class="finding">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="phase">tier 1</span> Closing-line value tracking</h4>
+<p>Entry price against the last traded price before resolution, per position. Becomes the primary decision KPI (Section 05) and shortens the evaluation loop from thousands of trades to dozens.</p>
+<div class="fix">Requires only the price-history endpoint and the trade log. A day's work for the single largest improvement in decision quality.</div>
+</div>
+</div>
+
+<div class="finding">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="phase">tier 1</span> Devigged bookmaker consensus as an independent estimate</h4>
+<p>The monitor already carries bookmaker moneylines. Removing the overround &mdash; via Shin's method or a multiplicative or power devig, chosen empirically &mdash; yields an independent probability estimate that is generally well calibrated. Three estimates then exist for every game: PW, Polymarket, and the sportsbook consensus.</p>
+<p>The filter that follows is powerful: <strong>only trade when PW disagrees with Polymarket and the devigged consensus supports PW.</strong> When PW disagrees with both, PW is far more likely to be wrong than to be early. This should remove a large fraction of false positives at essentially no cost.</p>
+<div class="fix">Uses data already flowing through the monitor. Also gives a free sanity check on PW calibration that does not depend on the paper-trading sample at all.</div>
+</div>
+</div>
+
+<div class="finding">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="phase">tier 1</span> Maker-first execution and complementary-token routing</h4>
+<p>Sections 07 and 06. Recovers roughly a third of the edge that Rev 1's execution policy gives away, and applies to every trade the system ever makes.</p>
+</div>
+</div>
+
+<h3>Tier 2 — Model quality</h3>
+
+<div class="finding">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="phase">tier 2</span> Stack PW with the market rather than competing against it</h4>
+<p>Instead of treating the Polymarket price as the adversary, treat it as a strong prior and PW as an update to it:</p>
+<pre><code>logit(p_final) = w0 + w1*logit(p_pw) + w2*logit(p_market) + w3*logit(p_devig)</code></pre>
+<p>Fitted on historical data with proper time-series validation, a stack of this form almost always dominates any single input. The weight <code>w1</code> is then a direct, interpretable measurement of how much information PW carries beyond the market &mdash; which is the project's central question expressed as a single number. If <code>w1</code> shrinks to zero in fitting, that is the answer, obtained without risking anything.</p>
+<div class="fix">Requires historical price data joined to PW fires. Same input as the Phase 1 analysis recommended in Section 06.</div>
+</div>
+</div>
+
+<div class="finding">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="phase">tier 2</span> Continuous live win-probability model</h4>
+<p>PW fires discretely; a continuous fair value is more useful. A calibrated live model over score margin, time remaining, possession, pace and pre-game team strength gives a fair value at every moment, which enables edge monitoring between fires, principled exits, hedge sizing, and a much better calibration target than raw PW confidence.</p>
+<p>The classical functional form &mdash; logistic in margin scaled by remaining time, anchored to a pre-game prior &mdash; is well understood, trains on play-by-play the monitor can already source, and is a stronger baseline than most bespoke models. It is also the prerequisite for the exit logic in H-08.</p>
+</div>
+</div>
+
+<div class="finding">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="phase">tier 2</span> Player availability and lineup pipeline</h4>
+<p>Late scratches and lineup confirmations are where genuine, legal informational edge in basketball actually lives, and prices move fastest on news that changes who is playing &mdash; confirmed lineups, injury updates and suspensions. A structured feed of official injury-report timings and starting-lineup confirmations, with a fast reaction path, is a more defensible edge than anything derived from score state, because score state is visible to every participant simultaneously while report timing is not.</p>
+<div class="fix">Worth prioritising above further PW refinement. It is a different <em>kind</em> of edge, and it is uncorrelated with the model risk in the rest of the system.</div>
+</div>
+</div>
+
+<div class="finding">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="phase">tier 2</span> Context features and regime detection</h4>
+<p>Rest days and back-to-backs, travel and time-zone shifts, pace and style matchups, referee assignment. Separately, detect regimes where the model's assumptions break &mdash; garbage time, foul trouble on a key player, blowouts &mdash; and suppress trading rather than trying to model them.</p>
+<p>Knowing when not to trade is usually worth more than a marginal accuracy gain, and it is much easier to validate.</p>
+</div>
+</div>
+
+<h3>Tier 3 — Portfolio and execution science</h3>
+<table>
+<thead><tr><th>Capability</th><th>What it does</th><th>Why it matters</th></tr></thead>
+<tbody>
+<tr><td class="k">Portfolio Kelly</td><td>Solves for simultaneous position sizes across correlated concurrent games rather than sizing each in isolation</td><td>Principled version of the correlation haircut in H-11; matters most on heavy slates</td></tr>
+<tr><td class="k">Bayesian edge posterior</td><td>Maintains a posterior over the true edge and sizes on it, shrinking automatically when evidence is thin</td><td>Removes the arbitrary half-Kelly constant and starts conservative by construction</td></tr>
+<tr><td class="k">Dynamic exit policy</td><td>Sells on model invalidation, on price approaching fair value, or on capital pressure from a better signal</td><td>Sells are fee-free; this is the cheapest lever available (H-08)</td></tr>
+<tr><td class="k">Cross-market expression</td><td>Checks whether spread or total markets on the same game price the same view better than the moneyline</td><td>Same conviction, better entry; also improves capital efficiency</td></tr>
+<tr><td class="k">Adverse-selection monitor</td><td>Measures price movement 1/5/30 minutes after each fill</td><td>Earliest available warning that the edge is illusory rather than merely unlucky</td></tr>
+<tr><td class="k">Execution counterfactuals</td><td>Logs what alternative execution policies would have cost on every fill</td><td>Turns execution tuning into measurement instead of argument</td></tr>
+</tbody>
+</table>
+
+<h3>Tier 4 — Research infrastructure</h3>
+<ul>
+  <li><strong>Replay harness.</strong> Deterministic re-run of any historical day under different parameters. Made possible by the pure decision function in Section 09 and the snapshots in Tier 1.</li>
+  <li><strong>Champion/challenger shadow mode.</strong> Several strategy variants evaluated in parallel against live prices while at most one trades. New ideas earn their way to capital instead of being switched on.</li>
+  <li><strong>Walk-forward validation with purged and embargoed splits.</strong> The backfill contamination Rev 1 flags is a leakage symptom; standard random cross-validation on this data will produce flattering nonsense.</li>
+  <li><strong>Model registry and feature store.</strong> Every decision records model version, calibration version and config hash, so a result from three months ago can still be explained.</li>
+  <li><strong>Analysis dashboard.</strong> Equity curve with drawdown, CLV distribution, reliability diagram, edge distribution, P&amp;L attribution by quarter, consensus, price band and league, and execution quality. Attribution is what turns a losing month into a fixable diagnosis.</li>
+</ul>
+
+<div class="note ok">
+<h4>If only three things are built</h4>
+<p>Record order-book snapshots and decision context from today. Track closing-line value as the primary KPI. Run the historical join of PW fire times against Polymarket prices to see whether the edge exists at all. All three are cheap, none requires capital or a VPS, and together they answer the project's central question far faster and more cheaply than the five-phase plan does.</p>
+</div>
+
+
+<!-- ═══════════════════════════════════════════ 14. ROADMAP ═══ -->
+<h2 id="s14"><span class="num">14</span>Revised Roadmap</h2>
+<p class="lede">The phase structure in Rev 1 is sound. The changes are an added Phase 0, replaced gates, and a longer paper period.</p>
+
+<table>
+<thead><tr><th>Phase</th><th>Rev 1</th><th>Rev 2</th><th>Gate</th></tr></thead>
+<tbody>
+<tr>
+  <td class="k">0 &mdash; Data</td>
+  <td>&mdash;</td>
+  <td><strong>New.</strong> Book snapshot recorder, decision-context logging, historical PW-to-price join, devig pipeline. No trading code, and no venue commitment &mdash; this phase is venue-independent.</td>
+  <td>The distribution of <code>market_price_at_fire &minus; pw_confidence</code> shows positive mass. If not, stop here.</td>
+</tr>
+<tr>
+  <td class="k">1 &mdash; Survey</td>
+  <td>Liquidity survey</td>
+  <td>Unchanged, plus: measure fees empirically, confirm live-market behaviour, measure the resolver's coverage rate.</td>
+  <td>&ge;60% of NBA games tradeable, plus resolver coverage &ge;95% on matched games.</td>
+</tr>
+<tr>
+  <td class="k">2 &mdash; Relay</td>
+  <td>Webhook push</td>
+  <td>Outbox plus cursor feed. Corrected schema, corrected date handling, corrected signature scheme.</td>
+  <td>Zero signal loss across an induced 30-minute bot outage.</td>
+</tr>
+<tr>
+  <td class="k">3 &mdash; Paper</td>
+  <td>50 games, ROI &gt; 0</td>
+  <td><strong>150+ signals over 6+ weeks.</strong> Identical decision code to live. Edge-decay and adverse-selection measurement. Held-out segment reserved for validation.</td>
+  <td>Mean CLV positive with a CI excluding zero; calibration stable on held-out data; resolver and reconciliation clean.</td>
+</tr>
+<tr>
+  <td class="k">4 &mdash; Live small</td>
+  <td>$10/game, $100 total</td>
+  <td>Unchanged sizing. Adds: reconciliation loop proven, dead-man switch live, rebuild procedure tested, legal position resolved.</td>
+  <td>20+ trades. Realised execution within 1&cent; of predicted. CLV consistent with the paper phase.</td>
+</tr>
+<tr>
+  <td class="k">5 &mdash; Scale</td>
+  <td>Kelly, $50/$500</td>
+  <td>Size increases tied to accumulated evidence via the uncertainty term rather than to a phase boundary.</td>
+  <td>Continuous: size follows the posterior, not the calendar.</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">
+<h4>On Phase 3's duration</h4>
+<p>Six weeks and 150 signals is longer than Rev 1's 50 games and still will not establish ROI significance &mdash; nothing achievable will. It is chosen to give CLV enough samples to be decisive, to span more than one weekly retraining cycle of the underlying model, and to include a held-out segment. The purpose of the paper phase is to find cheap reasons to stop, not to build confidence to proceed.</p>
+</div>
+
+
+<!-- ═══════════════════════════════════════════ 15. QUESTIONS ═══ -->
+<h2 id="s15"><span class="num">15</span>Revised Open Questions</h2>
+
+<table>
+<thead><tr><th>#</th><th>Question</th><th>Status</th><th>Path</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td>Do markets stay open for in-game trading?</td><td class="sev done">closed</td><td>Yes. Live in-play trading is supported.</td></tr>
+<tr><td class="num">2</td><td>What is the Polymarket price when PW fires?</td><td class="sev critical">critical</td><td>Answerable now from historical price data joined to PW fire times. Phase 0. This is the project's central question.</td></tr>
+<tr><td class="num">3</td><td>How are overtime, suspension and postponement handled?</td><td class="sev medium">open</td><td>Read the resolution rules; define an interim hold-and-alert policy meanwhile.</td></tr>
+<tr><td class="num">4</td><td>Can positions be sold before settlement?</td><td class="sev done">closed</td><td>Yes, and sells carry no taker fee. Makes exit logic a priority, not an option.</td></tr>
+<tr><td class="num">5</td><td>Is historical price data available?</td><td class="sev done">closed</td><td>Yes, per token via the CLOB price-history endpoint.</td></tr>
+<tr><td class="num">6</td><td>What happens to open orders during platform downtime?</td><td class="sev low">open</td><td>Review order persistence guarantees; assume the worst and reconcile on reconnect regardless.</td></tr>
+<tr><td class="num">7</td><td><strong>New.</strong> How fast does the market reprice after a PW-triggering event?</td><td class="sev high">new</td><td>Determines whether the edge is informational or latency-driven, and therefore where all subsequent effort should go. Phase 3.</td></tr>
+<tr><td class="num">8</td><td><strong>New.</strong> Does PW carry information beyond the market and the devigged consensus?</td><td class="sev critical">new</td><td>The stacking weight <code>w1</code> answers this as a single number. Phase 0.</td></tr>
+<tr><td class="num">9</td><td><strong>New.</strong> What is the resolver's true coverage across a full slate?</td><td class="sev high">new</td><td>Silent resolution failure is indistinguishable from a quiet market. Instrument from day one.</td></tr>
+<tr><td class="num">10</td><td><strong>Revised.</strong> Does an Australian resident temporarily abroad satisfy the platform's eligibility terms?</td><td class="sev critical">gating</td><td>The terms appear to exclude persons who <em>reside in</em> or <em>are located in</em> a prohibited locality, disjunctively. Physical presence in Malaysia answers only the second limb. Australian legal advice <strong>before Phase 2</strong> &mdash; this now gates the build, not just the funding. See Section 16.</td></tr>
+<tr><td class="num">11</td><td><strong>New.</strong> Where should the bot actually run, now that all three Rev 1 options are eliminated?</td><td class="sev critical">new</td><td>Singapore is blocked (C-06). Ireland or the EU looks strongest on latency and availability; Malaysia is cleanest on alignment but carries local blocking risk. Measure latency to the CLOB from candidate regions before committing. Phase 1.</td></tr>
+<tr><td class="num">12</td><td><strong>New.</strong> Is the AU host provably out of the trading path?</td><td class="sev high">new</td><td>Applies only on the Polymarket path. Enforce with an egress allowlist and verify, rather than relying on the architecture being correct by convention. Phase 2.</td></tr>
+<tr><td class="num">13</td><td><strong>New.</strong> Which venue &mdash; Polymarket or a licensed Australian exchange?</td><td class="sev high">new</td><td>Defer until Phase 0 answers whether an edge exists at all. If it does, compare on cost, basketball liquidity and eligibility. Betfair removes the residency question and the custody risk; Polymarket offers a zero-fee maker side. See Section 16.</td></tr>
+</tbody>
+</table>
+
+
+<!-- ═══════════════════════════════════════════ 16. LEGAL ═══ -->
+<h2 id="s16"><span class="num">16</span>Legal &amp; Capital Position</h2>
+
+<div class="note critical">
+<h4>Corrected premise: an Australian resident, temporarily in Malaysia</h4>
+<p>This section has now been revised twice. The first draft assumed an Australian operator; a correction indicated Malaysia; the refinement is that the operator is <strong>Australian, residing temporarily in Malaysia</strong>. That distinction is not minor, because the term that governs is residence, not location, and the two have come apart here.</p>
+<p>Polymarket's terms of service are reported to state that the services are not available to persons who <em>reside in, are located in, are incorporated in, or have a registered office in</em> the United States or any prohibited locality. The limbs are disjunctive: satisfying one is enough to be excluded. Physical presence in Malaysia addresses "located in". It does not address "reside in" if residence remains Australian &mdash; and Australia is on the restricted list.</p>
+<p>The word "temporarily" is doing the work here. Someone temporarily in a place ordinarily resides somewhere else.</p>
+</div>
+
+<h3>Where this leaves the position</h3>
+<table>
+<thead><tr><th>Test</th><th>Applies?</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td class="k">"Located in" a restricted locality</td><td class="sev done">No</td><td>Physically in Malaysia, which is not on the block list.</td></tr>
+<tr><td class="k">"Reside in" a restricted locality</td><td class="sev critical">Probably yes</td><td>If residence remains Australia, this limb is engaged regardless of current location. Australia is restricted.</td></tr>
+<tr><td class="k">Account identity</td><td class="sev high">Likely adverse</td><td>Where platforms verify identity, residency on file is commonly the controlling field rather than connection IP. Australian documents would set an Australian eligibility view.</td></tr>
+<tr><td class="k">Return to Australia</td><td class="sev critical">Scheduled</td><td>Not a contingency to monitor but an event with a date. On return, both limbs are engaged.</td></tr>
+<tr><td class="k">ACMA directive</td><td class="sev high">Re-engaged</td><td>The earlier revision set this aside on the basis of Malaysian residence. That basis no longer holds.</td></tr>
+</tbody>
+</table>
+
+<p>The honest summary is that this framing sits much closer to the original Australian analysis than to the Malaysian one, and the objection raised in the first draft of this review substantially returns. Being physically in an unblocked country does not cure a residence in a blocked one, and the arrangement is the kind that terms of this shape are written to catch. This review will not offer ways to characterise the residence question more favourably or to structure the account around it &mdash; that is precisely the circumvention that Rev 1 correctly ruled out when it rejected VPN use, and it does not become different when the mechanism is residency framing rather than a tunnel.</p>
+
+<p>This is now <strong>the</strong> gating item, ahead of the technical work in the roadmap rather than alongside it. The question for an Australian lawyer is narrow and answerable: given Australian residence and a temporary posting abroad, does this platform's eligibility position permit an account, and does the ACMA directive bear on it? Ask it before Phase 2, not before Phase 4 &mdash; there is no sense building a webhook relay for a system that cannot lawfully place an order.</p>
+
+<h3>Malaysia's own position, for completeness</h3>
+<p>If residence were to shift genuinely and permanently, Malaysia's position would still be grey rather than green. It is not on the block list, but no Malaysian regulator has classified prediction markets; the Common Gaming Houses Act 1953 and Betting Act 1953 are broad; MCMC has blocked several thousand gambling domains since 2022; amendments discussed through 2025&ndash;2026 would raise penalties for individual participants; Syariah law is a separate track for Muslim citizens; and Singapore, Thailand and Taiwan have all classified the platform as unlawful gambling. Rev 1's green cell describes access, not legality.</p>
+
+<h3>The licensed alternative: Betfair Exchange</h3>
+<p>Rev 1 treats Polymarket as the only venue, which is why the whole document ends up wrestling with jurisdiction. It is worth stating that a licensed exchange exists in the operator's own jurisdiction and would make the entire problem disappear.</p>
+<p>Betfair Exchange is licensed in Australia and requires proof of Australian residency to register. It runs a back/lay exchange that is structurally close to Polymarket's binary contracts, offers in-play markets, and publishes a documented automation API with REST and streaming access, subject to a separate application and approval step. For an Australian resident, the eligibility question in this section simply does not arise.</p>
+
+<h4>Mapping the design across</h4>
+<table>
+<thead><tr><th>Concept</th><th>Polymarket</th><th>Betfair</th></tr></thead>
+<tbody>
+<tr><td class="k">Position</td><td>Buy YES token at $0.00&ndash;$1.00</td><td>Back at decimal odds <code>d</code>; implied probability = <code>1/d</code></td></tr>
+<tr><td class="k">Opposite side</td><td>Buy the complementary token</td><td>Lay the selection</td></tr>
+<tr><td class="k">Best execution</td><td><code>min(ask_A, 1 &minus; bid_B)</code></td><td>Same check, expressed as back-A versus lay-B in a two-runner market</td></tr>
+<tr><td class="k">Cost</td><td>Per-trade taker fee on entry; maker exempt</td><td>Commission on net winnings per market at settlement; no maker exemption</td></tr>
+<tr><td class="k">Settlement</td><td>On-chain tokens pay $1.00</td><td>Exchange balance; no custody or bridge risk</td></tr>
+<tr><td class="k">Hosting</td><td>Must sit in an unblocked region</td><td>Can run beside the monitor in Australia</td></tr>
+</tbody>
+</table>
+
+<h4>Cost comparison in probability points</h4>
+<p>Betfair charges commission on net winnings per market rather than a fee on entry, so a losing market costs nothing extra. Converting to the break-even probability makes the two directly comparable: for a back bet at decimal odds <code>d</code> with commission <code>c</code>, break-even is <code>1 / [1 + (d&minus;1)(1&minus;c)]</code>. Sport markets are published at a 6% base rate, though rates vary by market &mdash; NRL sits at 10% &mdash; so confirm the rate for basketball rather than assuming.</p>
+<table>
+<thead><tr><th>Implied price</th><th>Polymarket taker</th><th>Polymarket maker</th><th>Betfair @ 6%</th></tr></thead>
+<tbody>
+<tr><td class="num">0.50</td><td class="num">1.25 pp</td><td class="num">0.00 pp</td><td class="num">1.55 pp</td></tr>
+<tr><td class="num">0.62</td><td class="num">1.18 pp</td><td class="num">0.00 pp</td><td class="num">1.45 pp</td></tr>
+<tr><td class="num">0.75</td><td class="num">0.94 pp</td><td class="num">0.00 pp</td><td class="num">1.14 pp</td></tr>
+<tr><td class="num">0.85</td><td class="num">0.64 pp</td><td class="num">0.00 pp</td><td class="num">0.77 pp</td></tr>
+</tbody>
+</table>
+<p>Against Polymarket as a taker, Betfair costs roughly 20&ndash;25% more. Against Polymarket as a <em>maker</em>, it costs infinitely more, because there is no zero-fee side. That is the real economic difference, and it is worth being clear that the maker-first ladder in Section 07 &mdash; the single highest-value execution recommendation in this review &mdash; loses half its purpose on Betfair. Posting passively still captures spread, which is worth having; it no longer eliminates a fee, because there is no entry fee to eliminate.</p>
+
+<h4>What transfers unchanged</h4>
+<p>Most of this review is venue-independent. The corrected Kelly formula applies with <code>cost</code> set to the break-even probability above. Depth-weighted pricing applies directly &mdash; Betfair exposes amounts available at each price, so the sweep logic in Section 06 is the same function against a different book shape. Calibration, model stacking, the devigged consensus filter, the sample-size mathematics, the event-sourced architecture, reconciliation, and every risk control in Section 11 all carry over without modification.</p>
+<p>Closing-line value transfers particularly well. Betfair's closing price is the standard benchmark in the sports betting literature precisely because it is a liquid exchange price, so the primary KPI recommended in Section 05 is arguably better supported there than on Polymarket.</p>
+
+<h4>New risks specific to Betfair</h4>
+<ul>
+  <li><strong>Premium Charges.</strong> Betfair's published terms provide for additional charges on customers who, over the long term, generate little commission relative to the amount they win. This is a success penalty with no Polymarket equivalent: if the bot works, it may become more expensive. Read the current terms carefully before sizing up &mdash; this materially changes the economics of a genuinely profitable strategy, which is the only scenario worth planning for.</li>
+  <li><strong>In-play suspensions.</strong> Exchanges suspend markets around significant in-game events, and unmatched orders can be cancelled. An automated system must handle suspension, re-match and cancellation states explicitly rather than assuming a continuously available book.</li>
+  <li><strong>Liquidity is unproven for NBA.</strong> Betfair's depth concentrates in Australian racing and international soccer. NBA in-play depth in Australian hours is an open question and needs the same Phase 1 survey Rev 1 specifies, with the same disqualification threshold.</li>
+  <li><strong>API approval.</strong> Access requires a separate application, so factor the lead time into the roadmap rather than discovering it at Phase 2.</li>
+</ul>
+
+<div class="note ok">
+<h4>What this does to the roadmap</h4>
+<p>Phase 0 is entirely venue-independent. Whether PW carries information beyond the market price is the question that decides this project, and it is answered from historical data with no account, no API key and no capital at either venue. Run it first and let the venue decision wait &mdash; if the answer is negative, both the jurisdiction problem and the commission comparison become moot.</p>
+<p>If the answer is positive, the venue choice is a straightforward trade: Betfair costs modestly more per trade, removes the maker-side optimisation, adds a success penalty, and has unproven basketball depth &mdash; against which it removes the eligibility question entirely, eliminates custody and bridge risk, allows the bot to run beside the monitor with no VPS, and dissolves the compliance boundary described below.</p>
+</div>
+
+<h3>Revised hosting analysis</h3>
+<p>Hosting remains a real question because Rev 1's three options are all invalid, but it should be read as subordinate to the section above. No hosting choice resolves the residency position; this table assumes that question is settled favourably and asks only where the code should run if it runs at all.</p>
+<table>
+<thead><tr><th>Option</th><th>Access</th><th>Latency to CLOB</th><th>Assessment</th></tr></thead>
+<tbody>
+<tr>
+  <td class="k">Singapore (all Rev 1 options)</td>
+  <td class="sev critical">blocked</td>
+  <td>&mdash;</td>
+  <td>Eliminated on the facts, independent of everything else. Includes the recommended Oracle free tier.</td>
+</tr>
+<tr>
+  <td class="k">Malaysia (local host)</td>
+  <td class="sev done">available</td>
+  <td>~180&ndash;250 ms if the CLOB is EU-hosted</td>
+  <td>Aligns with current physical location. Inherits MCMC blocking risk, and the alignment ends when the posting does.</td>
+</tr>
+<tr>
+  <td class="k">Ireland / EU</td>
+  <td class="sev done">available</td>
+  <td>Potentially single-digit ms (M-04)</td>
+  <td>Best on engineering grounds if the CLOB sits in London or Ireland. Mature providers, strong latency.</td>
+</tr>
+<tr>
+  <td class="k">Australia (existing server)</td>
+  <td class="sev critical">blocked</td>
+  <td>&mdash;</td>
+  <td>Monitor and dashboards only. Must never touch the CLOB, Gamma or the wallet.</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">
+<h4>On the proxy question</h4>
+<p>The note mentions a Malaysia-based proxy. Hosting infrastructure in a country you are physically in is simply hosting. Interposing infrastructure so that activity presents as originating somewhere other than where the operator belongs is the thing Rev 1 correctly rejected on terms-of-service grounds, and it does not change character according to who owns the proxy. Given the residency position above, the hosting layer is not where this question gets resolved, and no configuration of servers resolves it.</p>
+</div>
+
+<h3>The AU server is now a compliance boundary</h3>
+<p>Rev 1's design principle 4 &mdash; "the trading bot is a standalone service; it does not read monitor state files" &mdash; was written as separation of concerns. With an Australian monitor host it is doing more work than that, and it should be enforced mechanically rather than left as convention:</p>
+<ul>
+  <li>The AU host holds no wallet, no signing key and no CLOB credentials.</li>
+  <li>The AU host makes no requests to Polymarket endpoints, including the public Gamma API. Enforce with an egress allowlist, not a code review.</li>
+  <li>Signal flow is one-directional and carries game data only &mdash; no order state, no balances, no positions.</li>
+  <li>P&amp;L views on the AU host, if wanted, are served from data pushed by the bot rather than pulled from the platform.</li>
+</ul>
+<p>The pull-based transport in Section 09 fits this cleanly: the bot reaches into the monitor for signals, and nothing reaches out from Australia. Note that this is good hygiene and good architecture &mdash; it is not an answer to the residency question, and it should not be mistaken for one.</p>
+
+<h3>Plan the wind-down before the build</h3>
+<p>The temporary posting has an end date, and on return both eligibility limbs are engaged. That makes an orderly exit a scheduled requirement rather than a contingency, and it is far easier to design now than to improvise later with open positions:</p>
+<ul>
+  <li><strong>Stop opening positions</strong> at a defined lead time before the return date, sized so that the longest-dated position settles before departure.</li>
+  <li><strong>Test the withdrawal path early and repeatedly.</strong> An untested withdrawal route is a liability precisely when it is needed, and account status can change faster than a settlement cycle.</li>
+  <li><strong>Do not carry the account across the transition</strong> on the assumption it will keep working. Plan for the position to close, not to pause.</li>
+</ul>
+
+<h3>Tax</h3>
+<p>The earlier revision pointed this at a Malaysian accountant. With Australian residence retained, that is likely wrong. Australia taxes residents on worldwide income, and someone temporarily abroad commonly remains an Australian tax resident under the domicile test unless a permanent place of abode has been established overseas &mdash; which "temporarily" tends to argue against. The relevant questions are therefore Australian ones, and there are two:</p>
+<ul>
+  <li><strong>Residency status</strong> for the period abroad, which is fact-specific and worth confirming rather than assuming.</li>
+  <li><strong>Characterisation of the gains.</strong> Australia generally does not tax gambling winnings, but does tax business income, and a systematic automated strategy run continuously to a defined method is a strong fact pattern for carrying on a business. The answer determines whether gains are assessable and whether losses are deductible &mdash; and the two questions are linked, so a favourable answer on one is often unfavourable on the other.</li>
+</ul>
+
+<h3>On the capital at risk</h3>
+<p>Worth stating plainly, because the engineering can obscure it: the base rate for retail systems of this kind is negative expected value after costs, and Rev 1's own analysis suggests why &mdash; PW fires on teams that are already visibly ahead, which is exactly the information a live market has already priced. The 98% backfill contamination means the historical ROI figures provide little evidence against that.</p>
+<p>The right frame for the whole project is that its primary output is <em>an answer</em>, not a return. The architecture should be optimised to discover cheaply and quickly that there is no edge, if that is the truth. That is why this review moves the decisive analysis to Phase 0, where it costs nothing, and why it treats the paper phase as a search for reasons to stop rather than a hurdle to clear. Position sizing should stay small enough that the answer, whichever it turns out to be, is affordable.</p>
+
+
+<!-- ═══════════════════════════════════════════ FOOTER ═══ -->
+<footer>
+<p>Rev 2 &middot; Technical review of Rev 1 &middot; NBA Monitor #214 &middot; 2026-07-27</p>
+<p>Platform facts (fee schedules, geographic restrictions, API behaviour) were verified at time of writing and change frequently; verify at runtime rather than relying on this document. This review covers technical architecture and does not constitute legal, financial or tax advice.</p>
+</footer>
+
+</div><!-- .wrap -->
+</body>
+</html>

@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review Implementation Spec — NBA/WNBA + NRL Consolidated</title>
+<style>
+:root{
+  --paper:#F1F3EE;--paper-2:#E7EAE4;--ink:#16211C;--ink-2:#33423A;
+  --muted:#5D6B62;--rule:#CBD2C8;
+  --critical:#A3231C;--high:#C98A00;--medium:#2C6E8F;--low:#6B7A6F;
+  --green:#2E7D32;
+  --display:-apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  --body:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);font-size:17px;line-height:1.62}
+.wrap{max-width:64rem;margin:0 auto;padding:0 1.5rem 6rem}
+.mast{border-bottom:3px solid var(--ink);padding:3rem 0 1.2rem;margin-bottom:2rem}
+.eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin:0 0 .8rem}
+h1{font-family:var(--display);font-weight:800;letter-spacing:-.035em;line-height:.98;font-size:clamp(2.2rem,6vw,3.6rem);margin:0 0 .5rem}
+.sub{font-size:1.05rem;color:var(--ink-2);margin:0;max-width:50ch}
+.meta{font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-top:1.2rem;display:flex;flex-wrap:wrap;gap:.4rem 1.6rem}
+h2{font-family:var(--display);font-weight:800;letter-spacing:-.025em;font-size:clamp(1.4rem,3.4vw,2rem);line-height:1.1;margin:3.5rem 0 .3rem;padding-top:1.2rem;border-top:1px solid var(--rule)}
+h2 .num{font-family:var(--mono);font-size:.66rem;font-weight:400;letter-spacing:.16em;color:var(--muted);display:block;margin-bottom:.6rem}
+.lede{color:var(--ink-2);margin:.4rem 0 1.8rem;max-width:56ch}
+h3{font-family:var(--display);font-weight:700;font-size:1.05rem;letter-spacing:-.01em;margin:2rem 0 .5rem}
+p{margin:0 0 1rem}
+ul,ol{padding-left:1.25rem;margin:.5rem 0 1.2rem}
+li{margin-bottom:.45rem}
+code{font-family:var(--mono);font-size:.85em;background:var(--paper-2);padding:.08em .32em;border-radius:2px}
+pre{font-family:var(--mono);font-size:.76rem;line-height:1.5;background:var(--ink);color:#DCE4DC;padding:.9rem 1rem;overflow-x:auto;margin:.8rem 0;border-radius:2px}
+pre code{background:none;padding:0;color:inherit;font-size:1em}
+table{width:100%;border-collapse:collapse;margin:1rem 0 1.8rem;font-size:.88rem}
+th,td{text-align:left;padding:.5rem .65rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--mono);font-size:.63rem;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);font-weight:400;border-bottom:2px solid var(--ink)}
+td.k{font-family:var(--mono);font-size:.76rem;white-space:nowrap}
+td.num{font-family:var(--mono);font-size:.78rem;text-align:right}
+tbody tr:hover{background:var(--paper-2)}
+a{color:var(--medium)}
+
+.sev{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;padding:.15rem .45rem;border:1px solid currentColor;border-radius:2px;display:inline-block;margin-right:.4rem}
+.sev.critical{color:var(--critical)}.sev.high{color:var(--high)}.sev.medium{color:var(--medium)}.sev.low{color:var(--low)}.sev.done{color:var(--green);border-color:var(--green)}
+
+.finding{border:1px solid var(--rule);background:#fff;margin:0 0 1.2rem;display:grid;grid-template-columns:5px 1fr}
+.finding .bar{background:var(--low)}
+.finding.critical .bar{background:var(--critical)}
+.finding.high .bar{background:var(--high)}
+.finding.medium .bar{background:var(--medium)}
+.finding .body{padding:1rem 1.2rem}
+.finding h4{font-family:var(--display);font-weight:700;font-size:1rem;margin:0 0 .4rem}
+.finding p{margin:0 0 .6rem;font-size:.94rem}
+.finding p:last-child{margin-bottom:0}
+.finding .fix{border-top:1px dashed var(--rule);padding-top:.6rem;margin-top:.7rem;font-size:.92rem;color:var(--ink-2)}
+
+.ledger{display:grid;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);margin:0 0 2.5rem}
+.ledger div{background:var(--paper);padding:.8rem 1rem}
+.ledger .n{font-family:var(--display);font-weight:800;font-size:2rem;line-height:1;display:block}
+.ledger .l{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);display:block;margin-top:.35rem}
+
+.toc{background:var(--paper-2);border:1px solid var(--rule);padding:1.2rem 1.4rem;margin:0 0 1rem}
+.toc ol{columns:2;column-gap:2rem;margin:0;padding-left:1rem;font-size:.92rem}
+.toc li{margin-bottom:.3rem;break-inside:avoid}
+.toc a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
+
+.note{border:1px solid var(--rule);border-left:5px solid var(--high);background:#fff;padding:1rem 1.2rem;margin:1.5rem 0;font-size:.94rem}
+.note h4{font-family:var(--display);font-weight:700;font-size:.95rem;margin:0 0 .4rem}
+.note.ok{border-left-color:var(--green)}
+
+footer{margin-top:4rem;padding-top:1rem;border-top:3px solid var(--ink);font-family:var(--mono);font-size:.68rem;color:var(--muted)}
+
+@media(max-width:620px){body{font-size:16px}.toc ol{columns:1}.ledger{grid-template-columns:repeat(2,1fr)}}
+@media print{
+  @page{margin:14mm 12mm}html,body{background:#fff;color:#000;font-size:10.5pt}
+  .wrap{max-width:none;padding:0}.mast{padding-top:0}h1{font-size:24pt}h2{font-size:13pt;margin-top:1.4rem}
+  .finding,.note,table,pre,.ledger{page-break-inside:avoid;break-inside:avoid}
+  .finding{border:.5pt solid #000}.finding .bar{background:#000!important}
+  .ledger div,.toc,.note{background:#fff}pre{background:#fff;color:#000;border:.5pt solid #666}
+  a{color:#000}.toc{display:none}footer{border-top-width:2pt}
+}
+
+.note.critical{border-left-color:var(--critical)}
+.note.critical h4{color:var(--critical)}
+.banner{border:2px solid var(--critical);background:#fff;padding:1.2rem 1.4rem;margin:0 0 2.5rem}
+.banner .kicker{font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--critical);margin:0 0 .6rem}
+.banner h3{margin:0 0 .6rem;font-size:1.15rem}
+.banner p{font-size:.96rem;margin:0 0 .7rem}
+.banner p:last-child{margin-bottom:0}
+.banner ol{margin:.5rem 0 .8rem;padding-left:1.3rem;font-size:.95rem}
+.rev{font-family:var(--mono);font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;color:var(--critical);border:1px solid var(--critical);padding:.1rem .35rem;border-radius:2px;margin-left:.4rem;white-space:nowrap}
+.rev.new{color:var(--green);border-color:var(--green)}
+td.k small{font-family:var(--mono);color:var(--muted)}
+@media print{.banner{border:1.5pt solid #000}.banner .kicker{color:#000}.rev,.rev.new{color:#000;border-color:#000}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">Consolidated implementation specification &middot; revision 6 &middot; 26 July 2026</p>
+  <h1>Review Implementation Spec</h1>
+  <p class="sub">Consolidated findings from independent code reviews of NBAMonitor and NRLMonitor, with a unified implementation plan covering defects, security, analytics, and architecture.</p>
+  <div class="meta">
+    <span>Source: nbamonitor-review.html (38,381 lines Python)</span>
+    <span>Source: nrlmonitor-review.html (23,883 lines Python)</span>
+    <span>NBA #412 &middot; NRL #258</span>
+    <span>Rev 6: gap review; training pipeline; Phase 7 prediction roadmap</span>
+  </div>
+</header>
+
+<div class="ledger">
+  <div><span class="n" style="color:var(--critical)">14</span><span class="l">Critical findings</span></div>
+  <div><span class="n" style="color:var(--high)">21</span><span class="l">High severity</span></div>
+  <div><span class="n" style="color:var(--medium)">28</span><span class="l">Medium severity</span></div>
+  <div><span class="n" style="color:var(--low)">41</span><span class="l">Improvements</span></div>
+  <div><span class="n">7</span><span class="l">Implementation phases</span></div>
+</div>
+
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#changes">Revision history</a></li>
+    <li><a href="#overview">Review overview</a></li>
+    <li><a href="#measured">Measured call data</a></li>
+    <li><a href="#defects">Code defects</a></li>
+    <li><a href="#security">Security</a></li>
+    <li><a href="#analytics">Analytics &amp; ML</a></li>
+    <li><a href="#backfill">Backfill &amp; data pipeline</a></li>
+    <li><a href="#architecture">Architecture &amp; reliability</a></li>
+    <li><a href="#parity">Cross-repo parity</a></li>
+    <li><a href="#transition">Data &amp; process transition</a></li>
+    <li><a href="#production">Production change management</a></li>
+    <li><a href="#training">ML training pipeline</a></li>
+    <li><a href="#plan">Implementation plan</a></li>
+    <li><a href="#decisions">Open decisions</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="changes"><span class="num">00</span>Revision history</h2>
+
+<h3>Revision 6 — gap review, training pipeline, prediction roadmap</h3>
+<p>A gap review of revision 5, plus operator-supplied detail on the ML training setup and answers to the open operational questions (bookmaker: Bet365; Odds API quota: 20k credits/month; cloud backup: rsync to Google Drive, never restore-tested; pre-game modelling: in scope, not top priority).</p>
+<table>
+  <thead><tr><th>Change in rev 6</th><th>Reason</th></tr></thead>
+  <tbody>
+    <tr><td><strong>New Section 11</strong> — ML training pipeline</td><td class="k">Daily timers retrain weekly with no drift detection, no post-train comparison, no rollback; NRL retrains reinforce the known leakage weekly</td></tr>
+    <tr><td><strong>New 1.8</strong> — pause NRL scheduled retraining</td><td class="k">Every retrain re-fits the leaked model on the same leaked features; stopping the timer costs nothing and stops digging</td></tr>
+    <tr><td><strong>New Phase 7</strong> — prediction roadmap for betting</td><td class="k">The reviews' feature-level betting work (pre-game model, blending, drift tripwire) never became spec items</td></tr>
+    <tr><td><strong>Backup restore drill added</strong> (2.10) and DR runbook (10)</td><td class="k">rsync-to-Drive has never been restore-tested; single host holds everything</td></tr>
+    <tr><td><strong>Alert-path liveness, quota monitoring, API schema canary added</strong></td><td class="k">Silent failure modes not covered by the heartbeat: dead Slack delivery, exhausted Odds API credits, upstream schema drift</td></tr>
+    <tr><td><strong>DST deadline attached to 6.12</strong></td><td class="k">Sydney re-enters AEDT in October — the fixed UTC polling window shifts an hour against kickoffs at finals time</td></tr>
+    <tr><td><strong>Usability and performance items added</strong> (5.7–5.9, 3.9–3.10)</td><td class="k">Actionable alerts, quiet controls, memoised payload builds, external watchdog</td></tr>
+  </tbody>
+</table>
+
+<h3>Revision 5 — production change management</h3>
+<p>The systemd units were reviewed. They impose constraints the earlier revisions did not account for, and one item needed promoting several phases as a result.</p>
+<table>
+  <thead><tr><th>Change in rev 5</th><th>Reason</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Heartbeat promoted from 6.7 to 1.7</strong></td><td class="k">Dashboards run <code>Restart=always</code>; a bad deploy crash-loops silently. It is the precondition for every in-season deploy, not a finishing touch</td></tr>
+    <tr><td><strong>New Section 10</strong> — production change management</td><td class="k">Deploy procedure, change windows, rollback classes and staging were absent</td></tr>
+    <tr><td><strong>NBA and WNBA share one checkout and venv</strong></td><td class="k">No independent deploy; the "do NBA while it's quiet" plan exposes a live WNBA season</td></tr>
+    <tr><td><strong>Shadow mode added to 4.6 and 4.10</strong></td><td class="k">Both change which alerts fire, by an unknown magnitude, into live seasons</td></tr>
+    <tr><td><strong>Scratch-copy step added to 4.0, 4.5, 4.6</strong></td><td class="k">No staging environment exists</td></tr>
+    <tr><td><strong>2.9 escalated</strong></td><td class="k">The production checkout sits inside the workspace tree the funneled 8788 service plausibly has filesystem access to</td></tr>
+  </tbody>
+</table>
+
+<h3>Revision 4 — backfill pipeline audited</h3>
+<p>The backfill scripts had only been examined where they produced findings elsewhere. A dedicated pass found one correction to revision 2's own recommendation, one new high-severity footgun, and confirmation that the pregame-pricing problem is structural rather than a bug.</p>
+<table>
+  <thead><tr><th>Change in rev 4</th><th>Reason</th></tr></thead>
+  <tbody>
+    <tr><td><strong>4.1 and 4.2 rescoped around <code>call["synthetic"]</code></strong>; effort cut from 2 hours + half day to 30 minutes + 1 hour</td><td class="k">The discriminator already exists on every call in both repos. The <code>bk_ml_source</code> filter recommended in rev 2 is second-best</td></tr>
+    <tr><td><strong>New 4.0</strong> — duplicate <code>match_id</code> audit as a gate before all analytics work</td><td class="k">NRL backfill can append a second record for games already in history</td></tr>
+    <tr><td><strong>New 3.8</strong> — make NRL's backfill dedupe unconditional</td><td class="k">NBA's guard is unconditional; NRL's is gated on an opt-in flag</td></tr>
+    <tr><td><strong>New Section 06</strong> — backfill &amp; data pipeline</td><td class="k">Previously uncovered; contains both defects and things worth preserving</td></tr>
+    <tr><td><strong>New Section 09</strong> — data &amp; process transition</td><td class="k">The plan listed changes without a migration layer; several touch irreversible data</td></tr>
+    <tr><td><strong>Acceptance checks added per phase</strong></td><td class="k">The plan said what to change, not how you know it worked</td></tr>
+    <tr><td><strong>6.5 must precede 6.11</strong></td><td class="k"><code>pw_roi_report.py</code> reads NBA history by JSON path; SQLite breaks it unless the schema lands first</td></tr>
+  </tbody>
+</table>
+
+<h3>Revision 3 — network exposure corrected</h3>
+<p>Revision 2 introduced a Phase 0 on the premise that Tailscale Funnel exposed the dashboards to the public internet. That premise was wrong. Funnel is configured on port 443 only, proxying to <code>127.0.0.1:8788</code> — a different service. The dashboards (NBA 8899, WNBA 8900, NRL 8898) are served on 8444/8445/8446 as <strong>tailnet-only</strong>. They are not reachable from the public internet.</p>
+<table>
+  <thead><tr><th>Change in rev 3</th><th>Reason</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Phase 0 dissolved</strong>; items folded back into Phase 2</td><td class="k">No public exposure, so no same-day deadline</td></tr>
+    <tr><td><strong>Two items promoted to the front of Phase 2</strong> — drop wildcard CORS, mask <code>/api/config</code></td><td class="k">Still reachable from any browser on the tailnet; ~40 minutes combined</td></tr>
+    <tr><td><strong>Credential rotation reverts to precautionary</strong> (2.8)</td><td class="k">Rev 1's framing was correct; rev 2's "treat as disclosed" was not</td></tr>
+    <tr><td><strong>New item 2.9</strong> — review whatever runs on 8788</td><td class="k">That service <em>is</em> publicly funneled and was never in scope</td></tr>
+    <tr><td>Severity counts unchanged</td><td class="k">The underlying reviews rate impact-if-reached and never assumed public exposure</td></tr>
+  </tbody>
+</table>
+<p>Everything in Phases 1, 3, 4, 5 and 6 is unaffected — the code defects, the pricing findings and the resequencing driven by measured call data all stand independently of the network topology.</p>
+
+<h3>Revision 2 — verification pass and measured data</h3>
+<table>
+  <thead><tr><th>Change</th><th>Reason</th></tr></thead>
+  <tbody>
+    <tr><td><strong>NRL SO-01 line list corrected</strong> — 4 sites, not 10</td><td class="k">Six of the listed lines are helper functions where <code>now</code> is a parameter and the code is correct</td></tr>
+    <tr><td><strong>NRL SO-02 line corrected</strong> — 4817, not 4831</td><td class="k">Verified against the shipped archive</td></tr>
+    <tr><td><strong>Phase 4.7 deferred</strong>, Phase 5 elevated and parallelised</td><td class="k">Measured live-priced counts make combo CIs statistically empty for NBA</td></tr>
+    <tr><td><strong>De-vig and EV engine added</strong> (4.9, 4.10)</td><td class="k">Confirmed in scope; CLV as headline KPI depends on them</td></tr>
+    <tr><td><strong>Pre-registration added to Phase 5</strong> (5.0)</td><td class="k">Without it, <code>bets.jsonl</code> reproduces the combo-mining problem at smaller scale</td></tr>
+    <tr><td><strong>Six unassigned findings given phase items</strong></td><td class="k">Present in the finding tables but absent from every phase</td></tr>
+    <tr><td><strong>Phase 6 reframed as a merge path</strong></td><td class="k">Confirmed: 6.4 is a stepping stone to a single repo, owned by NBA</td></tr>
+    <tr><td><strong>NRL SO-03 moved to Phase 1</strong> (1.6)</td><td class="k">A live cross-request data race, not a refactor</td></tr>
+    <tr><td><strong>Decision gates added</strong> after 4.1</td><td class="k">Branches on results that are now known</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="overview"><span class="num">01</span>Review overview</h2>
+<p class="lede">Two independent code reviews identified overlapping patterns across the shared codebase. This spec consolidates all findings into a single prioritised implementation plan.</p>
+
+<h3>Key conclusions</h3>
+<ul>
+  <li><strong>4 silent runtime defects across both repos</strong> — all scope errors swallowed by broad <code>except Exception</code> handlers, all findable by a one-second lint run.</li>
+  <li><strong>Security baseline is inconsistent</strong> — fixes exist in one repo but not the other. NBA leaks all secrets via <code>/api/config</code>; NRL has path traversal on backup deletion. Both bind to all interfaces with wildcard CORS. The tailnet boundary contains these; it does not remove them.</li>
+  <li><strong>NBA model is sound; NRL model has target leakage</strong> — NBA uses point-in-time features, NRL trains on the final scoreline. NBA has walk-forward/Brier/calibration infrastructure that isn't connected to the sklearn model.</li>
+  <li><strong>NBA ROI figures are approximately 98% backfill-derived</strong> and therefore priced at pregame odds for mid-game signals. Measured, not estimated — see Section 02.</li>
+  <li><strong>70–93% code overlap in infrastructure modules</strong> — clean boundary between shared (backup, trend, outcomes, synthetic odds) and sport-specific (conditions, ML model). Fixes flow in both directions and land in only one repo.</li>
+</ul>
+
+<div class="note critical">
+  <h4>Live staking is currently on compromised NBA figures</h4>
+  <p>Stakes are being placed on the numbers this system produces. For NBA, 1.7% of calls carry a genuine at-fire price; the rest are booked at the pre-kickoff line. That bias runs in one direction and is largest on the signals that look strongest — a side well ahead late is short live and long pregame, so the highest-hit-rate strategies receive the largest fictional prices.</p>
+  <p>The implication is narrow and specific: <strong>NBA ROI figures do not currently support a staking decision.</strong> WNBA and NRL have workable live-priced subsets and can be assessed on those, at reduced sample size. Phase 4.1 is two hours of work and resolves which figures are which — worth doing before the next slate rather than after.</p>
+  <p><em>With the network exposure corrected, this is now the highest-priority item in the document.</em></p>
+</div>
+
+<h3>What the reviews got right that's worth preserving</h3>
+<ul>
+  <li><strong>NBA:</strong> point-in-time ML features (no leakage), <code>parity_check.py</code> (live vs replay assertion), <code>evaluate_model.py</code> with walk-forward/Brier/calibration, <code>FEATURE_SCHEMA_VERSION</code> check, backup name validation on the delete endpoint.</li>
+  <li><strong>NRL:</strong> config secret masking on <code>/api/config</code>, separate API client module (<code>nrl_api.py</code>), continuous odds monitoring thread (<code>odds_monitor.py</code>), timeline feature extraction (<code>timeline_features.py</code>).</li>
+  <li><strong>Both:</strong> WAL + atomic writes + snapshot/restore, two-phase backfill, condition evaluator architecture, PW changelog tracking.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="measured"><span class="num">02</span>Measured call data</h2>
+<p class="lede">Run against the live histories. These numbers replace the estimates in revision 1 and drive the resequencing of Phases 4 and 5.</p>
+
+<table>
+  <thead><tr><th>League</th><th class="num">Live-priced calls</th><th class="num">Share of calls</th><th>Assessment</th></tr></thead>
+  <tbody>
+    <tr><td class="k">NBA</td><td class="num">262 / 15,477</td><td class="num">1.7%</td><td>Unusable. 5,248 backfilled games dominate; any ROI figure is overwhelmingly pregame-priced</td></tr>
+    <tr><td class="k">WNBA</td><td class="num">1,359</td><td class="num">~37–40%</td><td>Workable in aggregate; modest for per-combo breakdowns</td></tr>
+    <tr><td class="k">NRL</td><td class="num">844</td><td class="num">~37–40%</td><td>Workable in aggregate; modest for per-combo breakdowns</td></tr>
+  </tbody>
+</table>
+
+<p><strong><code>strict_bk</code> false positives confirmed.</strong> NBA has 163 calls that pass the <code>strict_bk</code> filter but carry no <code>bk_ml_source</code> — backfilled calls with pregame odds written into <code>bk_moneyline</code>. The filter does what the code says and not what its name implies.</p>
+
+<div class="note">
+  <h4>Consequence for Phase 4.7 (combo confidence intervals)</h4>
+  <p>Divided across the combo grid, 262 NBA live-priced calls give single-digit counts per cell. Every interval would straddle zero and the leaderboard is statistically empty on live data alone. WNBA (1,359) and NRL (844) are borderline — perhaps 5–10 meaningful cells at <code>min_calls ≥ 30</code>.</p>
+  <p><strong>Revised plan:</strong> 4.1 still ships (it is cheap and it tells the truth). 4.7 moves behind a sample-size gate and is deferred until the live-priced pool grows. Phase 5 moves up and runs in parallel, because accumulating clean data is the highest-value near-term action available.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="defects"><span class="num">03</span>Code defects</h2>
+<p class="lede">All four critical defects are the same class: a variable referenced outside its scope, caught by a broad exception handler, resulting in silent feature failure.</p>
+
+<div class="finding critical">
+  <div class="bar"></div>
+  <div class="body">
+    <h4><span class="sev critical">Critical</span> NBA SO-01: <code>_sl_game_ids</code> out of scope</h4>
+    <p><code>monitor.py:2796</code> reads <code>_sl_game_ids</code> — a local of <code>main()</code> assigned at line 3200. <code>build_pregame_snapshot_for_event()</code> is a separate function and cannot see it. <code>NameError</code> swallowed by <code>except Exception as _oa_exc</code>.</p>
+    <p><strong>Impact:</strong> pregame odds fallback silently fails for every game where ESPN doesn't supply prices. Summer League games always affected.</p>
+    <div class="fix"><strong>Fix:</strong> pass <code>sl_game_ids</code> as a parameter. <span class="rev new">verified</span> There is exactly one call site (<code>monitor.py:3445</code>), inside <code>main()</code> where the variable is in scope — so this really is a two-line change.</div>
+  </div>
+</div>
+
+<div class="finding critical">
+  <div class="bar"></div>
+  <div class="body">
+    <h4><span class="sev critical">Critical</span> NBA SO-02: <code>_pw_half_quarters</code> out of scope</h4>
+    <p><code>server.py:3528</code> reads <code>_pw_half_quarters</code> — a local of <code>build_history_list_payload()</code> assigned at line 3842. <code>_history_matches_filters()</code> is a separate function.</p>
+    <p><strong>Impact:</strong> half filter (H1/H2/OT) on the game history endpoint returns a 500.</p>
+    <div class="fix"><strong>Fix:</strong> make the mapping a module-level constant; resolve inside <code>_history_matches_filters</code> from the <code>filters</code> dict. Note the near-identical check at <code>server.py:4171</code> is correct, because <code>_pw_stat_call_matches</code> is nested inside <code>build_history_list_payload</code> and picks the name up as a closure — do not "fix" that one.</div>
+  </div>
+</div>
+
+<div class="finding critical">
+  <div class="bar"></div>
+  <div class="body">
+    <h4><span class="sev critical">Critical</span> NRL SO-01: <code>now</code> used before assignment <span class="rev">corrected in rev 2</span></h4>
+    <p><code>monitor.py:1246</code> assigns <code>now = datetime.now(timezone.utc)</code>. Because the assignment exists, Python treats <code>now</code> as local for the whole of <code>main()</code>, so earlier reads raise <code>UnboundLocalError</code>.</p>
+    <p><strong>The affected sites are exactly four:</strong> <code>1179</code>, <code>1192</code>, <code>1208</code>, <code>1230</code>. Revision 1 also listed 234, 270, 271, 291, 316, 335, 867 and 903 — <code>main()</code> spans 998–2305, so those lines are inside <code>_recover_missed_game</code>, <code>_append_recovery_log</code>, <code>_record_pw_call</code> and <code>_poll_live_odds</code>, where <code>now</code> is an explicit parameter. That code is correct and must not be changed.</p>
+    <p><strong>Impact:</strong> auto-recovery silently fails every cycle; missed games are never recovered. Lines 1179 and 1192 are guarded only by <code>except (ValueError, TypeError)</code>, and <code>UnboundLocalError</code> subclasses <code>NameError</code>, so if a <code>recovery_checked_*</code> key ever reaches <code>.alert_state.json</code> the whole cycle terminates uncaught.</p>
+    <div class="fix"><strong>Fix:</strong> hoist <code>now = datetime.now(timezone.utc)</code> to the top of <code>main()</code> and remove the line 1246 assignment. Leave every helper signature alone.</div>
+  </div>
+</div>
+
+<div class="finding critical">
+  <div class="bar"></div>
+  <div class="body">
+    <h4><span class="sev critical">Critical</span> NRL SO-02: <code>new_config</code> undefined <span class="rev">corrected in rev 2</span></h4>
+    <p><code>server.py:4817</code> — <em>not 4831, which is a bare <code>try:</code></em> — reads <code>new_config.get("backup_retention", {})</code>. The local variable is <code>payload</code>; <code>new_config</code> appears exactly once in the file. <code>NameError</code> caught by <code>except Exception: pass</code>.</p>
+    <p><strong>Impact:</strong> pre-config-save snapshot pruning has never run. <code>runtime_backups/</code> grows without bound.</p>
+    <div class="fix"><strong>Fix:</strong> change <code>new_config</code> to <code>payload</code>.</div>
+  </div>
+</div>
+
+<h3>Additional code defects</h3>
+<table>
+  <thead><tr><th>ID</th><th>Repo</th><th>Sev</th><th>Finding</th><th>Phase</th></tr></thead>
+  <tbody>
+    <tr><td class="k">NRL SO-03</td><td class="k">NRL</td><td class="k">Critical</td><td>History cache is shared mutable state — <code>_enrich_pw_call</code> mutates in place across threads</td><td class="k">1.6</td></tr>
+    <tr><td class="k">NBA SB-01</td><td class="k">NBA</td><td class="k">High</td><td>Parity harness weakened — <code>_check_b2b</code> partial built but never called</td><td class="k">3.5</td></tr>
+    <tr><td class="k">NRL SB-01</td><td class="k">NRL</td><td class="k">High</td><td>Concurrent writers race on fixed <code>.tmp</code> paths</td><td class="k">3.6</td></tr>
+    <tr><td class="k">NRL SB-03</td><td class="k">NRL</td><td class="k">High</td><td><code>evaluate_red_card</code> has a stub PBP fallback that does nothing</td><td class="k">6.8</td></tr>
+    <tr><td class="k">NBA SB-04</td><td class="k">NBA</td><td class="k">High</td><td><code>league_config</code> renames 19 state files at import time; not concurrency-safe</td><td class="k">6.9</td></tr>
+    <tr><td class="k">NBA PE-01</td><td class="k">NBA</td><td class="k">Medium</td><td>Abandoned FG% delta feature (<code>prev_fg_pct</code> never used)</td><td class="k">3.3</td></tr>
+    <tr><td class="k">Both PE-02</td><td class="k">Both</td><td class="k">Medium</td><td>Dead locals: 15+ across NBA, 12+ across NRL</td><td class="k">3.3</td></tr>
+    <tr><td class="k">NRL PE-01</td><td class="k">NRL</td><td class="k">Medium</td><td>Duplicate dict key in postgame payload</td><td class="k">3.3</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="security"><span class="num">04</span>Security</h2>
+<p class="lede">The dashboards are tailnet-only and not publicly reachable. That contains the blast radius but does not eliminate it — the wildcard CORS header is exploitable from any browser that can route to the service, and the browsers in question are inside the tailnet by definition.</p>
+
+<div class="note ok">
+  <h4>Confirmed network topology</h4>
+  <p>Dashboards on NBA 8899, WNBA 8900, NRL 8898, served on 8444/8445/8446 as tailnet-only. Tailscale Funnel is configured on 443 only, proxying to <code>127.0.0.1:8788</code> — a separate service, out of scope for these reviews. Nothing in either repository is reachable from the public internet.</p>
+</div>
+
+<div class="finding high">
+  <div class="bar"></div>
+  <div class="body">
+    <h4><span class="sev high">High</span> Wildcard CORS makes the secrets readable by any page a tailnet browser loads</h4>
+    <p><code>send_json()</code> sets <code>Access-Control-Allow-Origin: *</code> on every JSON response in both repos:</p>
+    <pre><code>def send_json(self, code, data):
+    ...
+    self.send_header("Access-Control-Allow-Origin", "*")</code></pre>
+    <p>That header authorises a cross-origin read of the response body, so an arbitrary web page can <code>fetch()</code> <code>/api/config</code> and read the result. Two routes, neither requiring Funnel:</p>
+    <ul>
+      <li><strong>Localhost.</strong> If any browsing happens on a machine running a dashboard, <code>fetch("http://127.0.0.1:8899/api/config")</code> from any loaded page succeeds. Localhost port probing from JavaScript needs no hostname knowledge.</li>
+      <li><strong>Tailnet.</strong> From a browser elsewhere on the tailnet, an attacker needs <code>&lt;machine&gt;.&lt;tailnet&gt;.ts.net</code> plus the port. Tailscale provisions Let's Encrypt certificates for those names, so the hostname is discoverable via Certificate Transparency logs; 8444–8446 is a short scan.</li>
+    </ul>
+    <p>Both routes require the victim's browser to be on the tailnet, which is why this is High rather than Critical. It is not inert, and the fix is deleting one header.</p>
+    <div class="fix"><strong>Fix:</strong> remove the wildcard header from <code>send_json()</code> and <code>do_OPTIONS()</code>. The dashboard is same-origin and does not need it. <strong>Phase 2.1</strong> — ten minutes, highest value per line in the document.</div>
+  </div>
+</div>
+
+<div class="finding high">
+  <div class="bar"></div>
+  <div class="body">
+    <h4><span class="sev high">High</span> NBA: <code>/api/config</code> returns all secrets unmasked</h4>
+    <p>NBA <code>GET /api/config</code> returns the raw config file with <code>slack_bot_token</code>, <code>openclaw_token</code> and <code>odds_api_key</code>. NRL masks two of three but leaks <code>odds_api_key</code>. The static file handler serves <code>config.json</code> directly in both repos — NBA's containment check passes because the file sits inside the script root.</p>
+    <p>On its own this is a tailnet-internal disclosure. Combined with the CORS finding above it becomes remotely readable by any page a tailnet browser visits, which is why the two should be fixed together.</p>
+    <div class="fix"><strong>Fix:</strong> (1) shared <code>SECRET_KEYS</code> constant for mask on GET and re-merge on POST; (2) allowlist the static handler to <code>dashboard.html</code> and known assets; (3) move secrets to environment variables so neither route can leak them. <strong>Phase 2.2, 2.5, 2.6.</strong></div>
+  </div>
+</div>
+
+<div class="finding critical">
+  <div class="bar"></div>
+  <div class="body">
+    <h4><span class="sev critical">Critical</span> NRL: path traversal on backup delete; NBA: restore unvalidated</h4>
+    <p>NRL <code>/api/recovery/delete-backup</code> joins a user-supplied name to the backup root and calls <code>shutil.rmtree</code> with no <code>os.path.basename()</code> and no containment check. NBA's delete validates (<code>".." in name or "/" in name</code>) plus a league-ownership check, but its restore endpoint passes the name through unvalidated.</p>
+    <p>This stays Critical despite the tailnet boundary. A destructive POST needs no readable response, so the wildcard CORS header plus absent CSRF protection is sufficient — a page loaded in a tailnet browser can fire the request blind and delete directories or overwrite live history.</p>
+    <div class="fix"><strong>Fix:</strong> shared <code>_safe_backup_name()</code> helper — <code>basename()</code>, then verify <code>os.path.realpath()</code> resolves under the backup root. Apply to delete, restore and prune in both repos. <strong>Phase 2.3.</strong></div>
+  </div>
+</div>
+
+<table>
+  <thead><tr><th>Finding</th><th>Repo</th><th>Sev</th><th>Phase</th></tr></thead>
+  <tbody>
+    <tr><td>No authentication on any endpoint; no <code>Origin</code> or CSRF validation on POST</td><td class="k">Both</td><td class="k">High</td><td class="k">2.7</td></tr>
+    <tr><td>Bind to <code>0.0.0.0</code> (all interfaces) rather than loopback behind the tailnet proxy</td><td class="k">Both</td><td class="k">High</td><td class="k">2.4</td></tr>
+    <tr><td>Model artefacts loaded via <code>pickle</code></td><td class="k">Both</td><td class="k">High</td><td class="k">6.10</td></tr>
+    <tr><td>Config save can drop secrets if a field is renamed</td><td class="k">Both</td><td class="k">Medium</td><td class="k">2.5</td></tr>
+    <tr><td>Service on <code>127.0.0.1:8788</code> is publicly funneled and was never reviewed</td><td class="k">—</td><td class="k">Unknown</td><td class="k">2.9 <span class="rev new">new</span></td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <h4>Out of scope but worth a look: whatever runs on 8788</h4>
+  <p>That service carries the exposure profile mistakenly attributed to the dashboards in revision 2 — publicly reachable over HTTPS on 443. Given <code>openclaw_token</code> appears in both configs and <code>pw_roi_report.py</code> reads from <code>~/.openclaw/workspace/scripts/nba-monitor</code>, it plausibly has filesystem reach into both projects' working directories. It deserves the same authentication and input-validation pass these reviews applied to the dashboards, but it is a separate piece of work and neither review covered it.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="analytics"><span class="num">05</span>Analytics &amp; ML</h2>
+<p class="lede">The NBA model is methodologically sound but unvalidated. The NRL model has target leakage. ROI computation has systemic issues in both repos, now quantified.</p>
+
+<div class="note ok">
+  <h4>NBA model: no leakage</h4>
+  <p><code>build_training_rows()</code> uses <code>score_margin_at_fire</code> and <code>quarter_elapsed_pct</code> — the state at the moment the condition fired, not the final scoreline. This is correct. The NRL model uses the final margin as a feature against a "did they win" label, which is why it reports 98.9% and means nothing.</p>
+</div>
+
+<div class="finding critical">
+  <div class="bar"></div>
+  <div class="body">
+    <h4><span class="sev critical">Critical</span> NRL: ML model target leakage (98.9% is an artefact)</h4>
+    <p><code>score_margin</code> (final) is a feature and <code>winner</code> is the label, so <code>sign(score_margin)</code> is the label. Worse, <code>halftime_margin + h2_momentum = final_margin</code> exactly — <code>timeline_features.py:82–84</code> defines <code>h2_momentum = margin_final − margin_at_ht</code> — so the model receives the final margin directly and as an exact two-term decomposition. Standardised coefficients of +5.2, +4.1 and +3.7 correspond to odds multipliers of ×181, ×60 and ×40 per standard deviation.</p>
+    <p>Cross-validation cannot detect this: the held-out rows carry the leaked feature too, so the rule transfers perfectly. The narrow 99.7/98.9 train–CV gap is itself the tell — ordinary overfitting produces a wide gap.</p>
+    <div class="fix"><strong>Fix:</strong> train on time-sliced snapshots (state at each 5-minute interval, labelled with the final winner), porting the NBA <code>score_margin_at_fire</code> approach. Use <code>StratifiedGroupKFold</code> on <code>game_id</code> — NRL emits mirrored home/away rows that leak across ungrouped folds.</div>
+  </div>
+</div>
+
+<div class="finding critical">
+  <div class="bar"></div>
+  <div class="body">
+    <h4><span class="sev critical">Critical</span> NBA: sklearn model has no validation</h4>
+    <p>The walk-forward/Brier/calibration harness in <code>evaluate_model.py</code> evaluates the frequency and Bayesian models. The sklearn model driving PW predictions has no cross-validation, no holdout and no calibration measurement — <code>_fit_variant()</code> reports <code>sample_size</code> and <code>positive_rate</code>.</p>
+    <div class="fix"><strong>Fix:</strong> point the existing harness at <code>ml_model</code> via a <code>fit_fn</code> adapter, grouped on <code>game_id</code>. Publish Brier, log loss and the calibration table for all models side by side, with the de-vigged market probability as a fourth column. Note the training rows are one-per-condition-fire, so a game contributes many correlated rows — ungrouped folds will inflate the result.</div>
+  </div>
+</div>
+
+<h3>ROI computation issues</h3>
+<table>
+  <thead><tr><th>Finding</th><th>Sev</th><th>Phase</th></tr></thead>
+  <tbody>
+    <tr><td>Backfilled calls priced at pregame odds. <code>strict_bk</code> doesn't exclude them because backfill populates <code>bk_moneyline</code>. <strong>Measured: NBA 1.7% live-priced.</strong> The ROI path never consults the existing <code>call["synthetic"]</code> flag</td><td class="k">Critical</td><td class="k">4.0–4.2</td></tr>
+    <tr><td>Combo leaderboard: hundreds of cells ranked by ROI, no holdout, no CI, no minimum sample, no multiple-comparisons correction</td><td class="k">Critical</td><td class="k">4.7 <span class="rev">deferred</span></td></tr>
+    <tr><td>No de-vig layer — model probabilities compared against prices that include the bookmaker's cut</td><td class="k">High</td><td class="k">4.9</td></tr>
+    <tr><td>Alerting on a 65% confidence threshold rather than expected value</td><td class="k">High</td><td class="k">4.10</td></tr>
+    <tr><td>Synthetic odds have no bookmaker margin — <code>1/prob</code>, ~5% overround missing</td><td class="k">High</td><td class="k">4.8</td></tr>
+    <tr><td>−110 flat-juice fallback when a price is missing — mixes real and assumed prices</td><td class="k">High</td><td class="k">4.8</td></tr>
+    <tr><td>NRL synthetic spread ignores time remaining — same line at minute 3 and minute 75</td><td class="k">High</td><td class="k">4.11</td></tr>
+    <tr><td>NRL CV leaks between mirrored home/away rows</td><td class="k">High</td><td class="k">4.6</td></tr>
+    <tr><td>Pushes scored as losses — <code>(margin + spread) &gt; 0</code> makes an exact push a loss</td><td class="k">Medium</td><td class="k">4.4</td></tr>
+    <tr><td>Tied games classified as "trailing" — <code>margin ≤ 0</code> puts level scores in the trailing bucket</td><td class="k">Medium</td><td class="k">4.4</td></tr>
+    <tr><td>No closing-line value tracking — fastest reliable edge signal</td><td class="k">Medium</td><td class="k">5.1</td></tr>
+    <tr><td>No bet ledger or bankroll model — flat 100 staking everywhere</td><td class="k">Medium</td><td class="k">5.2, 5.5</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="backfill"><span class="num">06</span>Backfill &amp; data pipeline</h2>
+<p class="lede">Audited in revision 4. The pipeline is more careful than expected in three places and has one footgun that can corrupt the counts everything else is measured against.</p>
+
+<div class="finding high">
+  <div class="bar"></div>
+  <div class="body">
+    <h4><span class="sev high">High</span> NRL backfill can duplicate records; NBA's cannot <span class="rev new">new</span></h4>
+    <p>NRL gates its duplicate guard on an opt-in flag (<code>backfill.py:886</code>):</p>
+    <pre><code>if skip_existing and match_id in existing_ids:
+    skipped += 1; continue
+...
+history.extend(new_records)        # appends regardless</code></pre>
+    <p><code>existing_ids</code> is seeded from history at line 843 but consulted only under <code>skip_existing</code>. NBA's equivalent guard (<code>backfill.py:2421</code>) is unconditional, and <code>monitor.append_game_record()</code> dedupes correctly in both repos.</p>
+    <p>So any NRL backfill run omitting <code>--skip-existing</code> appends a second record for games already present — including live-monitored ones. The result is one record with genuine at-fire prices and one with pregame prices for the same match, inflating every count and double-counting the ROI series. The documented invocation at the head of the file does include the flag, so this is a footgun rather than a certainty.</p>
+    <div class="fix"><strong>Fix:</strong> make the guard unconditional (3.8), and audit the existing history for duplicate <code>match_id</code> before any analytics work (4.0). Note NRL's backfill write path also bypasses <code>append_game_record()</code> entirely — its own <code>history.extend</code> + <code>os.replace</code> — so backfilled records never reach the WAL (6.14).</div>
+  </div>
+</div>
+
+<div class="finding medium">
+  <div class="bar"></div>
+  <div class="body">
+    <h4><span class="sev medium">Medium</span> <code>--pw-force</code> stamps a historical version label on calls produced by today's code <span class="rev new">new</span></h4>
+    <p>Backfill resolves <code>pw_version</code> from the game's date (<code>backfill.py:496</code>, stamped at 817) via <code>pw_trend.resolve_pw_version</code> — correct behaviour, and better than stamping today's version. But <code>--pw-force</code> regenerates the calls using the <em>current</em> implementation, so a call can read <code>pw_version: v1.0</code> while having been produced by logic that did not exist then.</p>
+    <p>The label tracks configuration, not code. Any trend analysis segmented by <code>pw_version</code> is therefore comparing labels rather than implementations.</p>
+    <div class="fix"><strong>Fix:</strong> add a separate code or artefact version to the call record — <code>model_schema_version</code> from <code>ml_model.SCHEMA_VERSION</code>, plus a git short SHA where available (4.12, 6.15).</div>
+  </div>
+</div>
+
+<h3>The pregame pricing is structural, not a bug</h3>
+<p><code>backfill_odds.py</code> fetches from one to three days before kickoff and matches events to fixtures. That is what the Odds API's historical endpoint provides. Two consequences:</p>
+<ul>
+  <li><strong>Backfilled records can never carry at-fire prices</strong> without a different data source. The measured live-priced counts (262 / 1,359 / 844) are a ceiling on the existing history, not something a smarter reprocessing pass can raise.</li>
+  <li>Any plan that assumes historical ROI can be repaired is mistaken. It can only be <em>correctly labelled</em>, which is what 4.0–4.2 do, and then largely set aside — hence Phase 5.</li>
+</ul>
+
+<div class="note ok">
+  <h4>Three things the pipeline gets right</h4>
+  <ul>
+    <li><strong>Lookahead guard (#40).</strong> <code>_prior = [r for r in history + new_records if (r.get("kickoff_utc") or r.get("ts") or "")[:10] &lt; game_date]</code> — frequency and edge lookups cannot see games at or after the one being processed. This is the mistake most retrospective sports models make, and it was avoided deliberately.</li>
+    <li><strong><code>pw_version</code> resolved from the game date</strong> rather than from the current config, so backfilled calls carry the version in force at the time.</li>
+    <li><strong><code>backfill_synth_odds.py</code> is namespaced and idempotent</strong> — writes only <code>synth_*</code> fields and skips where already populated, so it cannot clobber a live-captured price. A pre-backfill snapshot is also taken before the canonical write.</li>
+  </ul>
+</div>
+
+<h3>The discriminator that already exists</h3>
+<p>Every PW call already carries a reliable provenance flag, set at creation in both repos:</p>
+<pre><code>backfill.py:815    "synthetic": True
+monitor.py:901     "synthetic": False</code></pre>
+<p>And <code>server.py:2393</code> already derives from it, with filtering support wired at 2464 and 2474:</p>
+<pre><code>if not c.get("source"):
+    c["source"] = "backfill" if c.get("synthetic") else "live"</code></pre>
+<p>The defect is therefore narrower than revision 2 described: <code>_compute_local_roi_combos</code> reads <code>call.get("moneyline")</code> without ever consulting <code>synthetic</code>. This is a better discriminator than the <code>bk_ml_source</code> filter recommended in revision 2, because it is set on every call rather than only where a live quote happened to be captured — and it makes 4.1 and 4.2 substantially cheaper.</p>
+
+<!-- ============================================================ -->
+<h2 id="architecture"><span class="num">07</span>Architecture &amp; reliability</h2>
+
+<h3>Function size</h3>
+<table>
+  <thead><tr><th>Function</th><th class="num">Lines</th><th>Repo</th></tr></thead>
+  <tbody>
+    <tr><td class="k">monitor.py::main</td><td class="num">2,786</td><td class="k">NBA</td></tr>
+    <tr><td class="k">server.py::do_GET</td><td class="num">1,930</td><td class="k">NBA</td></tr>
+    <tr><td class="k">monitor.py::main</td><td class="num">1,307</td><td class="k">NRL</td></tr>
+    <tr><td class="k">server.py::do_GET</td><td class="num">989</td><td class="k">NRL</td></tr>
+  </tbody>
+</table>
+<p>Both NBA scope defects exist because helper functions cannot see <code>main()</code>'s locals. Extracting a <code>CycleContext</code> dataclass — holding <code>config</code>, <code>state</code>, <code>now</code>, <code>season</code>, <code>sl_game_ids</code> — makes this class of bug structurally impossible rather than merely lintable, and it is the same fix for the NRL <code>now</code> defect.</p>
+
+<h3>Reliability patterns</h3>
+<table>
+  <thead><tr><th>Pattern</th><th>Count</th><th>Impact</th><th>Phase</th></tr></thead>
+  <tbody>
+    <tr><td><code>except Exception</code> blocks hiding errors</td><td class="k">96 NBA server + 35 NBA monitor + similar NRL</td><td>All four scope defects survived because of this</td><td class="k">6.6</td></tr>
+    <tr><td>No CI (linter or tests)</td><td class="k">Both repos</td><td>15 NBA test files, 4 NRL — none run automatically</td><td class="k">3.1, 3.2</td></tr>
+    <tr><td>No heartbeat/staleness monitoring</td><td class="k">Both repos</td><td>Monitor failures found by absence of Slack alerts; dashboards crash-loop silently under <code>Restart=always</code></td><td class="k">1.7 <span class="rev">promoted</span></td></tr>
+    <tr><td>Dependencies unpinned</td><td class="k">Both repos</td><td>A scikit-learn minor release can break pickle loading</td><td class="k">3.4</td></tr>
+    <tr><td>JSON files as datastore; whole-file rewrite per game; no cross-process lock</td><td class="k">Both repos</td><td>O(n) per append; lost updates between 5 writing processes</td><td class="k">6.11</td></tr>
+    <tr><td>Fixed polling window (06:00–12:00 UTC) regardless of the draw</td><td class="k">NRL</td><td>Wasted calls; misses finals and edge kickoffs</td><td class="k">6.12</td></tr>
+    <tr><td>Hardcoded team maps</td><td class="k">Both</td><td>Perth Bears enter the NRL in 2027, PNG in 2028</td><td class="k">6.12</td></tr>
+    <tr><td><code>dashboard.html</code> committed (1.09 MB NBA, 753 KB NRL)</td><td class="k">Both repos</td><td>Every clone, diff and context window pays for it</td><td class="k">6.13</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="parity"><span class="num">08</span>Cross-repo parity</h2>
+<p class="lede">Confirmed direction: the two repositories merge into one, with NBA as the target and owner. That changes what is worth porting versus what should wait for the merge.</p>
+
+<h3>Fixes that exist in one repo but not the other</h3>
+<table>
+  <thead><tr><th>Fix</th><th>Exists in</th><th>Missing from</th><th>Port now?</th></tr></thead>
+  <tbody>
+    <tr><td>Config secret masking on <code>/api/config</code></td><td class="k">NRL</td><td class="k">NBA — leaks all three</td><td class="k">Yes — 2.2</td></tr>
+    <tr><td>Static path containment via <code>realpath</code></td><td class="k">NBA</td><td class="k">NRL — <code>normpath</code> only</td><td class="k">Yes — 2.2</td></tr>
+    <tr><td>Backup name validation before <code>rmtree</code></td><td class="k">NBA</td><td class="k">NRL — fully traversable</td><td class="k">Yes — 2.3</td></tr>
+    <tr><td>Restore endpoint validation</td><td class="k">Neither</td><td class="k">Both</td><td class="k">Yes — 2.3</td></tr>
+    <tr><td>Unconditional backfill duplicate guard</td><td class="k">NBA</td><td class="k">NRL — gated on an opt-in flag</td><td class="k">Yes — 3.8</td></tr>
+    <tr><td>Point-in-time ML features (no leakage)</td><td class="k">NBA</td><td class="k">NRL — trains on final margin</td><td class="k">Yes — 4.6</td></tr>
+    <tr><td>Walk-forward / Brier / calibration harness</td><td class="k">Both</td><td class="k">Neither applies it to sklearn</td><td class="k">Yes — 4.5</td></tr>
+    <tr><td>Live-vs-replay parity harness</td><td class="k">NBA</td><td class="k">NRL — no equivalent</td><td class="k">Defer to merge</td></tr>
+    <tr><td>Separate API client module</td><td class="k">NRL</td><td class="k">NBA — URLs inline</td><td class="k">Defer to merge</td></tr>
+    <tr><td>Continuous odds monitoring thread</td><td class="k">NRL</td><td class="k">NBA</td><td class="k">Defer to merge</td></tr>
+  </tbody>
+</table>
+<p>Security and correctness fixes port immediately, because the merge is months away and both systems are live in the meantime. Capability ports — the parity harness, the API client extraction, the odds thread — are wasted work if they land twice; those wait and arrive as part of the merge.</p>
+
+<h3>Module overlap (NRL function names present in NBA)</h3>
+<table>
+  <thead><tr><th>Module</th><th class="num">Overlap</th><th>Destination in the merged repo</th></tr></thead>
+  <tbody>
+    <tr><td class="k">runtime_backup</td><td class="num">93%</td><td><code>sportmonitor/backup/</code></td></tr>
+    <tr><td class="k">pw_trend</td><td class="num">89%</td><td><code>sportmonitor/analysis/</code></td></tr>
+    <tr><td class="k">outcomes</td><td class="num">87%</td><td><code>sportmonitor/analysis/</code></td></tr>
+    <tr><td class="k">synthetic_odds</td><td class="num">83%</td><td><code>sportmonitor/odds/</code></td></tr>
+    <tr><td class="k">audit_roi</td><td class="num">72%</td><td><code>sportmonitor/analysis/</code></td></tr>
+    <tr><td class="k">odds_api</td><td class="num">70%</td><td><code>sportmonitor/odds/</code></td></tr>
+    <tr><td class="k">server</td><td class="num">38%</td><td>Skeleton to <code>sportmonitor/web/</code>; routes per adapter</td></tr>
+    <tr><td class="k">monitor</td><td class="num">38%</td><td>Scheduler to core; cycle body per adapter</td></tr>
+    <tr><td class="k">ml_model</td><td class="num">17%</td><td><code>adapters/{nba,wnba,nrl}/</code></td></tr>
+    <tr><td class="k">conditions</td><td class="num">14%</td><td><code>adapters/{nba,wnba,nrl}/</code></td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <h4>Design implication of merging</h4>
+  <p>Because the end state is one repository, <code>league_config.VALID_LEAGUES = ("nba", "wnba")</code> should become a <strong>sport adapter registry</strong> rather than a league enum, with NRL as a third entry. Two prerequisites follow: league resolution must become a function call rather than import-time module state (6.9), and the history record needs an explicit versioned schema (6.5) so one store serves all three sports. Both are on the critical path to the merge, which raises their priority above ordinary refactoring.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="transition"><span class="num">09</span>Data &amp; process transition</h2>
+<p class="lede">The plan lists changes; this section covers moving the existing data and running systems through them. Several items touch data that cannot be un-touched.</p>
+
+<h3>Before any analytics work: the duplicate decision</h3>
+<p>If the NRL history contains duplicate <code>match_id</code>s, every figure in Phase 4 is computed on inflated data. The dedupe rule is not obvious, because neither record dominates: the live record has genuine at-fire prices and possibly a partial timeline; the backfilled record has complete match data from cache.</p>
+<p>The likely answer is a <strong>merge</strong> rather than a pick — live PW calls and prices, backfill conditions and timeline. Decide and document the rule before writing anything, because the collapse is one-way.</p>
+
+<h3>Derive rather than migrate</h3>
+<p><code>price_source</code> needs no migration write — it is derivable on read from <code>call["synthetic"]</code>. Prefer that to rewriting a 5,248-game JSON file.</p>
+<p>Every mass rewrite of <code>game_history.json</code> is a risk event, particularly given the unqualified <code>.tmp</code> path (3.6) and a monitor that may be running concurrently. Where a write is genuinely required:</p>
+<ol>
+  <li>Stop the monitor timer.</li>
+  <li><code>runtime_backup.snapshot_runtime_files(label="pre-migration")</code>.</li>
+  <li>Migrate.</li>
+  <li>Verify record counts and per-season totals against the snapshot.</li>
+  <li>Restart, and confirm the next cycle appends normally.</li>
+</ol>
+
+<h3>The model cutover</h3>
+<p><strong>Asset already in place:</strong> NRL's <code>ml_model.py</code> defines <code>SCHEMA_VERSION</code> and <code>load_model()</code> rejects an artefact whose schema does not match (line 225). Bumping it as part of the leakage fix will refuse the old model rather than silently loading it. NBA has the equivalent in <code>FEATURE_SCHEMA_VERSION</code>.</p>
+<p><strong>Gap:</strong> the version is stamped on the model, not on the call. Historical calls carry only <code>pw_version</code>, which is config-derived. There is therefore no way to segment the accuracy or ROI series by which model produced a call, so pre-fix and post-fix calls will sit in one undifferentiated series and any "accuracy improved" reading after 4.6 will be uninterpretable.</p>
+<ul>
+  <li>Add <code>model_schema_version</code> to the call record at cutover (4.12).</li>
+  <li>Treat the pre-fix series as a <strong>closed set</strong>. Do not regenerate historical calls with the new model — that is hindsight, not repair.</li>
+  <li>Reset the headline model-performance series at the cutover date and label it as such on the dashboard.</li>
+</ul>
+
+<h3>Two series must start empty</h3>
+<ul>
+  <li><strong><code>bets.jsonl</code> must not be seeded from history.</strong> The whole value of pre-registration (5.0) is that the rule predates the data. Backfilling the log would reintroduce precisely the selection bias it exists to remove. It is tempting, because it would produce a usable sample immediately — that is the reason not to.</li>
+  <li><strong>CLV is forward-only.</strong> Closing prices for past fixtures are not recoverable at reasonable cost, and a mix of real and approximated closes is worse than a short honest series. Accept a start date.</li>
+</ul>
+
+<h3>Operational sequencing hazards</h3>
+<table>
+  <thead><tr><th>Item</th><th>Hazard</th><th>Order</th></tr></thead>
+  <tbody>
+    <tr><td class="k">2.6 → 2.8</td><td>Rotating the Slack token breaks alerting until every host's config is updated — three dashboards, possibly three configs</td><td>Env vars in place, then rotate, then confirm an alert fires, then strip from <code>config.json</code>. Reversing this means editing config twice</td></tr>
+    <tr><td class="k">2.4</td><td>If Tailscale <code>serve</code> proxies to the host's LAN address rather than loopback, binding to <code>127.0.0.1</code> takes the dashboard offline</td><td>Verify the serve target before changing the bind</td></tr>
+    <tr><td class="k">2.7</td><td>Adding auth breaks any scripted API consumer</td><td>No internal Python or shell callers were found in either repo, so the risk is low — but check the 8788 service and anything outside these repositories first</td></tr>
+    <tr><td class="k">6.9</td><td><code>league_config</code> migration has already run on live hosts (it fires at import), so the new explicit command meets an already-migrated filesystem</td><td>Make it idempotent and able to detect the migrated state; do not assume a clean start</td></tr>
+    <tr><td class="k">6.5 → 6.11</td><td><code>pw_roi_report.py</code> reads NBA history at a hardcoded JSON path and breaks the moment NBA moves to SQLite</td><td>Versioned schema lands first, SQLite second — not in parallel</td></tr>
+    <tr><td class="k">6.11</td><td><code>runtime_backup</code> and <code>recovery.py</code> snapshot JSON files; mid-transition they cover one store properly and the other not at all</td><td>Dual-write JSON and SQLite, compare on read, then cut over. No big-bang</td></tr>
+  </tbody>
+</table>
+
+<h3>Merge-time data unification</h3>
+<p>The record shapes differ: NRL keys on <code>match_id</code> (a match-centre URL), NBA on <code>game_id</code> (an ESPN event id), and a translation already exists at <code>backfill.py:414</code>. NRL additionally carries <code>timeline_features</code> with no NBA equivalent, and the two use different period semantics (halves versus quarters).</p>
+<p>6.5's versioned schema must accommodate both shapes. Normalising historical records is one-way, so the safer path is <strong>version-tag and read both</strong> rather than rewrite — at least until the merged system has run a full season.</p>
+<p>Ops scripts have drifted too: NRL's <code>setup.sh</code> still prints port 8899 rather than 8898, a leftover from the fork. Worth a pass over the runbooks for other stale NBA-isms before they become merge conflicts.</p>
+
+<h3>Acceptance checks</h3>
+<p>Each phase item should have a stated way of knowing it worked. Starting points:</p>
+<table>
+  <thead><tr><th>Item</th><th>Acceptance check</th></tr></thead>
+  <tbody>
+    <tr><td class="k">1.3</td><td>A <code>recovery_checked_&lt;season&gt;_&lt;round&gt;</code> key appears in <code>.alert_state.json</code> and the log shows a completed scan rather than a WARN</td></tr>
+    <tr><td class="k">1.4</td><td><code>runtime_backups/</code> stops growing after successive config saves</td></tr>
+    <tr><td class="k">1.6</td><td>Two concurrent requests with different filters return correctly distinct payloads</td></tr>
+    <tr><td class="k">2.1</td><td>A cross-origin <code>fetch()</code> to <code>/api/config</code> from a scratch page now fails</td></tr>
+    <tr><td class="k">2.3</td><td><code>delete-backup</code> with a name of <code>../x</code> returns an error rather than acting</td></tr>
+    <tr><td class="k">3.5</td><td><code>parity_check.py</code> figures move. If they do not, the B2B path was not affecting conditions after all — record that finding</td></tr>
+    <tr><td class="k">4.0</td><td>Duplicate <code>match_id</code> count is zero, and post-dedupe game totals are recorded for comparison</td></tr>
+    <tr><td class="k">4.1</td><td>Live-priced counts come out at 262 / 1,359 / 844, matching the independent measurement</td></tr>
+    <tr><td class="k">4.6</td><td>Reported accuracy drops materially — a model that still scores above ~90% has not been fixed</td></tr>
+    <tr><td class="k">5.0</td><td>A registered rule cannot be edited in place; an attempt produces a new rule ID</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="production"><span class="num">10</span>Production change management</h2>
+<p class="lede">All three services are live. The systemd units impose constraints the earlier revisions did not account for — in particular, the deployable unit is larger than one league.</p>
+
+<div class="finding high">
+  <div class="bar"></div>
+  <div class="body">
+    <h4><span class="sev high">High</span> NBA and WNBA cannot be deployed independently <span class="rev new">new</span></h4>
+    <p>Both leagues run from a single checkout and a single virtualenv, distinguished only by an environment variable:</p>
+    <pre><code>nba-monitor.service     WorkingDirectory=.../scripts/nba-monitor  NBA_MONITOR_CONFIG=config.json
+wnba-dashboard.service  WorkingDirectory=.../scripts/nba-monitor  NBA_MONITOR_CONFIG=config-wnba.json</code></pre>
+    <p>A <code>git pull</code> or a dependency change therefore reaches both leagues at the same instant. This collides with the calendar: NBA is between seasons while <strong>WNBA is mid-season</strong>, so the natural plan — do the heavy analytics work on NBA while it is quiet — exposes a live WNBA season to every change. NRL is also mid-season and heading toward finals.</p>
+    <p>It also makes <strong>SB-04 a live condition rather than a theoretical one</strong>: <code>league_config</code>'s import-time migration renames 19 state files per process, and the WNBA dashboard (<code>Restart=always</code>) coexists in that directory with the NBA monitor firing every minute.</p>
+    <div class="fix"><strong>Decision required:</strong> either provision a second checkout so risky work can be staged against NBA alone, or accept simultaneous exposure and rely on the heartbeat (1.7) and shadow mode (4.6, 4.10) as compensating controls. Recorded in Section 12.</div>
+  </div>
+</div>
+
+<h3>Change windows</h3>
+<table>
+  <thead><tr><th>League</th><th>Season status (late July)</th><th>Implication</th></tr></thead>
+  <tbody>
+    <tr><td class="k">NBA</td><td>Between seasons; Summer League concluded</td><td>Safest target — but see above, it shares a checkout with WNBA</td></tr>
+    <tr><td class="k">WNBA</td><td>Mid-season, games most nights</td><td>In-season change discipline applies to every NBA-repo deploy</td></tr>
+    <tr><td class="k">NRL</td><td>Mid-season, approaching finals</td><td>Highest consequence for a bad deploy; defer 4.6 and 4.11 to a bye or post-season window if possible</td></tr>
+  </tbody>
+</table>
+<p class="tnote">Confirm against the actual draw before scheduling — the monitor's polling window is fixed at 06:00–12:00 UTC (see 6.12), so the practical quiet period is outside that band on days with no fixtures.</p>
+<p><strong>DST deadline on 6.12:</strong> Sydney re-enters AEDT in early October — the start of NRL finals — shifting kickoffs an hour against the fixed UTC window. 6.12 (draw-driven polling) stops being opportunistic and needs to land, or the window widened as an interim, before the October changeover. Verify at the same time that all stored timestamps are UTC-normalised.</p>
+
+<h3>Deploy procedure</h3>
+<p>The monitor is <code>Type=oneshot</code> on a per-minute timer, so a pull mid-cycle gives that cycle a mixed read of the code. Stop the timers first.</p>
+<pre><code>systemctl --user stop  {nba,wnba}-monitor.timer nba-ml-train.timer wnba-ml-train.timer
+git pull && .venv/bin/pip install -r requirements.txt
+.venv/bin/python -c "import monitor, server, ml_model, conditions, outcomes"   # import smoke test
+systemctl --user restart {nba,wnba}-dashboard.service
+systemctl --user start  {nba,wnba}-monitor.timer nba-ml-train.timer wnba-ml-train.timer
+# then watch one full cycle complete in logs/monitor_nba.log before walking away</code></pre>
+<ul>
+  <li><strong>Close all dashboard tabs during a change window.</strong> The config POST rewrites the whole file last-write-wins, so a tab left open can overwrite deployed config with stale values. <code>config.json</code> and <code>config-wnba.json</code> are gitignored, so a pull itself is safe.</li>
+  <li><strong>Freeze manual edits</strong> to <code>game_history.json</code> and the state files for the duration of any data migration, or the audit trail in Section 09 is worthless.</li>
+  <li><strong>After 1.3, watch <code>nrl-recovery.timer</code>'s first successful run.</strong> It has been firing into the broken <code>now</code> path all season, so its first working pass may attempt to recover a backlog of missed games. Run it manually and inspect before letting the timer do it unattended.</li>
+</ul>
+
+<h3>Disaster recovery: one host, untested backups <span class="rev new">new</span></h3>
+<p>Everything — three leagues, all history, the models, both configs — lives on a single machine, and the off-host copy is an rsync to Google Drive that has <strong>never been restore-tested</strong>. A backup that has never been restored is a hope, not a control; rsync in particular fails quietly (auth expiry, excluded paths, one-way deletes) in ways that only a restore reveals.</p>
+<ul>
+  <li><strong>Restore drill (2.10):</strong> restore the Drive copy to a scratch directory, verify record counts, config presence and model loadability against production, and time it. Repeat quarterly. First run this week — before any data-touching phase, since the snapshot-restore rollback class in this section silently assumes backups work.</li>
+  <li><strong>Coverage check:</strong> confirm the rsync includes the gitignored files — <code>game_history*.json</code>, <code>model.pkl</code>, <code>config.json</code>, <code>config-wnba.json</code>, the state files — which are precisely the files git cannot recover. Confirm deletions don't propagate (<code>--backup</code> or versioned destination).</li>
+  <li><strong>DR runbook:</strong> one page — reinstall, clone, venv, restore from Drive, re-enable units, verify heartbeat — with a stated recovery-time objective. Mid-season, a day of outage is missed games and missed live prices that cannot be re-captured.</li>
+</ul>
+
+<h3>Observability is the precondition, not the polish</h3>
+<p>Dashboards run <code>Restart=always</code> with <code>RestartSec=5</code>, so a bad deploy produces a silent crash loop whose only symptom is the absence of Slack alerts — precisely how the <code>now</code> defect survived a season. <strong>The heartbeat has therefore moved from 6.7 to 1.7</strong> and should land before any in-season deploy. It is half a day and it is the safety net for everything else in this plan.</p>
+<p>Three silent failure modes the heartbeat alone does not catch:</p>
+<ul>
+  <li><strong>Dead alert path.</strong> A revoked Slack token or webhook failure is indistinguishable from a quiet slate. Fix: a daily "monitor alive, N games watched, M alerts sent" summary message — silence then becomes a signal — plus alert-send failures incrementing a visible error counter (1.7).</li>
+  <li><strong>Exhausted Odds API credits.</strong> At 20k credits/month, a careless re-backfill can consume the budget and silently stop live price capture — corrupting exactly the clean dataset Phase 5 exists to build. Fix: remaining credits in the heartbeat payload with a threshold alert at 25% (1.7); budget re-fetch jobs explicitly.</li>
+  <li><strong>Upstream schema drift.</strong> ESPN and NRL.com endpoints are unofficial and contract-free; a renamed stat key degrades conditions quietly — the <code>sendOffs</code> stub shows it has already happened once. Fix: a lightweight ingest validator that alerts when expected keys go missing from live responses, and a daily canary parse of a golden sample (3.10).</li>
+  <li><strong>Dead host.</strong> The heartbeat lives on the machine it monitors. Fix: an external watchdog — a free ping-expectation service or a cron on any second machine — that pages when the heartbeat stops arriving (3.9).</li>
+</ul>
+<p>Also worth checking before it becomes a mystery: the monitor units set <code>MemoryMax=2G</code>, against a 5,248-game history loaded whole plus a <code>ConditionEdgeStore</code> built per request. If that ceiling is reached, systemd kills a oneshot cycle with no application-level trace. Record current RSS as a baseline.</p>
+
+<h3>Shadow mode for anything that changes alerting</h3>
+<p>4.10 replaces a 65% confidence threshold with an EV test, and 4.6 replaces the NRL model outright. Both change which alerts fire, in an unknown direction and magnitude. Deploying either straight into a live season means discovering the answer in Slack.</p>
+<p><strong>Dual-decision period:</strong> compute the new decision, write it to <code>bets.jsonl</code> with the rule ID, and continue alerting on the old rule. Compare volumes and hit rates for a defined period — a fortnight, or 100 signals, whichever comes first — then cut over. This is also exactly the data Phase 5 wants, so the shadow period is not lost time.</p>
+
+<h3>Staging on a copy</h3>
+<p>There is no staging environment. 4.0 (dedupe), 4.5 and 4.6 (model work) should not run first against production data. The snapshot machinery plus <code>--use-cache</code> makes a scratch run cheap:</p>
+<ol>
+  <li>Copy <code>game_history*.json</code>, the state files and <code>espn_cache/</code> to a scratch directory.</li>
+  <li>Run the change there with <code>--use-cache</code> and <code>--dry-run</code> where available.</li>
+  <li>Diff record counts, per-season totals, call counts and accuracy figures against the original.</li>
+  <li>Only then apply to production, following the migration steps in Section 09.</li>
+</ol>
+<p><strong>Odds API credits:</strong> <code>odds_api.py</code> tracks rate-limit state and remaining credits. Any re-backfill consumes quota, and exhausting it mid-season blinds the live odds poller. Require <code>--use-cache</code> on re-runs and check remaining credits before any historical fetch.</p>
+
+<h3>Rollback classification</h3>
+<p>Code rolls back with git. Data does not — <code>game_history.json</code> and <code>model.pkl</code> are gitignored, so snapshots are the only mechanism. Every item needs a stated rollback path:</p>
+<table>
+  <thead><tr><th>Class</th><th>Items</th><th>Rollback</th></tr></thead>
+  <tbody>
+    <tr><td class="k">Forward-compatible</td><td>4.2, 4.12, 5.0–5.2, 1.7</td><td>Revert the commit; old code ignores the new fields. No data action</td></tr>
+    <tr><td class="k">Config re-edit needed</td><td>2.6, 2.8, 2.4</td><td>Revert, then restore the previous config or environment values on every host</td></tr>
+    <tr><td class="k">Snapshot restore needed</td><td>4.0, 4.6, 6.11</td><td>Revert the commit <em>and</em> restore the pre-change snapshot. Records written between change and rollback are lost — note the window</td></tr>
+    <tr><td class="k">One-way</td><td>4.0 duplicate collapse, 6.5 schema normalisation</td><td>No rollback beyond the snapshot. Requires the sign-off named in Section 12</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <h4>Escalation: the 8788 service shares the filesystem</h4>
+  <p><code>WorkingDirectory</code> is <code>~/.openclaw/workspace/scripts/nba-monitor</code> — inside the same workspace tree that <code>pw_roi_report.py</code> hardcodes, and plausibly the workspace of whatever runs on <code>127.0.0.1:8788</code>. If the publicly-funneled service has filesystem reach into that tree, it has reach into the live production checkout, both configs and all history data.</p>
+  <p>That makes <strong>2.9 more urgent than "a separate task"</strong>. It should be scoped and answered in the same week as Phase 2, even though the work itself sits outside these repositories.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="training"><span class="num">11</span>ML training pipeline</h2>
+<p class="lede">Operator-supplied detail, revision 6. Three leagues retrain weekly on daily timers, gated on staleness and a data hash — and on nothing about model quality.</p>
+
+<h3>Current setup</h3>
+<table>
+  <thead><tr><th></th><th>NBA</th><th>WNBA</th><th>NRL</th></tr></thead>
+  <tbody>
+    <tr><td class="k">Timer</td><td>Daily 09:15 UTC</td><td>Daily 09:20 UTC</td><td>Daily 13:00 UTC</td></tr>
+    <tr><td class="k">Interval</td><td>7 days</td><td>7 days</td><td>7 days</td></tr>
+    <tr><td class="k">Last trained</td><td>2026-07-20</td><td>2026-07-21</td><td>2026-07-23</td></tr>
+    <tr><td class="k">Runner</td><td><code>ml_train_runner.py</code></td><td>Same, via <code>config-wnba.json</code></td><td><code>ml_train_runner.py</code> (NRL variant)</td></tr>
+  </tbody>
+</table>
+<p>Three gates before training proceeds, all bypassed by <code>--force</code>: an enabled flag in config, a staleness check (model age ≥ interval − 1h), and a SHA-256 hash of <code>game_history.json</code> (skip if unchanged). All three gate on <em>whether to bother</em>, none on <em>whether the result is any good</em>.</p>
+
+<div class="finding high">
+  <div class="bar"></div>
+  <div class="body">
+    <h4><span class="sev high">High</span> Train-on-schedule with no quality gate, no comparison, no rollback <span class="rev new">new</span></h4>
+    <p>When the interval elapses and the hash has changed, <code>ml_model.train_and_save()</code> fits on everything and the artefact goes live immediately. There is no pre-train evaluation of the current model on recent data, no post-train comparison of new against old, no holdout protection, and no rollback if the new model is worse. <code>evaluate_model.py</code> computes Brier, log loss and ECE — but on demand, disconnected from the pipeline.</p>
+    <p>Two concrete consequences today:</p>
+    <ul>
+      <li><strong>NRL retrains reinforce the known leakage weekly.</strong> Every Thursday 13:00 UTC the leaked model is re-fitted on the same leaked features and redeployed. Nothing improves and the artefact date freshens, which makes the model <em>look</em> maintained.</li>
+      <li><strong>A bad data batch deploys silently.</strong> Summer League contamination, a schema drift upstream, or a duplicated history (Section 06) flows into the next weekly artefact with no tripwire between data and live alerts.</li>
+    </ul>
+    <div class="fix"><strong>Fix (7.1, staged):</strong> (a) <em>immediately</em> — stop the NRL scheduled retrain (1.8): a stopped clock beats one that re-injures itself weekly; the deployed artefact keeps serving. (b) <em>Champion–challenger</em>: the runner trains a challenger, evaluates champion and challenger on the trailing window via the existing <code>evaluate_model.py</code> metrics, and promotes only on improvement (log loss, with a no-worse guard on ECE); otherwise it keeps the champion and alerts. (c) <em>Archive artefacts</em> — <code>model_YYYYMMDD.pkl</code> plus metrics JSON, so rollback is a symlink move. (d) Wire the decision into the heartbeat: "retrained: promoted/held, champion log loss X vs Y".</div>
+  </div>
+</div>
+
+<p>This section and Phase 7 are deliberately coupled: the champion–challenger harness built here is the same machinery the drift tripwire (7.2) and the blend evaluation (7.5) run on. Build it once.</p>
+
+<!-- ============================================================ -->
+<h2 id="plan"><span class="num">12</span>Implementation plan</h2>
+<p class="lede">Six phases ordered by impact and dependency. Each is independently deployable.</p>
+
+<h3>Phase 1: Critical defects (1–2 hours + half day)</h3>
+<table>
+  <thead><tr><th>#</th><th>Action</th><th>Repo</th><th>Effort</th></tr></thead>
+  <tbody>
+    <tr><td class="k">1.1</td><td>Fix <code>_sl_game_ids</code> scope — add parameter to <code>build_pregame_snapshot_for_event()</code> and pass at the single call site (3445)</td><td class="k">NBA</td><td class="k">15 min</td></tr>
+    <tr><td class="k">1.2</td><td>Fix <code>_pw_half_quarters</code> scope — module-level constant. Leave the 4171 closure alone</td><td class="k">NBA</td><td class="k">15 min</td></tr>
+    <tr><td class="k">1.3</td><td>Fix <code>now</code> scope — hoist to top of <code>main()</code>. <strong>Four sites only</strong>: 1179, 1192, 1208, 1230. Do not touch helper signatures</td><td class="k">NRL</td><td class="k">10 min</td></tr>
+    <tr><td class="k">1.4</td><td>Fix <code>new_config</code> → <code>payload</code> at <code>server.py:4817</code></td><td class="k">NRL</td><td class="k">5 min</td></tr>
+    <tr><td class="k">1.5</td><td>Manual prune of accumulated <code>runtime_backups/</code> pre-config-save snapshots</td><td class="k">NRL</td><td class="k">5 min</td></tr>
+    <tr><td class="k">1.6</td><td>Make <code>_enrich_pw_call</code> pure — return a new dict instead of mutating the shared cache</td><td class="k">NRL</td><td class="k">halfday</td></tr>
+    <tr><td class="k">1.7</td><td><strong>Monitor heartbeat + dashboard staleness badge + watchdog alert on missed cycles.</strong> Include alert-send failures, daily "alive" summary, and remaining Odds API credits with a 25% threshold alert <span class="rev">expanded</span></td><td class="k">Both</td><td class="k">halfday</td></tr>
+    <tr><td class="k">1.8</td><td><strong>Disable the NRL scheduled retrain</strong> (<code>ml_training_enabled: false</code> or stop <code>nrl-ml-train.timer</code>) until 4.6 lands — each weekly retrain re-fits the known leakage and freshens the artefact date without improving anything <span class="rev new">new</span></td><td class="k">NRL</td><td class="k">5 min</td></tr>
+  </tbody>
+</table>
+
+<h3>Phase 2: Security hardening (1 day) <span class="rev">absorbed rev 2 Phase 0</span></h3>
+<p>2.1 and 2.2 are the two that matter and take about forty minutes between them. The rest is defence in depth.</p>
+<table>
+  <thead><tr><th>#</th><th>Action</th><th>Repo</th><th>Effort</th></tr></thead>
+  <tbody>
+    <tr><td class="k">2.1</td><td><strong>Remove <code>Access-Control-Allow-Origin: *</code></strong> from <code>send_json()</code> and <code>do_OPTIONS()</code></td><td class="k">Both</td><td class="k">10 min</td></tr>
+    <tr><td class="k">2.2</td><td><strong>Mask secrets on <code>/api/config</code> GET</strong>; allowlist the static handler so <code>config.json</code> is unreachable</td><td class="k">Both</td><td class="k">30 min</td></tr>
+    <tr><td class="k">2.3</td><td>Add <code>_safe_backup_name()</code> to the delete, restore and prune endpoints</td><td class="k">Both</td><td class="k">30 min</td></tr>
+    <tr><td class="k">2.4</td><td>Bind to <code>127.0.0.1</code>; let the Tailscale proxy handle reachability</td><td class="k">Both</td><td class="k">10 min</td></tr>
+    <tr><td class="k">2.5</td><td>Single <code>SECRET_KEYS</code> constant driving both the GET mask and the POST re-merge</td><td class="k">Both</td><td class="k">30 min</td></tr>
+    <tr><td class="k">2.6</td><td>Move secrets from <code>config.json</code> to environment variables read at startup</td><td class="k">Both</td><td class="k">1 hour</td></tr>
+    <tr><td class="k">2.7</td><td>Add authentication — shared secret header or session — plus <code>Origin</code> validation on POST</td><td class="k">Both</td><td class="k">2 hours</td></tr>
+    <tr><td class="k">2.8</td><td>Rotate Slack bot token, OpenClaw token and Odds API key — precautionary, after 2.2 lands</td><td class="k">Both</td><td class="k">15 min</td></tr>
+    <tr><td class="k">2.9</td><td><strong>Scope and review the publicly-funneled service on <code>127.0.0.1:8788</code></strong> — it plausibly has filesystem reach into the live production checkout and both configs <span class="rev">escalated</span></td><td class="k">—</td><td class="k">Same week</td></tr>
+    <tr><td class="k">2.10</td><td><strong>Backup restore drill</strong> — restore the Google Drive rsync copy to a scratch directory; verify record counts, configs and model loadability; confirm gitignored files are covered and deletions don't propagate; time it; repeat quarterly. Never tested to date <span class="rev new">new</span></td><td class="k">Both</td><td class="k">2 hours</td></tr>
+  </tbody>
+</table>
+
+<h3>Phase 3: CI &amp; code quality (half day)</h3>
+<table>
+  <thead><tr><th>#</th><th>Action</th><th>Repo</th><th>Effort</th></tr></thead>
+  <tbody>
+    <tr><td class="k">3.1</td><td>Add <code>ruff check</code> to GitHub Actions. <strong>Start with <code>F</code> rules only</strong> — a full ruleset turns CI red on ~30 pre-existing findings</td><td class="k">Both</td><td class="k">30 min</td></tr>
+    <tr><td class="k">3.2</td><td>Convert existing test scripts to pytest; add to CI</td><td class="k">Both</td><td class="k">1 hour</td></tr>
+    <tr><td class="k">3.3</td><td>Fix dead locals, duplicate keys and f-string warnings; then widen the ruleset</td><td class="k">Both</td><td class="k">1 hour</td></tr>
+    <tr><td class="k">3.4</td><td>Pin dependency versions in <code>requirements.txt</code></td><td class="k">Both</td><td class="k">15 min</td></tr>
+    <tr><td class="k">3.5</td><td>Wire <code>_check_b2b</code> into condition evaluation; re-run <code>parity_check.py</code> and compare</td><td class="k">NBA</td><td class="k">halfday</td></tr>
+    <tr><td class="k">3.6</td><td>PID-qualify <code>.tmp</code> paths; add an advisory lock around history read-modify-write</td><td class="k">NRL</td><td class="k">halfday</td></tr>
+    <tr><td class="k">3.7</td><td>Add <code>parity_check.py</code> as a scheduled CI job over a fixed game sample</td><td class="k">NBA</td><td class="k">1 hour</td></tr>
+    <tr><td class="k">3.8</td><td>Make the NRL backfill duplicate guard unconditional rather than gated on <code>--skip-existing</code></td><td class="k">NRL</td><td class="k">15 min</td></tr>
+    <tr><td class="k">3.9</td><td>External watchdog — a ping-expectation service or second-machine cron that pages when the heartbeat stops arriving; plus systemd <code>OnFailure=</code> notification units <span class="rev new">new</span></td><td class="k">Both</td><td class="k">2 hours</td></tr>
+    <tr><td class="k">3.10</td><td>Ingest schema validator + daily canary parse of a golden sample — alert when expected keys vanish from ESPN/NRL.com responses <span class="rev new">new</span></td><td class="k">Both</td><td class="k">1 day</td></tr>
+    <tr><td class="k">3.11</td><td>Memoise <code>ConditionEdgeStore</code> and combo-grid builds keyed on history mtime; add <code>ETag</code>/gzip to JSON payloads and the dashboard <span class="rev new">new</span></td><td class="k">Both</td><td class="k">halfday</td></tr>
+  </tbody>
+</table>
+
+<h3>Phase 4: Analytics fixes (1–2 weeks) <span class="rev">now the top priority</span></h3>
+<p>With the network exposure corrected, 4.1 and 4.2 are the most urgent items in the document — stakes are being placed on figures they correct.</p>
+<table>
+  <thead><tr><th>#</th><th>Action</th><th>Repo</th><th>Effort</th></tr></thead>
+  <tbody>
+    <tr><td class="k">4.0</td><td><strong>Audit for duplicate <code>match_id</code></strong> and collapse per the documented merge rule; record pre- and post-counts. <strong>Run on a scratch copy first.</strong> Gate on this before 4.1</td><td class="k">NRL</td><td class="k">2 hours</td></tr>
+    <tr><td class="k">4.1</td><td><strong>Filter the ROI path on <code>call["synthetic"]</code></strong> (or the derived <code>source</code>), not <code>strict_bk</code>; rename the toggle to "live-priced only"; show surviving <code>n</code> <span class="rev">rescoped</span></td><td class="k">Both</td><td class="k">30 min</td></tr>
+    <tr><td class="k">4.2</td><td>Expose <code>price_source</code> derived on read from <code>synthetic</code> — no migration write; report ROI separately by source <span class="rev">rescoped</span></td><td class="k">Both</td><td class="k">1 hour</td></tr>
+    <tr><td class="k">4.3</td><td>Display sample size next to every ROI figure; suppress ROI entirely below <code>n = 30</code></td><td class="k">Both</td><td class="k">halfday</td></tr>
+    <tr><td class="k">4.4</td><td>Three-state push handling (win/push/loss) and tied-score classification (trailing/level/leading)</td><td class="k">Both</td><td class="k">halfday</td></tr>
+    <tr><td class="k">4.5</td><td>Point <code>evaluate_model.py</code> at <code>ml_model</code> with <code>StratifiedGroupKFold</code> on <code>game_id</code>; publish Brier, log loss and calibration for all models side by side. Run against a scratch copy before production</td><td class="k">NBA</td><td class="k">2–3 days</td></tr>
+    <tr><td class="k">4.6</td><td>Fix NRL leakage — train on time-sliced snapshots, port the NBA approach, grouped CV. <strong>Shadow the new model's calls before alerting on them</strong>; schedule to a bye or post-season window if possible <span class="rev">amended</span></td><td class="k">NRL</td><td class="k">3–5 days</td></tr>
+    <tr><td class="k">4.7</td><td>Combo leaderboard CIs and multiple-comparisons correction — <strong>gated on live-priced sample size</strong> <span class="rev">deferred</span></td><td class="k">Both</td><td class="k">1–2 days</td></tr>
+    <tr><td class="k">4.8</td><td>Add overround to synthetic odds; remove the −110 fallback; tag price provenance</td><td class="k">Both</td><td class="k">halfday</td></tr>
+    <tr><td class="k">4.9</td><td>De-vig layer — convert prices to fair probabilities (multiplicative, Shin or power); store raw and fair</td><td class="k">Both</td><td class="k">halfday</td></tr>
+    <tr><td class="k">4.10</td><td>EV engine replacing the 65% confidence threshold: <code>EV = p·(odds−1) − (1−p)</code> against the de-vigged price, with an estimation-error allowance. <strong>Dual-decision period before cutover</strong> — log the new decision, alert on the old, compare for a fortnight or 100 signals <span class="rev">amended</span></td><td class="k">Both</td><td class="k">2 days</td></tr>
+    <tr><td class="k">4.11</td><td>Rebuild the NRL synthetic spread on margin + seconds remaining; replace quarter buckets with halves</td><td class="k">NRL</td><td class="k">1–2 days</td></tr>
+    <tr><td class="k">4.12</td><td>Stamp <code>model_schema_version</code> on every call at the model cutover; segment all accuracy and ROI series by it <span class="rev new">new</span></td><td class="k">Both</td><td class="k">halfday</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <h4>Decision gate after 4.1</h4>
+  <p><strong>Already answered for NBA.</strong> At 262 live-priced calls, NBA fails the gate: no per-combo ROI is reportable and no NBA figure supports a staking decision. WNBA (1,359) and NRL (844) pass in aggregate at <code>min_calls ≥ 30</code>, giving perhaps 5–10 meaningful cells each. Re-run the gate monthly as the live-priced pool grows; 4.7 unblocks when a league clears roughly 3,000 live-priced calls.</p>
+</div>
+
+<h3>Phase 5: Forward-testing infrastructure (1 week) <span class="rev">parallel to Phase 4</span></h3>
+<p>Clean data only accumulates once this exists, so 5.0–5.2 should start alongside Phase 4 rather than after it. Combined they are about a day and a half.</p>
+<table>
+  <thead><tr><th>#</th><th>Action</th><th>Repo</th><th>Effort</th></tr></thead>
+  <tbody>
+    <tr><td class="k">5.0</td><td><strong>Rule pre-registration</strong> — <code>rules.json</code> holding rule definition, registration date and a rule ID; bets reference the ID; definitions immutable once registered</td><td class="k">Both</td><td class="k">halfday</td></tr>
+    <tr><td class="k">5.1</td><td>CLV capture — snapshot the final pre-kickoff price for every fixture; backfill <code>closing_price</code></td><td class="k">Both</td><td class="k">1 day</td></tr>
+    <tr><td class="k">5.2</td><td><code>bets.jsonl</code> append-only forward-test log written at PW call time, including <code>rule_id</code>, <code>price_source</code>, <code>model_prob</code>, <code>market_prob_devig</code>, <code>ev</code></td><td class="k">Both</td><td class="k">halfday</td></tr>
+    <tr><td class="k">5.3</td><td>Dashboard paper-trading panel — bets to date, mean CLV with CI, ROI with CI, registration date, per rule</td><td class="k">Both</td><td class="k">2–3 days</td></tr>
+    <tr><td class="k">5.4</td><td>Make mean CLV the headline KPI on the analysis tab, above ROI</td><td class="k">Both</td><td class="k">halfday</td></tr>
+    <tr><td class="k">5.5</td><td>Bankroll ledger with fractional Kelly sizing and a drawdown circuit-breaker — gated on 4.5/4.6 calibration</td><td class="k">Both</td><td class="k">2 days</td></tr>
+    <tr><td class="k">5.6</td><td>Execution assumptions in the backtest — latency, slippage, exclusion of signals firing during market suspension</td><td class="k">Both</td><td class="k">1 day</td></tr>
+    <tr><td class="k">5.7</td><td>Actionable alerts — Slack blocks carrying model prob vs de-vigged market prob, EV, price + source, rule sample size, and a deep link to the game view; usable from the phone without opening the dashboard <span class="rev new">new</span></td><td class="k">Both</td><td class="k">1 day</td></tr>
+    <tr><td class="k">5.8</td><td>Quiet controls — per-rule mute, minimum-EV slider, max-alerts-per-game cap; in place before the 4.10 shadow period ends <span class="rev new">new</span></td><td class="k">Both</td><td class="k">1 day</td></tr>
+    <tr><td class="k">5.9</td><td>Data-confidence banner on every ROI/accuracy panel — <code>n</code>, price-source mix, date range; persist filter state in the URL for phone sharing <span class="rev new">new</span></td><td class="k">Both</td><td class="k">1 day</td></tr>
+  </tbody>
+</table>
+
+<h3>Phase 6: Architecture &amp; merge path (ongoing)</h3>
+<p>Steps toward a single repository with NBA as the target, not open-ended refactoring.</p>
+<table>
+  <thead><tr><th>#</th><th>Action</th><th>Repo</th><th>Effort</th></tr></thead>
+  <tbody>
+    <tr><td class="k">6.1</td><td>Port security and correctness fixes only; defer capability ports to the merge</td><td class="k">Both</td><td class="k">halfday</td></tr>
+    <tr><td class="k">6.3</td><td>Extract <code>CycleContext</code> dataclass; break up <code>main()</code> and <code>do_GET</code></td><td class="k">Both</td><td class="k">1 week</td></tr>
+    <tr><td class="k">6.4</td><td>Extract <code>sportmonitor</code> package — backup, trend, synthetic odds, odds client — as the merge skeleton</td><td class="k">Both</td><td class="k">3–5 days</td></tr>
+    <tr><td class="k">6.5</td><td>Versioned history record schema; retire the hardcoded cross-repo path in <code>pw_roi_report.py</code>. <strong>Must land before 6.11</strong> <span class="rev">merge-critical</span></td><td class="k">Both</td><td class="k">3–5 days</td></tr>
+    <tr><td class="k">6.6</td><td>Narrow <code>except Exception</code> blocks; add <code>logging.exception()</code> and an error counter on the dashboard</td><td class="k">Both</td><td class="k">2–3 days</td></tr>
+    <tr><td class="k">6.8</td><td>Implement or remove the <code>evaluate_red_card</code> PBP fallback</td><td class="k">NRL</td><td class="k">halfday</td></tr>
+    <tr><td class="k">6.9</td><td>Make <code>league_config</code> migration an explicit locked command; convert league resolution to a function call and <code>VALID_LEAGUES</code> to an adapter registry <span class="rev">merge-critical</span></td><td class="k">NBA</td><td class="k">1 day</td></tr>
+    <tr><td class="k">6.10</td><td>Replace pickle artefacts with JSON (vocabulary, coefficients, intercept, metadata)</td><td class="k">Both</td><td class="k">halfday</td></tr>
+    <tr><td class="k">6.11</td><td>Migrate the store to SQLite in WAL mode; add <code>bets</code> and <code>odds</code> tables; keep JSON export. <strong>Dual-write period, not a big-bang</strong> — see Section 09</td><td class="k">Both</td><td class="k">3–5 days</td></tr>
+    <tr><td class="k">6.12</td><td>Draw-driven polling schedule; derive team maps from the draw API with a static fallback. <strong>Deadline: before the October AEDT changeover</strong> (NRL finals) <span class="rev">deadline added</span></td><td class="k">Both</td><td class="k">1 day</td></tr>
+    <tr><td class="k">6.13</td><td>Move generated artefacts out of version control; split <code>dashboard.html</code> into lazy-loaded modules</td><td class="k">Both</td><td class="k">2–3 days</td></tr>
+    <tr><td class="k">6.14</td><td>Route the NRL backfill write through <code>append_game_record()</code> so backfilled records reach the WAL <span class="rev new">new</span></td><td class="k">NRL</td><td class="k">halfday</td></tr>
+    <tr><td class="k">6.15</td><td>Add a code/artefact version alongside <code>pw_version</code> so version-segmented trends compare implementations, not labels <span class="rev new">new</span></td><td class="k">Both</td><td class="k">halfday</td></tr>
+    <tr><td class="k">6.16</td><td>Reconcile ops scripts and runbooks for fork drift (NRL <code>setup.sh</code> prints port 8899, not 8898)</td><td class="k">NRL</td><td class="k">1 hour</td></tr>
+  </tbody>
+</table>
+
+<h3>Phase 7: Prediction roadmap for betting (staged) <span class="rev new">new</span></h3>
+<p>The feature-level betting work from the two reviews, none of which had survived into the plan. Ordered by expected value per unit effort; 7.1–7.3 are prerequisites for trusting anything the later items produce. Bookmaker context: staking is with Bet365, so Bet365 is the canonical price series for CLV and EV; Odds API budget is 20k credits/month, which comfortably covers routine polling but not casual historical re-fetches.</p>
+<table>
+  <thead><tr><th>#</th><th>Action</th><th>Repo</th><th>Effort</th></tr></thead>
+  <tbody>
+    <tr><td class="k">7.1</td><td><strong>Champion–challenger training</strong> — evaluate before promote, archive artefacts, rollback by symlink; wire the existing <code>evaluate_model.py</code> metrics into <code>ml_train_runner.py</code> as the gate (Section 11)</td><td class="k">Both</td><td class="k">2–3 days</td></tr>
+    <tr><td class="k">7.2</td><td><strong>Drift tripwire</strong> — rolling log loss per league per model; degradation past a threshold auto-pauses that model's alerts and pages, rather than waiting for the bankroll to notice</td><td class="k">Both</td><td class="k">1 day</td></tr>
+    <tr><td class="k">7.3</td><td><strong>Empirical-Bayes shrinkage on the combo grid</strong> — shrink each cell's ROI toward the global mean in proportion to <code>n</code>; rank on the shrunk estimate. Partially rescues 4.7 at current sample sizes (844–1,359 live calls)</td><td class="k">Both</td><td class="k">halfday</td></tr>
+    <tr><td class="k">7.4</td><td><strong>Bet365 as canonical price series</strong> — capture and store Bet365 explicitly for CLV and EV; keep the consensus de-vig (4.9) as the fair-probability estimate. Verify Bet365 AU coverage in the Odds API regions used; budget the added polling against 20k credits/month</td><td class="k">Both</td><td class="k">1 day</td></tr>
+    <tr><td class="k">7.5</td><td><strong>Probability blending</strong> — logistic stack (or fixed-weight average anchored on the de-vigged market) over sklearn, frequency, Bayesian and market probabilities; evaluated through the 7.1 harness against each component</td><td class="k">Both</td><td class="k">2–3 days</td></tr>
+    <tr><td class="k">7.6</td><td><strong>Time-decayed NRL live model</strong> — margin × seconds-remaining interaction, sin-bin state (13-v-12 is large, quantifiable and temporary), fitted on the 514-game scoring timelines. Depends on 4.6</td><td class="k">NRL</td><td class="k">3–5 days</td></tr>
+    <tr><td class="k">7.7</td><td><strong>Line-movement features</strong> — open-to-current drift, velocity, book divergence from the <code>odds_monitor.py</code> series; "market moved against the model" as an alert-suppression signal</td><td class="k">Both</td><td class="k">2 days</td></tr>
+    <tr><td class="k">7.8</td><td><strong>Pre-game strength model</strong> — Elo/Glicko on margin, home advantage, rest, travel; NRL team-list reaction (Tuesday lists, late outs, spine changes vs last start) and NBA/WNBA injury-report deltas. Gives the live model a prior. In scope, not top priority — sequence after 7.1–7.5</td><td class="k">Both</td><td class="k">1–2 weeks</td></tr>
+  </tbody>
+</table>
+
+
+<!-- ============================================================ -->
+<h2 id="decisions"><span class="num">13</span>Open decisions</h2>
+
+<div class="note">
+  <h4>Sequencing guidance</h4>
+  <p><strong>Phase 4.0 first, then 4.1 and 4.2.</strong> The duplicate audit gates the rest: if the NRL history has duplicate records, every count downstream is inflated.</p>
+  <p><strong>4.1 and 4.2 are now half-day work, not two days.</strong> With no public exposure, the most urgent thing in the document is that stakes are being placed on figures that are ~98% pregame-priced for NBA. Two hours of filtering resolves which numbers are real.</p>
+  <p><strong>1.7 before any in-season deploy.</strong> The heartbeat is what makes a bad deploy visible; without it the failure mode is silence, which is how the current defects survived a season.</p>
+  <p><strong>Phases 1, 2.1–2.3 and 3 the same week.</strong> Phase 1 fixes active bugs. 2.1 and 2.2 are forty minutes and close the credential-read path. Phase 3 stops the defect class recurring — <code>ruff</code> would have caught all four scope errors in a second.</p>
+  <p><strong>Phases 4 and 5 run in parallel.</strong> 4.5–4.7 are weeks of work during which no clean data is being collected; 5.0–5.2 are a day and a half and start the clock on the only trustworthy dataset you will have.</p>
+  <p><strong>1.8 and 2.10 cost two hours combined and remove two standing risks</strong> — the weekly re-fit of the leaked NRL model, and a backup that has never proven it can restore.</p>
+  <p><strong>Phase 7 follows 4.5/4.6, with 7.1 first.</strong> The champion–challenger harness is the machinery every later prediction item is evaluated on; building features before the harness means trusting them on faith.</p>
+  <p><strong>Phase 6 is the merge path.</strong> 6.5 and 6.9 are on the critical path and should be scheduled deliberately; the rest can be taken opportunistically.</p>
+</div>
+
+<h3>Decisions still needed</h3>
+<table>
+  <thead><tr><th>Question</th><th>Blocks</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Does NBA staking pause</strong> until 4.1/4.2 land, or continue on figures known to be ~98% pregame-priced?</td><td class="k">4.1</td></tr>
+    <tr><td><strong>What runs on 8788,</strong> and does it have authentication? It is the only publicly-reachable surface on the host</td><td class="k">2.9</td></tr>
+    <tr><td><strong>Champion promotion criterion</strong> — log loss alone, or log loss with a no-worse ECE guard? And over what trailing window per league?</td><td class="k">7.1</td></tr>
+    <tr><td><strong>Drift tripwire thresholds</strong> — how much log-loss degradation, over how many games, pauses a model's alerts?</td><td class="k">7.2</td></tr>
+    <tr><td><strong>Second checkout for NBA,</strong> or accept simultaneous WNBA exposure on every deploy?</td><td class="k">Section 10</td></tr>
+    <tr><td><strong>Do 4.6 and 4.11 wait for an NRL bye or the post-season,</strong> or ship into the run to finals behind shadow mode?</td><td class="k">4.6, 4.11</td></tr>
+    <tr><td><strong>Which rules get pre-registered first?</strong> 5.0 needs an initial rule set; registering too many reintroduces multiple testing</td><td class="k">5.0</td></tr>
+    <tr><td><strong>Target date for the merge?</strong> Determines how much of Phase 6 is worth doing twice versus deferring</td><td class="k">6.1, 6.4</td></tr>
+    <tr><td><strong>Does WNBA get its own model,</strong> or share NBA's? Different period length, pace and roster depth argue for separate calibration</td><td class="k">4.5</td></tr>
+    <tr><td><strong>What is the duplicate-collapse rule?</strong> Live record, backfill record, or a merge of both — and who signs off, since it is one-way</td><td class="k">4.0</td></tr>
+    <tr><td><strong>Attempt a partial historical CLV backfill,</strong> or accept a forward-only series from implementation date?</td><td class="k">5.1</td></tr>
+    <tr><td><strong>De-vig method</strong> — multiplicative, Shin, or power? Shin is better on longshots but needs more implementation. With Bet365 as the staking book, the consensus de-vig serves as the fair-probability estimate while Bet365 is the executable price</td><td class="k">4.9</td></tr>
+  </tbody>
+</table>
+
+<footer>
+  Review Implementation Spec &middot; revision 6 &middot; 26 July 2026 &middot; consolidates findings from NBAMonitor review (38,381 lines) and NRLMonitor review (23,883 lines) &middot; verified against source archives &middot; NBA #412, NRL #258
+</footer>
+
+</div>
+</body>
+</html>

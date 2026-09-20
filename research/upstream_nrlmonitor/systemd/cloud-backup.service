@@ -1,0 +1,8 @@
+[Unit]
+Description=Cloud backup — sync NRL to Google Drive
+After=network-online.target nrl-backup.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor
+ExecStart=/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/cloud_backup.sh

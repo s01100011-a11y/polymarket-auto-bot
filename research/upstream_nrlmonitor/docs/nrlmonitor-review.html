@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NRLMonitor — Code &amp; Analytics Review</title>
+<style>
+:root{
+  --paper:#F1F3EE;
+  --paper-2:#E7EAE4;
+  --ink:#16211C;
+  --ink-2:#33423A;
+  --muted:#5D6B62;
+  --rule:#CBD2C8;
+  --sendoff:#A3231C;
+  --sinbin:#C98A00;
+  --penalty:#2C6E8F;
+  --advice:#6B7A6F;
+  --display: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --body: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--body); font-size:17px; line-height:1.62;
+}
+.wrap{max-width:60rem;margin:0 auto;padding:0 1.5rem 6rem}
+
+/* ---------- masthead ---------- */
+.mast{border-bottom:3px solid var(--ink);padding:3.5rem 0 1.25rem;margin-bottom:2rem}
+.eyebrow{
+  font-family:var(--mono);font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 1rem
+}
+h1{
+  font-family:var(--display);font-weight:800;letter-spacing:-.035em;line-height:.98;
+  font-size:clamp(2.4rem,7vw,4.1rem);margin:0 0 .6rem
+}
+.sub{font-size:1.12rem;color:var(--ink-2);margin:0;max-width:44ch}
+.meta{font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-top:1.4rem;
+  display:flex;flex-wrap:wrap;gap:.4rem 1.6rem}
+
+/* ---------- verdict ---------- */
+.verdict{border-left:5px solid var(--ink);padding:.2rem 0 .2rem 1.4rem;margin:2.5rem 0 3rem}
+.verdict p{margin:0 0 .9rem}
+.verdict p:last-child{margin-bottom:0}
+.verdict strong{font-weight:700}
+
+/* ---------- sanction ledger ---------- */
+.ledger{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));
+  gap:1px;background:var(--rule);border:1px solid var(--rule);margin:0 0 3rem}
+.ledger div{background:var(--paper);padding:1rem 1.1rem}
+.ledger .n{font-family:var(--display);font-weight:800;font-size:2.2rem;line-height:1;
+  letter-spacing:-.04em;display:block}
+.ledger .l{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted);display:block;margin-top:.45rem}
+.ledger .so .n{color:var(--sendoff)}
+.ledger .sb .n{color:var(--sinbin)}
+.ledger .pe .n{color:var(--penalty)}
+.ledger .ad .n{color:var(--advice)}
+
+/* ---------- sections ---------- */
+h2{
+  font-family:var(--display);font-weight:800;letter-spacing:-.025em;
+  font-size:clamp(1.5rem,3.6vw,2.1rem);line-height:1.1;
+  margin:4rem 0 .35rem;padding-top:1.4rem;border-top:1px solid var(--rule)
+}
+h2 .num{font-family:var(--mono);font-size:.68rem;font-weight:400;letter-spacing:.16em;
+  color:var(--muted);display:block;margin-bottom:.7rem}
+.lede{color:var(--ink-2);margin:.4rem 0 2rem;max-width:56ch}
+h3{font-family:var(--display);font-weight:700;font-size:1.08rem;letter-spacing:-.01em;
+  margin:2.4rem 0 .6rem}
+
+/* ---------- finding cards ---------- */
+.f{border:1px solid var(--rule);background:#fff;margin:0 0 1.4rem;
+  display:grid;grid-template-columns:6px 1fr}
+.f .card{background:var(--advice)}
+.f.so .card{background:var(--sendoff)}
+.f.sb .card{background:var(--sinbin)}
+.f.pe .card{background:var(--penalty)}
+.f .in{padding:1.1rem 1.3rem 1.2rem}
+.f .hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:.5rem .9rem;margin-bottom:.5rem}
+.f .id{font-family:var(--mono);font-size:.72rem;letter-spacing:.08em;color:var(--muted)}
+.f .tag{font-family:var(--mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;
+  padding:.16rem .5rem;border:1px solid currentColor;border-radius:2px}
+.f.so .tag{color:var(--sendoff)}
+.f.sb .tag{color:var(--sinbin)}
+.f.pe .tag{color:var(--penalty)}
+.f .tag{color:var(--advice)}
+.f h4{font-family:var(--display);font-weight:700;font-size:1.06rem;letter-spacing:-.012em;
+  margin:0 0 .5rem;flex-basis:100%}
+.f p{margin:0 0 .7rem;font-size:.98rem}
+.f p:last-child{margin-bottom:0}
+.f .subh{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);margin:1.3rem 0 .5rem}
+.f .fix{border-top:1px dashed var(--rule);padding-top:.7rem;margin-top:.9rem;
+  font-size:.94rem;color:var(--ink-2)}
+.f .fix b{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);display:block;margin-bottom:.25rem;font-weight:400}
+code{font-family:var(--mono);font-size:.85em;background:var(--paper-2);padding:.08em .32em;
+  border-radius:2px;word-break:break-word}
+pre{font-family:var(--mono);font-size:.78rem;line-height:1.55;background:var(--ink);color:#DCE4DC;
+  padding:1rem 1.1rem;overflow-x:auto;margin:.9rem 0;border-radius:2px}
+pre code{background:none;padding:0;color:inherit;font-size:1em}
+.loc{font-family:var(--mono);font-size:.78rem;color:var(--penalty)}
+
+ul,ol{padding-left:1.25rem;margin:.6rem 0 1.2rem}
+li{margin-bottom:.5rem}
+p{margin:0 0 1.1rem}
+
+/* ---------- tables ---------- */
+table{width:100%;border-collapse:collapse;margin:1.2rem 0 2rem;font-size:.9rem}
+th,td{text-align:left;padding:.6rem .7rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--mono);font-size:.64rem;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--muted);font-weight:400;border-bottom:2px solid var(--ink)}
+td.k{font-family:var(--mono);font-size:.78rem;white-space:nowrap}
+tbody tr:hover{background:var(--paper-2)}
+
+/* ---------- index ---------- */
+.toc{background:var(--paper-2);border:1px solid var(--rule);padding:1.4rem 1.6rem;margin:0 0 1rem}
+.toc ol{columns:2;column-gap:2.5rem;margin:0;padding-left:1.1rem;font-size:.94rem}
+.toc li{margin-bottom:.35rem;break-inside:avoid}
+.toc a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
+.toc a:hover{border-bottom-color:var(--ink)}
+a{color:var(--penalty)}
+a:focus-visible,.toc a:focus-visible{outline:2px solid var(--penalty);outline-offset:3px}
+
+.summary{border:2px solid var(--ink);background:#fff;padding:1.4rem 1.6rem;margin:0 0 2.2rem}
+.sumh{font-family:var(--mono);font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--muted);font-weight:400;margin:0 0 1rem}
+.summary p{margin:0 0 .9rem;font-size:1rem}
+.sumlist{margin:.6rem 0 1.1rem;padding-left:1.3rem}
+.sumlist li{margin-bottom:.55rem;font-size:.97rem}
+.sumtail{font-size:.9rem!important;color:var(--muted);margin-bottom:0!important}
+.acth{font-family:var(--mono);font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--muted);font-weight:400;margin:0 0 .6rem}
+table.actions{margin-top:0}
+table.actions td:first-child{font-weight:600}
+
+.note{border:1px solid var(--rule);border-left:5px solid var(--sinbin);background:#fff;
+  padding:1.1rem 1.3rem;margin:2rem 0;font-size:.96rem}
+.note h4{font-family:var(--display);font-weight:700;font-size:1rem;margin:0 0 .5rem}
+
+footer{margin-top:5rem;padding-top:1.2rem;border-top:3px solid var(--ink);
+  font-family:var(--mono);font-size:.7rem;color:var(--muted);letter-spacing:.04em}
+
+@media (max-width:620px){
+  body{font-size:16px}
+  .toc ol{columns:1}
+  .ledger{grid-template-columns:repeat(2,1fr)}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ---------- print ---------- */
+@media print{
+  @page{margin:16mm 14mm}
+  html,body{background:#fff;color:#000;font-size:10.5pt}
+  .wrap{max-width:none;padding:0}
+  .mast{padding-top:0;border-bottom-width:2pt}
+  h1{font-size:26pt}
+  h2{font-size:14pt;page-break-after:avoid;break-after:avoid;margin-top:1.6rem}
+  h3,h4{page-break-after:avoid;break-after:avoid}
+  .f,.note,table,pre,.ledger{page-break-inside:avoid;break-inside:avoid}
+  .f{border:.5pt solid #000;background:#fff}
+  .f .card{background:#000!important}
+  .f.so .card,.f.sb .card,.f.pe .card{background:#000!important}
+  .f .tag,.f.so .tag,.f.sb .tag,.f.pe .tag{color:#000}
+  .ledger .n,.ledger .so .n,.ledger .sb .n,.ledger .pe .n,.ledger .ad .n{color:#000}
+  .ledger div,.toc,.note{background:#fff}
+  pre{background:#fff;color:#000;border:.5pt solid #666}
+  a{color:#000;text-decoration:none}
+  .loc{color:#000}
+  tbody tr:hover{background:none}
+  .toc{display:none}
+  footer{border-top-width:2pt}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">Engineering &amp; analytics audit · 26 July 2026</p>
+  <h1>NRLMonitor</h1>
+  <p class="sub">A review of the codebase, its reliability posture, and the soundness of the prediction and ROI analytics that sit on top of it.</p>
+  <div class="meta">
+    <span>73 files · 23,883 lines of Python</span>
+    <span>server.py 5,129 · monitor.py 2,309 · dashboard.html 10,813</span>
+    <span>Source: NRLMonitor-master.zip</span>
+  </div>
+</header>
+
+<div class="verdict">
+  <p><strong>The engineering is ambitious and the data pipeline is genuinely good.</strong> Two-phase backfill, a WAL, atomic writes, snapshot/restore, a recovery scanner, 26 condition evaluators and 21 timeline features across 514 games — that is real infrastructure, and most of it works.</p>
+  <p><strong>Two silent runtime defects mean documented features have never run.</strong> A use-before-assignment in <code>monitor.py</code> breaks auto-recovery on every cycle; an undefined variable in <code>server.py</code> stops snapshot pruning. Both are swallowed by broad <code>except Exception</code> handlers. A one-second <code>pyflakes</code> run finds both.</p>
+  <p><strong>The dashboard server has no authentication and serves <code>config.json</code> over HTTP.</strong> It binds to all interfaces. Your Slack bot token and Odds API key are one GET request away from anyone on the network, and unauthenticated POST endpoints can delete directories.</p>
+  <p><strong>The betting analytics are the part that needs the most work.</strong> The 98.9% model accuracy is target leakage, not skill — the final score margin is a feature and the winner is the label. The combo leaderboard mines hundreds of cells with no correction for multiple testing.</p>
+  <p><strong>And the price attached to each call is usually the wrong price.</strong> ROI is flat 1 unit at <code>call["moneyline"]</code>, which is the correct convention — but for every backfilled game that field holds the <em>pregame</em> line, so a signal firing at minute 72 is booked at the odds available before kickoff. The <code>strict_bk</code> filter does not exclude these, because backfill writes the same pregame number into <code>bk_moneyline</code>. <strong>No ROI figure currently on the dashboard should be used to size a bet.</strong></p>
+</div>
+
+<div class="ledger">
+  <div class="so"><span class="n">8</span><span class="l">Send-off · critical</span></div>
+  <div class="sb"><span class="n">9</span><span class="l">Sin bin · high</span></div>
+  <div class="pe"><span class="n">11</span><span class="l">Penalty · medium</span></div>
+  <div class="ad"><span class="n">15</span><span class="l">Advice · improvement</span></div>
+</div>
+
+<section class="summary" id="summary">
+  <h3 class="sumh">Summary</h3>
+  <p><strong>Can the current ROI data be relied on for betting?</strong> No — for three independent reasons, each sufficient on its own.</p>
+  <ol class="sumlist">
+    <li><strong>Wrong prices.</strong> Backfilled calls are booked at pregame odds for mid-game signals. The bias runs one way and is largest on the strategies that look best.</li>
+    <li><strong>Selection.</strong> The combo grid ranks hundreds of cells by ROI with no holdout, no minimum sample and no interval. Its top entries are chosen <em>for</em> looking good.</li>
+    <li><strong>The signal isn't reproducible.</strong> PW calls blend <code>ml_model.predict_winner()</code> with outcomes win%, and the ML half reads the final scoreline.</li>
+  </ol>
+  <p><strong>Does filtering to <code>strict_bk</code> fix it?</strong> No. That filter gates on <code>bk_moneyline</code> being non-empty, and backfill populates it with the pregame line. It excludes calls with <em>no</em> odds, not calls with <em>stale</em> odds. A filter on <code>bk_ml_source</code> or <code>bk_spread_price</code> would work — those are written only by <code>monitor.py</code> from a live quote.</p>
+  <p class="sumtail">Full detail in <a href="#analytics">Section 05</a>; the forward-testing protocol that replaces backtesting until this is fixed is in <a href="#forward">Section 06</a>.</p>
+</section>
+
+<h3 class="acth">Do these first</h3>
+<table class="actions">
+  <thead><tr><th>Now</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Rotate the Slack and Odds API keys; stop serving <code>config.json</code></td><td class="k">Credentials are readable over HTTP today</td></tr>
+    <tr><td>Fix <code>now</code> in <code>monitor.py</code>; fix <code>new_config</code> in <code>server.py</code></td><td class="k">Two documented features have never run</td></tr>
+    <tr><td>Add <code>ruff</code> + <code>pytest</code> to CI</td><td class="k">Both defects above are one-second lint findings</td></tr>
+    <tr><td>Replace <code>strict_bk</code> with a <code>bk_ml_source</code> filter, then count the surviving calls</td><td class="k">Tells you whether you have a measurable sample at all</td></tr>
+    <tr><td>Stop quoting ROI without <code>n</code> and a confidence interval beside it</td><td class="k">+40% over 7 bets currently renders like +4% over 700</td></tr>
+    <tr><td>Start a <code>bets.jsonl</code> forward-test log this round</td><td class="k">The only clean data you can still collect</td></tr>
+  </tbody>
+</table>
+
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#defects">Code defects</a></li>
+    <li><a href="#security">Security</a></li>
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#reliability">Reliability &amp; operations</a></li>
+    <li><a href="#analytics">Prediction &amp; ROI analytics</a></li>
+    <li><a href="#forward">Forward-testing protocol</a></li>
+    <li><a href="#usability">Dashboard &amp; usability</a></li>
+    <li><a href="#features">Proposed capabilities</a></li>
+    <li><a href="#plan">Prioritised plan</a></li>
+  </ol>
+</nav>
+
+<p style="font-family:var(--mono);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)">
+Severity is carded the way a match official would: send-off stops play, sin bin costs you badly, penalty is a correctable infringement, advice is coaching.</p>
+
+<!-- ============================================================ -->
+<h2 id="defects"><span class="num">Section 01</span>Code defects</h2>
+<p class="lede">Everything below was confirmed against the source. Line numbers refer to the files as shipped in the archive.</p>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-01</span><span class="tag">Send-off</span>
+      <h4>Auto-recovery has never worked — <code>now</code> is used before it is assigned</h4>
+    </div>
+    <p><span class="loc">monitor.py:1179, 1191, 1208, 1230</span> read <code>now</code>. The only assignment in <code>main()</code> is at <span class="loc">line 1246</span>. Because <code>now</code> is assigned somewhere in the function, Python treats it as local for the whole function, so every earlier read raises <code>UnboundLocalError</code>.</p>
+    <p>The write at line 1208 (<code>state[_chk_key] = now.isoformat()</code>) sits inside <code>except Exception</code>, so each scan fails and logs a warning; because the state key is never written, the next cycle repeats the same failure. The per-game recovery call at line 1230 fails the same way. Net effect: the round scan never completes, missed games are never recovered, and the only trace is a <code>WARN</code> line in the log.</p>
+    <p>Worse, lines 1179 and 1191 are guarded only by <code>except (ValueError, TypeError)</code>. <code>UnboundLocalError</code> subclasses <code>NameError</code>, so it escapes. If a <code>recovery_checked_*</code> key ever appears in <code>.alert_state.json</code> — via a restored snapshot, a hand edit, or a future code path — <code>main()</code> will terminate with an uncaught traceback before any alerts are sent, and the end-of-cycle <code>save_state()</code> will never run.</p>
+    <div class="fix"><b>Fix</b>Hoist <code>now = datetime.now(timezone.utc)</code> to the top of <code>main()</code> and delete the line 1246 assignment. Then add a regression test that runs one cycle against a fixture draw with a populated <code>recovery_checked_*</code> key.</div>
+  </div>
+</div>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-02</span><span class="tag">Send-off</span>
+      <h4>Snapshot pruning is dead code — <code>new_config</code> is undefined</h4>
+    </div>
+    <p><span class="loc">server.py:4817</span> reads <code>new_config.get("backup_retention", {})</code>. <code>new_config</code> appears exactly once in the entire 5,129-line file. The local variable is called <code>payload</code>.</p>
+    <p>The resulting <code>NameError</code> is caught by <code>except Exception: pass</code> at line 4820, so <code>prune_old_snapshots()</code> is never reached. Every config save writes a <code>pre-config-save</code> snapshot of the runtime files and nothing ever removes them. On a box that has been running a season, <code>runtime_backups/</code> will grow without bound — and the disk-space figure in <code>/api/monitor-status</code> is the thing that will notice first.</p>
+    <div class="fix"><b>Fix</b><code>_bk_ret = payload.get("backup_retention", {})</code>. Then check the size of <code>runtime_backups/</code> on the live box and prune manually once.</div>
+  </div>
+</div>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-03</span><span class="tag">Send-off</span>
+      <h4>The history cache is shared mutable state, and request handlers mutate it</h4>
+    </div>
+    <p><code>_load_history_cached()</code> (<span class="loc">server.py:410</span>) returns <code>list(records)</code> — a shallow copy. The nested game dicts, and the <code>predicted_winner_calls</code> lists inside them, are the same objects every caller receives.</p>
+    <p><code>_enrich_pw_call(c, r, _edge_store)</code> at <span class="loc">server.py:2505</span> mutates those call dicts in place, writing <code>quarter</code>, <code>spread_role</code>, <code>live_line</code>, <code>bk_live_line</code> and <code>condition_edge</code> onto them. The server is <code>ThreadingMixIn</code>, so two concurrent dashboard requests enrich the same objects at the same time, with different filter parameters. Results bleed between requests and the cache accumulates derived fields that were computed under someone else's filters.</p>
+    <div class="fix"><b>Fix</b>Make <code>_enrich_pw_call</code> pure — take a call dict, return a new enriched dict. Alternatively <code>copy.deepcopy</code> on cache read, but that will hurt at 514+ games; the pure function is the better shape and is also easier to test.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-01</span><span class="tag">Sin bin</span>
+      <h4>Concurrent writers race on shared <code>.tmp</code> paths</h4>
+    </div>
+    <p>The atomic-write pattern (<code>write tmp → os.replace</code>) is correct, but several call sites use a fixed suffix rather than a PID-qualified one: <span class="loc">monitor.py:100, 108, 280, 2057</span>, <span class="loc">backfill.py:953</span>, <span class="loc">backfill_odds.py:278</span>, and the config write at <span class="loc">server.py:4824</span>. Others already do it correctly (<code>outcomes.py:716</code>, <code>odds_api.py:219</code>, <code>ml_train_runner.py:77</code>).</p>
+    <p>Five processes touch <code>game_history.json</code>: the per-minute monitor, the server's background threads, <code>odds_monitor</code>, <code>backfill.py</code> and <code>recovery.py</code>. Two writing at once through the same <code>.tmp</code> path will interleave and one will win with a partially-written file. There is no cross-process lock anywhere in the tree.</p>
+    <div class="fix"><b>Fix</b>Short term: PID-qualify every temp path and add an <code>fcntl.flock</code> advisory lock around read-modify-write of <code>game_history.json</code>. Proper fix in <a href="#architecture">Section 03</a>.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-02</span><span class="tag">Sin bin</span>
+      <h4>Whole-file rewrite on every completed game</h4>
+    </div>
+    <p><code>append_game_record()</code> (<span class="loc">monitor.py:126</span>) loads the entire history JSON, scans it for duplicate <code>match_id</code>, appends, and rewrites the whole file with <code>indent=2</code>. At 514 games that is tolerable; the cost is O(n) per game and the file is re-serialised in full each time, on a box also running the dashboard.</p>
+    <div class="fix"><b>Fix</b>The WAL already exists and is the right idea — the missing half is a store that supports append. See SQLite recommendation in Section 03.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-03</span><span class="tag">Sin bin</span>
+      <h4><code>evaluate_red_card</code> has a stub fallback that does nothing</h4>
+    </div>
+    <p><span class="loc">conditions.py:668–687</span>. When the <code>sendOffs</code> stat is absent or zero the function enters a PBP fallback, assigns <code>pbp = team_ctx.get("pbp_features", {})</code> and <code>side = team_ctx.get("team_side", "home")</code>, uses neither, and sets <code>val = val or 0</code>. The comment says "sendOffs might be in timeline events — check if available"; the check was never written.</p>
+    <p>So <code>red_card</code> only fires if NRL.com happens to publish the stat key, and never from the timeline. It is listed as a working condition type in the README and is a feature in the trained model's input vector.</p>
+    <div class="fix"><b>Fix</b>Either implement the timeline scan for send-off events, or remove the dead branch and document the condition as stats-only. Silently half-implemented is the worst of the three.</div>
+  </div>
+</div>
+
+<div class="f pe">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">PE-01</span><span class="tag">Penalty</span>
+      <h4>Duplicate dictionary key in the postgame payload</h4>
+    </div>
+    <p><span class="loc">server.py:1722 and 1733</span> both set <code>"round_title"</code> in the same dict literal. Harmless today (both read the same source field) but it is a copy-paste artefact in a 90-line literal, and the class of mistake that eventually assigns two different values.</p>
+    <div class="fix"><b>Fix</b>Delete the duplicate. A linter in CI catches this for free.</div>
+  </div>
+</div>
+
+<div class="f pe">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">PE-02</span><span class="tag">Penalty</span>
+      <h4>Assorted dead locals flagged by static analysis</h4>
+    </div>
+    <p><code>backfill.py:472</code> <code>ml_model</code>; <code>monitor.py:820</code> <code>away</code>, <code>:973</code> <code>markets</code>, <code>:1053</code> <code>soo_scoreboard</code>, <code>:1962</code> <code>sample</code>; <code>server.py:1141</code> <code>mtime_date</code>, <code>:1908</code> <code>f_search</code>, <code>:2688</code> <code>pred</code>, <code>:3177</code> <code>pct</code>; <code>pw_trend.py:78</code> <code>winner</code>, <code>:638</code> <code>game_id</code>; <code>timeline_features.py:74</code> <code>ht_margin</code>; <code>ml_model.py:299</code> <code>loser</code>.</p>
+    <p><code>server.py:1908</code> is the one worth a second look: <code>f_search</code> is parsed from the query string and then never used, which suggests a free-text filter that silently does nothing on that endpoint.</p>
+    <p>Also: <code>pw_roi_report.py:1729</code> raises a <code>SyntaxWarning</code> for an invalid escape sequence <code>\w</code> in a non-raw string, and <code>analyse_bk_odds.py:1066, 1091</code> plus <code>pw_compare.py:630</code> have f-strings with no placeholders.</p>
+    <div class="fix"><b>Fix</b>Run <code>ruff check</code> once, fix the list, then wire it into CI so the list stays empty.</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="security"><span class="num">Section 02</span>Security</h2>
+<p class="lede">The dashboard server has no authentication of any kind — no token, no session, no origin check. It binds to every interface. That single decision is what makes the rest of this section serious.</p>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-04</span><span class="tag">Send-off</span>
+      <h4>Your Slack token and Odds API key are served over HTTP</h4>
+    </div>
+    <p><code>/api/config</code> is careful — it strips <code>slack_bot_token</code> and <code>openclaw_token</code> before responding (<span class="loc">server.py:3805</span>). The static file handler underneath (<span class="loc">server.py:4755–4785</span>) then serves any file in the script directory, and <code>config.json</code> lives in the script directory.</p>
+    <pre><code>GET http://&lt;host&gt;:8898/config.json
+→ {"slack_bot_token": "xoxb-…", "openclaw_token": "…", "odds_api_key": "…", …}</code></pre>
+    <p>Two secondary points. The masking on <code>/api/config</code> omits <code>odds_api_key</code>, so that one leaks through the API as well. And <code>main()</code> binds <code>("", PORT)</code> — all interfaces, not loopback — so anything on the LAN can ask.</p>
+    <div class="fix"><b>Fix</b>Three things, in order: (1) rotate the Slack token and Odds API key now, on the assumption they are already exposed; (2) allow-list the static handler to <code>dashboard.html</code> and known assets rather than serving whatever is on disk; (3) move secrets out of <code>config.json</code> into environment variables read at startup, so a file-read bug cannot leak them at all.</div>
+  </div>
+</div>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-05</span><span class="tag">Send-off</span>
+      <h4>Unauthenticated directory deletion with a traversable path</h4>
+    </div>
+    <p><code>POST /api/recovery/delete-backup</code> (<span class="loc">server.py:4904</span>) takes names from the request body and does:</p>
+    <pre><code>backup_dir = os.path.join(runtime_backup.DEFAULT_BACKUP_ROOT, name)
+if os.path.isdir(backup_dir):
+    shutil.rmtree(backup_dir)</code></pre>
+    <p>There is no <code>os.path.basename()</code>, no containment check that the resolved path is still under the backup root, and no authentication. A name of <code>../../something</code> escapes the root and deletes a directory tree as the service user.</p>
+    <p><code>/api/recovery/restore</code> and <code>/api/recovery/prune-backups</code> take the same shape of input, <code>/api/config</code> rewrites your configuration, <code>/api/cloud-backup/run</code> spawns <code>bash cloud_backup.sh</code>, and <code>/api/ml-train</code> kicks off a training run. All unauthenticated.</p>
+    <div class="fix"><b>Fix</b><code>name = os.path.basename(name)</code>, then verify <code>os.path.realpath(backup_dir).startswith(os.path.realpath(BACKUP_ROOT) + os.sep)</code> before touching anything. Apply the same guard to restore and prune.</div>
+  </div>
+</div>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-06</span><span class="tag">Send-off</span>
+      <h4>Any website you visit can drive the dashboard</h4>
+    </div>
+    <p><code>send_json</code> sets <code>Access-Control-Allow-Origin: *</code> on every response and <code>do_OPTIONS</code> allows <code>GET, POST</code> from anywhere. With no session, no CSRF token and no <code>Origin</code> check, a page in a browser tab can issue POSTs to the dashboard's host and port and they will be honoured. Combined with SO-05, a malicious page can delete your backups; combined with SO-04 and a DNS-rebinding technique, it can read your tokens.</p>
+    <div class="fix"><b>Fix</b>Drop the wildcard CORS header entirely — the dashboard is same-origin and does not need it. Add a shared-secret header or a session cookie, and validate <code>Origin</code>/<code>Host</code> on every state-changing request. If you want phone access, put it behind Tailscale or a reverse proxy with auth rather than opening the port.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-04</span><span class="tag">Sin bin</span>
+      <h4>The model is loaded with <code>pickle</code></h4>
+    </div>
+    <p><code>ml_model.load_model()</code> (<span class="loc">ml_model.py:222</span>) unpickles <code>model_nrl.pkl</code>. Unpickling executes arbitrary code by design. Anyone who can write that file — including via the restore endpoint in SO-05 — gets code execution inside the monitor process.</p>
+    <div class="fix"><b>Fix</b>A logistic regression is a coefficient vector, an intercept, and the scaler's means and scales. Serialise those to JSON and reconstruct at load time; you also get a diffable, reviewable model artefact and lose the scikit-learn version-compatibility trap.</div>
+  </div>
+</div>
+
+<div class="f pe">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">PE-03</span><span class="tag">Penalty</span>
+      <h4>Config save can drop secrets if a field is ever renamed</h4>
+    </div>
+    <p><code>POST /api/config</code> re-injects <code>slack_bot_token</code> and <code>openclaw_token</code> from the current file when they are absent from the payload (<span class="loc">server.py:4804</span>). That works, but it is a hardcoded list that has to be kept in sync with the masking list on GET — and the two lists already disagree about <code>odds_api_key</code>. The next secret added will be silently wiped by the first config save from the dashboard.</p>
+    <div class="fix"><b>Fix</b>One <code>SECRET_KEYS</code> constant used by both the GET mask and the POST merge. Better still, secrets in the environment (see SO-04) and this problem disappears.</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="architecture"><span class="num">Section 03</span>Architecture</h2>
+<p class="lede">The system has outgrown the shape it started in. Three specific structural choices are now costing you.</p>
+
+<h3>JSON files as a database</h3>
+<p>Every analytical endpoint reloads the full history and scans it in Python. <code>build_pw_calls_payload</code> constructs a <code>ConditionEdgeStore</code> over the entire history <em>per request</em>. <code>build_pw_roi_combos_payload</code> enumerates the full role × margin × selection × half × quarter cross-product per request. The filtering, grouping and aggregation you have hand-written across <code>server.py</code>, <code>audit_roi.py</code>, <code>pw_matrix.py</code> and <code>pw_trend.py</code> is, almost line for line, what a database does.</p>
+<p><strong>Recommendation: SQLite in WAL mode.</strong> It is a single portable file, it needs no server, it gives you real transactions and multi-process concurrency (which fixes SB-01 outright), indices on <code>game_id</code>/<code>season</code>/<code>ts</code>, and it turns the combo enumeration into a <code>GROUP BY</code>. Keep a JSON export command for portability and for the snapshot system. Schema sketch:</p>
+<pre><code>games(game_id PK, season, round, kickoff_utc, home, away,
+      home_score, away_score, winner, venue, segment)
+conditions_fired(game_id FK, ts, game_minute, type, team, side, detail)
+pw_calls(game_id FK, ts, game_minute, predicted_team, confidence,
+         margin_at_fire, spread_role, correct)
+odds(game_id FK, ts, book, market, side, price, line, is_closing)
+bets(id PK, game_id FK, ts, market, side, price, line, stake,
+     model_prob, market_prob_devig, ev, result, pnl, closing_price)</code></pre>
+<p>That <code>bets</code> table is the one that does not exist today and matters most — see Section 05.</p>
+
+<h3>Two modules doing everything</h3>
+<p><code>server.py</code> is 5,129 lines and 220 KB. It contains HTTP routing, every payload builder, the ROI mathematics, backup orchestration, log rotation, ML training supervision and three background threads. <code>monitor.py</code> is 2,309 lines with the polling loop, condition dispatch, recovery, odds polling, alerting and persistence all in <code>main()</code>. Imports are scattered inside functions (<code>import subprocess</code>, <code>import outcomes</code>, <code>import runtime_backup</code>, <code>import nrl_api as _nrl</code>) — the usual signature of circular-import avoidance.</p>
+<p>Suggested split, without rewriting behaviour:</p>
+<pre><code>nrlmonitor/
+  core/      config, store (sqlite), models, logging
+  ingest/    nrl_api, odds_api, backfill, recovery
+  analysis/  conditions, timeline_features, outcomes, roi, calibration
+  predict/   features, train, evaluate, registry
+  web/       app.py (routing only), api/*.py (one module per endpoint group)
+  cli/       monitor, backfill, train, audit
+</code></pre>
+<p>Move the ROI mathematics into <code>analysis/roi.py</code> as pure functions with no I/O. That is what makes it testable, and it is currently duplicated between <code>server.py</code> and <code>audit_roi.py</code> — <code>_roi_pct</code> is defined in both, and again locally at <code>audit_roi.py:788</code>.</p>
+
+<h3>The HTTP layer</h3>
+<p><code>BaseHTTPRequestHandler</code> + <code>ThreadingMixIn</code> gives you thread-per-connection with no request timeouts, no body size limits, no backpressure and no middleware hook — which is why there is nowhere natural to put authentication. Moving to FastAPI or Flask behind <code>uvicorn</code>/<code>gunicorn</code> gets you auth middleware, request validation from your existing config schema, automatic API docs, and connection limits, without touching the payload builders.</p>
+
+<div class="note">
+  <h4>Generated artefacts are in version control</h4>
+  <p><code>pw_roi_report.html</code> is 5.4 MB and <code>dashboard.html</code> is 753 KB — both committed. <code>CHANGES.md</code> is 216 KB and <code>CLAUDE.md</code> is 55 KB. Between them that is roughly 6.4 MB of generated or append-only text in a repository whose actual source is under 1 MB. Every clone, every diff and every agent context window pays for it. Move generated reports to <code>out/</code> and gitignore them; split <code>CHANGES.md</code> per season.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="reliability"><span class="num">Section 04</span>Reliability &amp; operations</h2>
+
+<h3>Exception handling is hiding your bugs</h3>
+<p>96 <code>except Exception</code> blocks in <code>server.py</code>, 35 in <code>monitor.py</code>, 14 in <code>odds_monitor.py</code>. A large fraction end in <code>pass</code>. Both send-off defects in Section 01 survived because of this: a <code>NameError</code> that would have been obvious in a stack trace was converted into silence.</p>
+<p>The rule worth adopting: catch the specific exceptions you expect (<code>OSError</code>, <code>json.JSONDecodeError</code>, <code>requests.RequestException</code>), and where a broad catch really is needed at a task boundary, use <code>logging.exception()</code> so the traceback lands in the log, and increment an error counter that the dashboard displays. Silence should never be an outcome.</p>
+
+<h3>There is no test safety net</h3>
+<p>Four <code>test_issue*.py</code> files, each a script with hand-rolled <code>PASS</code>/<code>FAIL</code> globals, covering three specific bug fixes. Nothing covers the 26 condition evaluators, none of the 15 API endpoints, none of the ROI mathematics, no CI configuration anywhere in the tree.</p>
+<ul>
+  <li>Convert the four scripts to <code>pytest</code> — they are already structured as assertions.</li>
+  <li>Add a GitHub Action running <code>ruff check</code> and <code>pytest</code> on push. <em>Ruff would have caught both send-off defects in under a second.</em></li>
+  <li>Golden-file tests for <code>conditions.py</code>: one recorded match JSON per condition type, asserting fired/not-fired. This is the highest-value test suite you can write, because condition semantics are what everything downstream depends on.</li>
+  <li>Property tests on the ROI functions: ROI of an all-losing set is −100%, a push is a push, de-vigged probabilities sum to 1.</li>
+</ul>
+
+<h3>Nothing tells you when the monitor stops</h3>
+<p>If <code>monitor.py</code> starts failing — as it does today on the recovery path — you find out by noticing the absence of Slack alerts. Add a heartbeat: write <code>last_cycle_utc</code> on every successful completion, show a staleness badge on the dashboard, and have a cheap external check post to Slack when no cycle has completed during a scheduled game window.</p>
+
+<h3>Polling schedule is fixed, the draw is not</h3>
+<p>The timer runs every minute from 06:00–12:00 UTC year-round. That burns cycles on days with no fixtures and misses anything outside the window — Vegas round kickoffs, finals scheduling, and Monday night games at the edge. Drive the schedule from the draw API: fetch the round's kickoff times once a day, and poll only from ten minutes before the first kickoff to full time plus a buffer.</p>
+
+<h3>Team data is hardcoded</h3>
+<p><code>nrl_api.py</code> hardcodes 17 teams across three maps, plus abbreviations and colours in the dashboard. The Perth Bears enter the competition in 2027 and a PNG franchise in 2028. Derive the team list from the draw API with the static table as fallback, so an expansion season doesn't require edits in four files.</p>
+
+<!-- ============================================================ -->
+<h2 id="analytics"><span class="num">Section 05</span>Prediction &amp; ROI analytics</h2>
+<p class="lede">This is the section that matters most for your stated goal, and it is where the problems are most severe. The short version: the model's headline accuracy is an artefact, and the ROI figures are not currently measuring anything you could bet on.</p>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-07</span><span class="tag">Send-off</span>
+      <h4>The 98.9% accuracy is target leakage</h4>
+    </div>
+    <p><code>build_training_data()</code> (<span class="loc">ml_model.py:75</span>) computes <code>margin = my_score - opp_score</code> from a <em>completed</em> game record, and the label is <code>1 if team == winner</code>. The sign of the final margin <strong>is</strong> the label. The model has learned that the team ahead at full time wins the game.</p>
+    <p>The README's own feature ranking confirms it: <code>score_margin (+5.2)</code>, <code>halftime_margin (+4.1)</code>, <code>h2_momentum (+3.7)</code> — the three largest coefficients are all functions of the final scoreline. 99.7% train and 98.9% CV is not a strong model; it is a scoreboard reader.</p>
+
+    <p class="subh">Why those three numbers say leakage</p>
+    <p><strong>The coefficients are impossibly large.</strong> Features are standardised before fitting, so a coefficient is log-odds per one standard deviation. Exponentiating: <code>score_margin</code> multiplies the modelled odds of winning by ×181 per SD, <code>halftime_margin</code> by ×60, <code>h2_momentum</code> by ×40. One standard deviation of NRL final margin is roughly 13 points. No genuine predictor behaves like that — that magnitude is what a feature looks like when it <em>is</em> the answer rather than evidence about it.</p>
+    <p><strong>The three features reconstruct the label exactly.</strong> <code>score_margin</code> is <code>my_score − opp_score</code> from the completed record, and <code>winner</code> is by definition whoever scored more, so <code>sign(score_margin)</code> <em>is</em> the label once draws are excluded. The other two are not merely correlated with it — from <span class="loc">timeline_features.py:82–84</span>:</p>
+    <pre><code>margin_at_ht = _margin_at_time(score_prog, HALF_SECONDS)
+margin_final = _margin_at_time(score_prog, 9999)
+h2_momentum  = margin_final - margin_at_ht</code></pre>
+    <p>So <code>halftime_margin + h2_momentum = final_margin</code>, algebraically, by construction. The model is handed the final margin directly <em>and</em> as an exact two-term decomposition. Its top three features are three views of one number, and that number determines the label deterministically.</p>
+
+    <p class="subh">Why cross-validation didn't catch it</p>
+    <p>Cross-validation splits the data into <em>k</em> parts (here 5), trains on <em>k</em>−1 and scores on the held-out part, rotating through all of them. It is the standard guard against a model that has <em>memorised</em> rows rather than learned a pattern.</p>
+    <p>It cannot detect leakage, because the leaked feature is present in the held-out fold too. The test rows also carry their own final margin, so the rule "predict whoever has the positive margin" transfers perfectly to data the model has never seen. CV is working correctly — it is answering a question about generalisation, not about whether the feature should have existed.</p>
+    <p><strong>The small gap is itself the tell.</strong> Ordinary overfitting shows a wide spread: 99% train against 62% CV. Here it is 99.7% against 98.9% — a gap of 0.8 points. Near-perfect <em>and</em> stable means the model found a rule that genuinely generalises. It did. The rule is "the team that finished ahead won the game."</p>
+    <p>For calibration: bookmakers land around 68–72% on NRL head-to-head pre-game. An honest in-play model might reach the mid-80s late in a match and considerably less early. Anything above roughly 90% overall should be treated as a leakage alarm rather than a result.</p>
+    <div class="fix"><b>Fix</b>Train on snapshots, not outcomes. For each game, sample the state at (say) every 5 game-minutes: margin <em>at that minute</em>, minutes remaining, conditions fired <em>so far</em>, possession and penalty differentials to date. Label with the final winner. That model can be honestly evaluated, and it will not score 98%. Note also that <code>evaluate_model.py</code> already implements <code>rolling_origin_predictions</code>, <code>brier()</code>, <code>log_loss_metric()</code> and <code>calibration()</code> and is wired into the server — it simply evaluates the frequency and Bayesian models instead. Point that harness at <code>ml_model</code> and most of the evaluation work is already done.</div>
+  </div>
+</div>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-08</span><span class="tag">Send-off</span>
+      <h4>Train/serve skew — the live model sees a distribution it never trained on</h4>
+    </div>
+    <p><code>predict_winner()</code> builds its feature vector from a <em>live</em> game record, so <code>margin</code> is the current margin, condition flags are whatever has fired so far, and <code>max_unanswered</code>/<code>max_error_streak</code> are partial-game maxima. Training used full-game values for all of them.</p>
+    <p>The consequence is that <code>confidence_pct</code> has no defensible meaning. A model trained to read final margins, shown a 6-point lead at minute 12, will report high confidence because a 6-point final margin nearly always wins. Every downstream artefact — the <code>predicted_winner_threshold</code> condition, the PW call log, the ROI combo tables — inherits that error.</p>
+    <div class="fix"><b>Fix</b>Same as SO-07. Additionally, assert at inference time that the feature vector's provenance matches training (a schema check on which features are "so far" versus "final").</div>
+  </div>
+</div>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-09</span><span class="tag">Send-off</span>
+      <h4>The combo leaderboard is a multiple-comparisons machine</h4>
+    </div>
+    <p><code>_compute_local_roi_combos()</code> (<span class="loc">audit_roi.py:320</span>) enumerates 2 roles × 2 margin signs × 4 selection modes × 3 halves × 5 quarters, ranks the cells by ROI, and defaults to <code>min_calls=1</code>. That is on the order of several hundred hypotheses tested against a few hundred games, with the winners surfaced to a dashboard tab.</p>
+    <p>With that many cells and that little data, the top of the leaderboard will show a strongly positive ROI whether or not any edge exists — this is what data mining produces by construction. There is no holdout, no correction for the number of tests, no confidence interval, and no minimum sample size. This artefact is the single most dangerous thing in the repository for the goal of improving ROI, precisely because the numbers look specific and authoritative.</p>
+    <div class="fix"><b>Fix</b>Four changes: (1) raise <code>min_calls</code> to at least 100 and display the count next to every ROI figure; (2) report a Wilson or bootstrap 95% confidence interval on every ROI cell — most will straddle zero, which is the honest answer; (3) split seasons into discovery (2024–2025) and validation (2026), and only ever promote a strategy that survives the split; (4) apply Benjamini–Hochberg across the grid, or a White reality-check, and show the adjusted significance. Label the tab "hypothesis generation", not "strategies".</div>
+  </div>
+</div>
+
+<h3>The price attached to a call</h3>
+<p>ROI is computed as a flat 1 unit staked at the odds recorded on the call — <code>_ROI_STAKE = 100.0</code> against <code>call["moneyline"]</code>. That convention is correct and standard. The problem is which price ends up in that field.</p>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-10</span><span class="tag">Send-off</span>
+      <h4>Backfilled calls are priced at the pregame line</h4>
+    </div>
+    <p><code>_compute_local_roi_combos()</code> reads <code>ml_odds = call.get("moneyline")</code>. In <code>backfill.py</code> that field is populated from the game record's pregame market:</p>
+    <pre><code>hml = record.get("home_ml")
+moneyline = str(hml) if pred_is_home else str(aml)
+...
+"moneyline":      moneyline,
+"live_moneyline": moneyline,   # same value
+"bk_moneyline":   moneyline,   # same value</code></pre>
+    <p><code>backfill_synth_odds.py</code> states it in its own comment: <em>"Pregame ML from PW call's moneyline field"</em>. So for every backfilled game — the bulk of the 514-game history — a call firing at minute 72 is booked at the odds available <strong>before kickoff</strong>.</p>
+    <p>This is not a small distortion, and it runs in one direction. It is largest on exactly the calls that look best: a side 14 points up with eight minutes left might be 1.05 live and 1.85 pregame. The signals with the highest hit rate receive the largest fictional price, which is precisely the mechanism that would manufacture an attractive-looking strategy out of nothing.</p>
+    <p>Live-monitored games are fine — <code>monitor.py</code> captures a genuine <code>live_odds</code> quote at fire time. The history is therefore a mix of correctly-priced and pregame-priced calls in a single ROI series, with no field on the record distinguishing them.</p>
+    <div class="fix"><b>Fix</b>Add an explicit <code>price_source</code> field (<code>live</code> / <code>pregame</code> / <code>synthetic</code>) written at call creation, and report ROI separately by source. Until backfilled calls can be re-priced against a historical in-play line, exclude them from any ROI figure used for a decision. To size the problem now:
+    <pre><code>import json
+h = json.load(open("game_history.json"))
+same = tot = 0
+for g in h:
+    for c in g.get("predicted_winner_calls", []):
+        tot += 1
+        if c.get("moneyline") and c["moneyline"] == c.get("bk_moneyline") == c.get("live_moneyline"):
+            same += 1
+print(f"{same}/{tot} calls priced at pregame odds")</code></pre>
+    Anything near 100% means the ML ROI column is "pregame price, mid-game signal" throughout.</div>
+  </div>
+</div>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-11</span><span class="tag">Send-off</span>
+      <h4><code>strict_bk</code> does not filter what its name implies</h4>
+    </div>
+    <p><code>_filter_strict_bk()</code> (<span class="loc">server.py:2977</span>) is documented as removing "PW calls without genuine BK data". It tests:</p>
+    <pre><code>if c.get("bk_moneyline") or c.get("bk_spread"):
+    genuine.append(c)</code></pre>
+    <p>But <code>backfill.py</code> writes the pregame line into <code>bk_moneyline</code>, so backfilled calls pass the gate. The filter excludes calls with <em>no</em> odds; it does not exclude calls with <em>stale</em> odds. Anyone reaching for the strict-BK toggle to get a trustworthy number is getting the same contaminated series with the odds-less calls removed.</p>
+    <p>This matters more than an ordinary naming problem, because <code>strict_bk</code> is the control a user would reasonably reach for after being told the data is mixed.</p>
+    <div class="fix"><b>Fix</b>Filter on <code>bk_ml_source</code> or <code>bk_spread_price</code> instead. Those fields are written only by <code>monitor.py</code> from a live quote — <code>backfill.py</code>'s call builder never sets them (verified: zero occurrences). Then rename the toggle to something that describes what it does, such as "live-priced calls only", and display the surviving sample size next to it.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-05</span><span class="tag">Sin bin</span>
+      <h4>Synthetic odds carry no bookmaker margin</h4>
+    </div>
+    <p>A separate problem from SO-10, affecting the <code>synth_*</code> columns rather than the main ML ROI column. <code>synthetic_odds._prob_to_decimal()</code> returns <code>1.0 / prob</code> — fair odds with zero overround. Australian NRL head-to-head markets typically run about 4–7% overround, and line markets sit near 1.91 / 1.91 (≈4.7%). Every ROI number computed against a synthetic price is therefore overstated by roughly a bookmaker's margin, which is very often the entire difference between a strategy that looks profitable and one that is not.</p>
+    <p>Compounding it, <code>_decimal_ml_profit()</code> (<span class="loc">server.py:2241</span>) returns <code>90.91</code> when a price is missing — inventing a −110 American price for absent data. Any backtest that mixes real prices, synthetic prices and this fallback is not measuring a single thing.</p>
+    <div class="fix"><b>Fix</b>Apply an explicit overround when generating synthetic prices, and tag every stored price with its provenance (<code>real</code> / <code>synthetic</code> / <code>fallback</code>). Report ROI separately by provenance and treat the real-price series as the only one that counts. Never substitute a default price for a missing one — exclude the bet instead.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-06</span><span class="tag">Sin bin</span>
+      <h4>The synthetic live line ignores time remaining</h4>
+    </div>
+    <p><code>compute_synth_spread(margin)</code> is <code>-0.953 × margin + 0.10</code>. A 10-point lead maps to a −9.4 line at minute 3 and at minute 75 alike. Time elapsed is the dominant variable in any live pricing model, and it is absent. <code>compute_synth_moneyline</code> nods at it through a coarse <code>_QUARTER_MULT</code> table only.</p>
+    <p>The quarters are themselves inherited from the NBA codebase: <code>_quarter_from_minute</code> buckets an NRL match into Q1–Q4 at 20-minute boundaries, but rugby league is played in two 40-minute halves. The buckets don't correspond to anything on the field, so any "by quarter" analysis is cutting the data on an arbitrary grid.</p>
+    <div class="fix"><b>Fix</b>Make margin and <em>seconds remaining</em> the two base terms, fitted on your own timeline data — you have 514 games of scoring events, which is enough for a serviceable live win-probability curve. Replace quarters with halves plus a minutes-remaining bucket that matches how the game is actually structured.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-07</span><span class="tag">Sin bin</span>
+      <h4>Cross-validation leaks between mirrored rows</h4>
+    </div>
+    <p>Each game produces two rows — home perspective and away perspective — that are near-exact negatives of each other. <code>cross_val_score(model, X, y, cv=5)</code> uses unshuffled <code>KFold</code>, which places a row's own mirror in the test fold while its twin is in training. Even without the leakage in SO-07, the reported CV figure would be optimistic.</p>
+    <div class="fix"><b>Fix</b><code>StratifiedGroupKFold</code> grouped on <code>game_id</code>. For a betting model, go further and use walk-forward validation: train on seasons ≤ N, test on season N+1. That is the only validation that matches how you will actually use it.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-08</span><span class="tag">Sin bin</span>
+      <h4>Accuracy is the wrong metric; you need calibration</h4>
+    </div>
+    <p>Betting does not reward picking winners — it rewards knowing <em>how likely</em> a winner is, more precisely than the price implies. A model that is 55% accurate but perfectly calibrated is bettable; a model that is 70% accurate but reports 90% confidence is not. Nothing in the codebase measures calibration.</p>
+    <p>Also note that <code>predict_winner</code> computes the two sides' win probabilities from two independent forward passes and does not normalise them to sum to 1, so <code>home_win_pct + away_win_pct</code> will generally not be 100.</p>
+    <div class="fix"><b>Fix</b>Report log loss and Brier score as the primary metrics, plot a reliability curve (predicted probability decile vs realised win rate), and apply isotonic or Platt calibration as a final layer. Benchmark against three baselines: the de-vigged market price, home-advantage-only, and a margin+time-only logistic. <strong>If the model cannot beat the de-vigged market, there is no bet</strong> — and that comparison is the single most useful number the dashboard could display.</div>
+  </div>
+</div>
+
+<div class="f pe">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">PE-04</span><span class="tag">Penalty</span>
+      <h4>Pushes are scored as losses</h4>
+    </div>
+    <p><code>_did_team_cover_spread()</code> (<span class="loc">server.py:2255</span>) returns <code>(team_margin + spread_line) > 0</code>. An exact push — margin +6 against a −6 line — returns <code>False</code> and is recorded as a loss rather than a stake return. NRL line markets frequently use whole numbers.</p>
+    <div class="fix"><b>Fix</b>Return a three-state result (<code>win</code> / <code>push</code> / <code>loss</code>) and exclude pushes from both the numerator and the denominator of ROI.</div>
+  </div>
+</div>
+
+<div class="f pe">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">PE-05</span><span class="tag">Penalty</span>
+      <h4>Tied games are classified as "trailing"</h4>
+    </div>
+    <p><code>margin_sign = "trailing" if score_margin is not None and score_margin &lt;= 0</code> (<span class="loc">audit_roi.py:363</span>). A level scoreline is neither. Given how often NRL games are tied — and that the tied state is a genuinely distinct betting situation — this contaminates both buckets.</p>
+    <div class="fix"><b>Fix</b>Three-way: <code>trailing</code> / <code>level</code> / <code>leading</code>.</div>
+  </div>
+</div>
+
+<div class="f pe">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">PE-06</span><span class="tag">Penalty</span>
+      <h4>No closing-line value tracking</h4>
+    </div>
+    <p>Nothing captures the closing price. CLV — whether you consistently beat the price the market settles at — is the fastest reliable read on whether a strategy has real edge. ROI needs hundreds of bets to become statistically distinguishable from noise; CLV gives a usable signal in dozens.</p>
+    <div class="fix"><b>Fix</b>Add a job that snapshots the final pre-kickoff price for every fixture, store it against every recorded call, and make <em>mean CLV</em> the headline KPI on the analysis tab — above ROI.</div>
+  </div>
+</div>
+
+<div class="f pe">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">PE-07</span><span class="tag">Penalty</span>
+      <h4>Flat staking with no bankroll model</h4>
+    </div>
+    <p><code>_ROI_STAKE = 100.0</code> everywhere. There is no bankroll, no variance reporting, no maximum drawdown, no risk of ruin. ROI alone cannot tell you whether a strategy is survivable — a 5% edge with high variance and full-Kelly sizing goes bankrupt regularly.</p>
+    <div class="fix"><b>Fix</b>Model a bankroll explicitly. Report maximum drawdown and a bootstrapped distribution of final bankroll alongside ROI. See the fractional-Kelly proposal in Section 06.</div>
+  </div>
+</div>
+
+<div class="f pe">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">PE-08</span><span class="tag">Penalty</span>
+      <h4>Backtests assume prices you could not have taken</h4>
+    </div>
+    <p>In-play NRL markets suspend at every try, every conversion and every referee review — precisely the moments your conditions fire. A price recorded in a backfill is not evidence that the price was available to you at that moment, and Australian books apply stake limits that tighten on accounts that win. A backtest with no execution model systematically overstates achievable return.</p>
+    <div class="fix"><b>Fix</b>Add an execution-assumptions layer: a configurable latency between signal and bet, an assumed slippage in ticks, and exclusion of any signal that fires within N seconds of a scoring event. Show ROI with and without those assumptions.</div>
+  </div>
+</div>
+
+<h3>What is missing entirely</h3>
+<p>Every feature in the model is in-play. There is no pre-game model at all — no team strength rating, no rest days, no travel, no venue effect, no team-list information. That excludes the deepest and most liquid market, and it excludes the place where a well-specified model has the best chance against a line that moves more slowly than an in-play one.</p>
+
+<!-- ============================================================ -->
+<h2 id="forward"><span class="num">Section 06</span>Forward-testing protocol</h2>
+<p class="lede">Until the pricing and leakage problems are fixed, the historical record cannot answer whether a strategy works. Forward-testing can, and it can start this round.</p>
+
+<p>Forward-testing on paper means recording the bets you <em>would</em> have placed, going forward, at prices you actually observe — with no stake. Same discipline as live betting, no money down. Three properties make it worth more than another cut of the history:</p>
+
+<ul>
+  <li><strong>The rule is fixed before the data exists.</strong> You write the strategy down this week and see what the next 200 signals do. Nothing can be re-cut or re-ranked afterwards, which removes the selection bias that makes the combo leaderboard untrustworthy.</li>
+  <li><strong>The price is real.</strong> <code>monitor.py</code> already captures a live quote at fire time. You log the number that was genuinely on screen, not one reconstructed later — which is the exact failure in SO-10.</li>
+  <li><strong>Execution becomes visible.</strong> You see how often a signal fires while the market is suspended after a try, and how long a price survives. A backtest cannot show you either.</li>
+</ul>
+
+<h3>What to log</h3>
+<p>One append-only JSONL line per signal, written by the monitor at the moment the call fires:</p>
+<pre><code>{"ts", "game_id", "game_minute", "rule_name", "side",
+ "price_at_signal", "price_source", "model_prob", "market_prob_devig",
+ "ev", "notional_stake", "closing_price", "result", "pnl", "clv"}</code></pre>
+<p><code>closing_price</code> and <code>result</code> are filled in by a later job; everything else is written at signal time and never modified. Append-only matters — a file you can edit is a file you will eventually edit.</p>
+
+<h3>Two rules that make it work</h3>
+<ol>
+  <li><strong>Pre-register the rule.</strong> Write the exact filter down before the round, and do not add conditions once results come in. If you want to test three variants, declare three and count all three in the significance calculation — testing three rules and reporting the best is the same error as the combo leaderboard, at smaller scale.</li>
+  <li><strong>Watch CLV before ROI.</strong> Whether your price beat the closing line is readable in roughly 30–50 bets; ROI needs several hundred to separate from noise. If you are consistently taking prices worse than the close, no further volume will rescue it — that is the earliest honest signal available to you.</li>
+</ol>
+
+<h3>What this needs, concretely</h3>
+<ol>
+  <li>Replace the <code>strict_bk</code> filter per SO-11, then count how many live-priced calls the history actually contains. If it is under about 100, the historical question is settled — there is not enough data to conclude anything, and forward-testing is the only route.</li>
+  <li>Add a <code>bets.jsonl</code> writer to <code>monitor.py</code> at the point the PW call is created. Perhaps thirty lines.</li>
+  <li>Add a closing-price snapshot job that captures the final pre-kickoff price for every fixture and backfills <code>closing_price</code>.</li>
+  <li>Add a paper-trading panel to the dashboard showing, per registered rule: bets to date, mean CLV with a confidence interval, ROI with a confidence interval, and the pre-registration date.</li>
+</ol>
+
+<p>A round or two of NRL gives you the shape of the data. A season gives you an answer. That is slower than reading a number off the existing dashboard, but the existing number is not measuring what it appears to measure.</p>
+
+<div class="note">
+  <h4>What to expect from it</h4>
+  <p>This is still measurement, not edge. Paper-testing a signal built on a leaked model will most likely show that the signal does not hold up — which is worth knowing, and considerably cheaper to learn this way than with stakes behind it. The sequence that makes sense is: fix the price filter, fix the model, register a rule, then paper-test it. Running the protocol on the current signal is useful mainly as a rehearsal of the plumbing.</p>
+</div>
+
+<h2 id="usability"><span class="num">Section 07</span>Dashboard &amp; usability</h2>
+
+<table>
+  <thead><tr><th>Observation</th><th>Why it matters</th><th>Suggested change</th></tr></thead>
+  <tbody>
+    <tr><td class="k">753 KB / 10,813 lines in one HTML file, two script tags</td><td>Full parse on every load; no caching benefit; hard to change safely</td><td>Split into ES modules per tab, lazy-load on first activation, serve with a content hash and long cache lifetime</td></tr>
+    <tr><td class="k">257 inline <code>onclick</code> handlers</td><td>Blocks a Content-Security-Policy, makes behaviour hard to trace</td><td>Delegated event listeners bound at container level</td></tr>
+    <tr><td class="k">Zero <code>aria-</code> attributes</td><td>Tabs, filters and the game list are unusable by keyboard and screen reader; focus states unclear</td><td>Proper <code>role="tablist"</code> semantics, <code>aria-selected</code>, visible focus rings, and labels on filter controls</td></tr>
+    <tr><td class="k">Full game list rendered into the DOM</td><td>Degrades as history grows past a few hundred games</td><td>Virtualised list, or keep the existing server-side pagination and stop rendering beyond the page</td></tr>
+    <tr><td class="k">75 <code>fetch</code> calls, no shared client</td><td>No consistent error, loading or retry handling; a failed endpoint shows an empty panel</td><td>One wrapper with timeout, retry, and a visible error state per panel</td></tr>
+    <tr><td class="k">No auth (see SO-06)</td><td>You cannot safely reach it from a phone, which is where a live monitor is most useful</td><td>Auth + Tailscale, then a mobile-first layout for the live and alerts tabs</td></tr>
+    <tr><td class="k">ROI figures shown without sample size or interval</td><td>A +40% ROI over 7 bets reads identically to +4% over 700</td><td>Never render an ROI without <code>n</code> and a confidence interval beside it</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="features"><span class="num">Section 08</span>Proposed capabilities</h2>
+<p class="lede">Ordered by expected value for prediction quality and return, not by effort.</p>
+
+<h3>1. A pre-game strength model</h3>
+<p>The highest-value addition. An Elo or Glicko rating updated on margin of victory, plus home advantage, days of rest, travel (materially relevant for the Warriors, Cowboys and Titans), venue, and — the NRL-specific one — <strong>team-list changes</strong>. Lists drop Tuesday and late outs move markets significantly; a feature capturing "named halfback/hooker/fullback missing versus last start" is likely to carry real signal that the market prices slowly. This gives you a prior for the live model and a bet in the deepest market.</p>
+
+<h3>2. A real live win-probability model</h3>
+<p>Features: margin, seconds remaining, possession, field position, tackle count in the set, penalty differential, sin-bin state (13-v-12 is a large and quantifiable swing you already detect), and the pre-game prior from (1). Trained on snapshots per SO-07, validated walk-forward, calibrated with isotonic regression. Output: a calibrated probability, not a "confidence".</p>
+
+<h3>3. A de-vig layer</h3>
+<p>Convert bookmaker prices to fair probabilities before any comparison — multiplicative, Shin, or power method, stored alongside the raw price so you can compare methods later. Every downstream calculation should compare model probability to <em>de-vigged</em> market probability. Without this, "edge" is measured against a number that includes the bookmaker's cut.</p>
+
+<h3>4. An expected-value engine, replacing the confidence threshold</h3>
+<p>Today an alert fires when confidence exceeds 65%. That is orthogonal to whether a bet is good. Replace it with <code>EV = p_model × (odds − 1) − (1 − p_model)</code>, and require EV above a threshold that accounts for estimation error — a 2% modelled edge is inside the noise of a model fitted on 514 games. Alert on EV, show the model probability, the de-vigged market probability and the gap.</p>
+
+<h3>5. Fractional Kelly staking with a bankroll ledger</h3>
+<p>Quarter to half Kelly, capped at a maximum percentage of bankroll per bet, with a drawdown circuit-breaker that halves stakes after a defined loss and stops entirely at a floor. Kelly on an overconfident probability is how bankrolls die, so the calibration work in (2) is a prerequisite, not an optional extra.</p>
+
+<h3>6. A bet ledger and a paper-trading mode</h3>
+<p>An explicit <code>bets</code> table (schema in Section 03) recording timestamp, market, side, price taken, stake, model probability, de-vigged market probability, EV, result, P&amp;L and closing price. Every new strategy runs in paper mode for a pre-committed number of bets before it is permitted to alert. This converts "the dashboard says +18% ROI" into a record you can audit.</p>
+
+<h3>7. Multi-book price capture</h3>
+<p>You currently prioritise TAB &gt; PointsBet AU &gt; Ladbrokes AU. Capturing several books simultaneously gives you two things: the best available price (which is itself a few percent of edge), and a better estimate of the fair price than any single book provides — the consensus of a de-vigged panel is a stronger benchmark than one bookmaker's line.</p>
+
+<h3>8. Market-movement features</h3>
+<p><code>odds_monitor.py</code> already tracks live odds. Turn the movement into features: open-to-current drift, velocity, and divergence between books. Line movement is informative about information you do not have, and "the market moved against my model" is a useful suppression signal.</p>
+
+<h3>9. Model registry and drift monitoring</h3>
+<p>Version every model, log every prediction with its full feature vector, and chart rolling log loss by week. Models degrade — rule changes, roster turnover, a new interpretation of the six-again — and you want to see it in the metric rather than in your bankroll.</p>
+
+<h3>10. One backtest engine, shared with CI</h3>
+<p>A single code path used by both the dashboard and the test suite, so the numbers on screen are the numbers the tests assert. Walk-forward by default, confidence intervals on everything, execution assumptions applied, and a hard refusal to report ROI below a minimum sample size.</p>
+
+<div class="note">
+  <h4>One honest note on expectations</h4>
+  <p>Everything above improves the <em>measurement</em>, which is the necessary first step. It is worth being clear that better measurement will often reveal that an apparent edge was not there — that is the point of doing it, and it is a good outcome even though it doesn't feel like one.</p>
+  <p>Sports betting markets carry a structural margin, the great majority of participants lose over time, and Australian bookmakers actively restrict accounts that win consistently — which means an edge that survives everything above can still be hard to realise at meaningful stakes. Treat the CLV metric as your honest scoreboard, size conservatively, and set a bankroll you have decided in advance you are willing to lose. If the numbers ever start driving the stakes rather than the other way around, that's the signal to stop.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="plan"><span class="num">Section 09</span>Prioritised plan</h2>
+
+<table>
+  <thead><tr><th>#</th><th>Action</th><th>Refs</th><th>Effort</th></tr></thead>
+  <tbody>
+    <tr><td class="k">1</td><td>Rotate the Slack token and Odds API key; restrict the static handler; bind to loopback until auth exists</td><td class="k">SO-04</td><td>1 hour</td></tr>
+    <tr><td class="k">2</td><td>Fix <code>now</code> in <code>monitor.py</code> and <code>new_config</code> in <code>server.py</code></td><td class="k">SO-01, SO-02</td><td>15 min</td></tr>
+    <tr><td class="k">3</td><td>Add <code>ruff</code> + <code>pytest</code> in CI so this class of bug cannot recur</td><td class="k">Section 04</td><td>2 hours</td></tr>
+    <tr><td class="k">4</td><td>Sanitise backup paths; add auth and drop wildcard CORS</td><td class="k">SO-05, SO-06</td><td>halfday</td></tr>
+    <tr><td class="k">5</td><td>Stop mutating the cached history; make enrichment pure</td><td class="k">SO-03</td><td>halfday</td></tr>
+    <tr><td class="k">6</td><td>Replace <code>strict_bk</code> with a <code>bk_ml_source</code> filter; count the surviving live-priced calls</td><td class="k">SO-11</td><td>1 hour</td></tr>
+    <tr><td class="k">7</td><td>Add <code>price_source</code> at call creation; report ROI separately by source; exclude pregame-priced calls from any decision figure</td><td class="k">SO-10</td><td>halfday</td></tr>
+    <tr><td class="k">8</td><td>Add a <code>bets.jsonl</code> writer and a closing-price snapshot job; register the first rule</td><td class="k">Section 06</td><td>1 day</td></tr>
+    <tr><td class="k">9</td><td>Add sample size and confidence intervals to every ROI figure; raise <code>min_calls</code>; relabel the combos tab</td><td class="k">SO-09</td><td>1 day</td></tr>
+    <tr><td class="k">10</td><td>Add overround to synthetic odds; remove the 90.91 fallback; fix push handling and the level-scores bucket</td><td class="k">SB-05, PE-04, PE-05</td><td>halfday</td></tr>
+    <tr><td class="k">11</td><td>Rebuild the model on time-sliced snapshots; point the existing <code>evaluate_model.py</code> harness at it with grouped walk-forward folds</td><td class="k">SO-07, SO-08, SB-07, SB-08</td><td>3–5 days</td></tr>
+    <tr><td class="k">12</td><td>Paper-trading panel: bets, mean CLV with interval, ROI with interval, pre-registration date</td><td class="k">Section 06</td><td>2–3 days</td></tr>
+    <tr><td class="k">13</td><td>Migrate the store to SQLite (WAL); add the <code>bets</code> and <code>odds</code> tables</td><td class="k">Section 03</td><td>3–5 days</td></tr>
+    <tr><td class="k">14</td><td>Pre-game strength model with team-list features</td><td class="k">Feature 1</td><td>1–2 weeks</td></tr>
+    <tr><td class="k">15</td><td>Package split, module extraction, move to a WSGI framework</td><td class="k">Section 03</td><td>1–2 weeks</td></tr>
+  </tbody>
+</table>
+
+<p>Items 1–3 are worth doing before the next round. Items 6–8 are the cheapest high-value work in the list: an hour of filtering tells you whether you have a measurable sample at all, and a day of logging starts collecting the only clean data available to you. Item 11 is the one that changes what the system is capable of — until the model is trained and validated honestly, every number downstream of it is measuring the leakage rather than the game.</p>
+
+<p>One sequencing note. It is tempting to do item 11 first because it is the most interesting. Items 6–8 should come first anyway: they are far cheaper, and until the price attached to a call is trustworthy there is no way to tell whether a rebuilt model has improved anything.</p>
+
+<footer>
+  NRLMonitor review · prepared 26 July 2026 · findings verified against source at NRLMonitor-master.zip · 23,883 lines of Python reviewed
+</footer>
+
+</div>
+</body>
+</html>

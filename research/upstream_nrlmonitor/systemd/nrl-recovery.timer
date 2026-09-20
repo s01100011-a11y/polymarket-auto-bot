@@ -1,0 +1,11 @@
+[Unit]
+Description=NRL Monitor — daily auto-recovery scan (14:00 UTC)
+Requires=nrl-recovery.service
+
+[Timer]
+# Run once daily at 14:00 UTC (after NRL game window 04:00-13:00 UTC)
+OnCalendar=*-*-* 14:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

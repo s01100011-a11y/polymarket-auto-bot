@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NBAMonitor — Code, Analytics &amp; Cross-Project Parity Review</title>
+<style>
+:root{
+  --paper:#F1F3EE;
+  --paper-2:#E7EAE4;
+  --ink:#16211C;
+  --ink-2:#33423A;
+  --muted:#5D6B62;
+  --rule:#CBD2C8;
+  --sendoff:#A3231C;
+  --sinbin:#C98A00;
+  --penalty:#2C6E8F;
+  --advice:#6B7A6F;
+  --nba:#2C6E8F;
+  --nrl:#7A5C2E;
+  --display: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --body: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--body);font-size:17px;line-height:1.62}
+.wrap{max-width:60rem;margin:0 auto;padding:0 1.5rem 6rem}
+
+.mast{border-bottom:3px solid var(--ink);padding:3.5rem 0 1.25rem;margin-bottom:2rem}
+.eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 1rem}
+h1{font-family:var(--display);font-weight:800;letter-spacing:-.035em;line-height:.98;
+  font-size:clamp(2.4rem,7vw,4.1rem);margin:0 0 .6rem}
+.sub{font-size:1.12rem;color:var(--ink-2);margin:0;max-width:46ch}
+.meta{font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-top:1.4rem;
+  display:flex;flex-wrap:wrap;gap:.4rem 1.6rem}
+
+.verdict{border-left:5px solid var(--ink);padding:.2rem 0 .2rem 1.4rem;margin:2.5rem 0 3rem}
+.verdict p{margin:0 0 .9rem}
+.verdict p:last-child{margin-bottom:0}
+
+.ledger{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));
+  gap:1px;background:var(--rule);border:1px solid var(--rule);margin:0 0 3rem}
+.ledger div{background:var(--paper);padding:1rem 1.1rem}
+.ledger .n{font-family:var(--display);font-weight:800;font-size:2.2rem;line-height:1;
+  letter-spacing:-.04em;display:block}
+.ledger .l{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted);display:block;margin-top:.45rem}
+.ledger .so .n{color:var(--sendoff)}
+.ledger .sb .n{color:var(--sinbin)}
+.ledger .pe .n{color:var(--penalty)}
+.ledger .ad .n{color:var(--advice)}
+
+h2{font-family:var(--display);font-weight:800;letter-spacing:-.025em;
+  font-size:clamp(1.5rem,3.6vw,2.1rem);line-height:1.1;
+  margin:4rem 0 .35rem;padding-top:1.4rem;border-top:1px solid var(--rule)}
+h2 .num{font-family:var(--mono);font-size:.68rem;font-weight:400;letter-spacing:.16em;
+  color:var(--muted);display:block;margin-bottom:.7rem}
+.lede{color:var(--ink-2);margin:.4rem 0 2rem;max-width:56ch}
+h3{font-family:var(--display);font-weight:700;font-size:1.08rem;letter-spacing:-.01em;
+  margin:2.4rem 0 .6rem}
+
+.f{border:1px solid var(--rule);background:#fff;margin:0 0 1.4rem;
+  display:grid;grid-template-columns:6px 1fr}
+.f .card{background:var(--advice)}
+.f.so .card{background:var(--sendoff)}
+.f.sb .card{background:var(--sinbin)}
+.f.pe .card{background:var(--penalty)}
+.f .in{padding:1.1rem 1.3rem 1.2rem}
+.f .hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:.5rem .9rem;margin-bottom:.5rem}
+.f .id{font-family:var(--mono);font-size:.72rem;letter-spacing:.08em;color:var(--muted)}
+.f .tag{font-family:var(--mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;
+  padding:.16rem .5rem;border:1px solid currentColor;border-radius:2px;color:var(--advice)}
+.f.so .tag{color:var(--sendoff)}
+.f.sb .tag{color:var(--sinbin)}
+.f.pe .tag{color:var(--penalty)}
+.f h4{font-family:var(--display);font-weight:700;font-size:1.06rem;letter-spacing:-.012em;
+  margin:0 0 .5rem;flex-basis:100%}
+.f p{margin:0 0 .7rem;font-size:.98rem}
+.f p:last-child{margin-bottom:0}
+.f .fix{border-top:1px dashed var(--rule);padding-top:.7rem;margin-top:.9rem;
+  font-size:.94rem;color:var(--ink-2)}
+.f .fix b{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);display:block;margin-bottom:.25rem;font-weight:400}
+code{font-family:var(--mono);font-size:.85em;background:var(--paper-2);padding:.08em .32em;
+  border-radius:2px;word-break:break-word}
+pre{font-family:var(--mono);font-size:.78rem;line-height:1.55;background:var(--ink);color:#DCE4DC;
+  padding:1rem 1.1rem;overflow-x:auto;margin:.9rem 0;border-radius:2px}
+pre code{background:none;padding:0;color:inherit;font-size:1em}
+.loc{font-family:var(--mono);font-size:.78rem;color:var(--penalty)}
+
+ul,ol{padding-left:1.25rem;margin:.6rem 0 1.2rem}
+li{margin-bottom:.5rem}
+p{margin:0 0 1.1rem}
+
+table{width:100%;border-collapse:collapse;margin:1.2rem 0 2rem;font-size:.9rem}
+th,td{text-align:left;padding:.55rem .7rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--mono);font-size:.64rem;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--muted);font-weight:400;border-bottom:2px solid var(--ink)}
+td.k{font-family:var(--mono);font-size:.78rem;white-space:nowrap}
+td.num{font-family:var(--mono);font-size:.8rem;text-align:right;white-space:nowrap}
+tbody tr:hover{background:var(--paper-2)}
+.tnote{font-size:.82rem;color:var(--muted);margin:-1.4rem 0 2rem}
+
+/* parity bars */
+.bars{margin:1.4rem 0 2.4rem}
+.bar{display:grid;grid-template-columns:9.5rem 1fr 3rem;align-items:center;gap:.8rem;
+  margin-bottom:.45rem;font-size:.86rem}
+.bar .nm{font-family:var(--mono);font-size:.74rem;color:var(--ink-2);text-align:right}
+.bar .track{background:var(--paper-2);height:1.15rem;border:1px solid var(--rule);position:relative}
+.bar .fill{background:var(--ink);height:100%}
+.bar.low .fill{background:var(--sendoff)}
+.bar .pc{font-family:var(--mono);font-size:.74rem;color:var(--muted)}
+
+.toc{background:var(--paper-2);border:1px solid var(--rule);padding:1.4rem 1.6rem;margin:0 0 1rem}
+.toc ol{columns:2;column-gap:2.5rem;margin:0;padding-left:1.1rem;font-size:.94rem}
+.toc li{margin-bottom:.35rem;break-inside:avoid}
+.toc a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
+.toc a:hover{border-bottom-color:var(--ink)}
+a{color:var(--penalty)}
+a:focus-visible,.toc a:focus-visible{outline:2px solid var(--penalty);outline-offset:3px}
+
+.note{border:1px solid var(--rule);border-left:5px solid var(--sinbin);background:#fff;
+  padding:1.1rem 1.3rem;margin:2rem 0;font-size:.96rem}
+.note.good{border-left-color:var(--advice)}
+.note h4{font-family:var(--display);font-weight:700;font-size:1rem;margin:0 0 .5rem}
+
+footer{margin-top:5rem;padding-top:1.2rem;border-top:3px solid var(--ink);
+  font-family:var(--mono);font-size:.7rem;color:var(--muted);letter-spacing:.04em}
+
+@media (max-width:620px){
+  body{font-size:16px}
+  .toc ol{columns:1}
+  .ledger{grid-template-columns:repeat(2,1fr)}
+  .bar{grid-template-columns:7rem 1fr 2.6rem;gap:.5rem}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+@media print{
+  @page{margin:16mm 14mm}
+  html,body{background:#fff;color:#000;font-size:10.5pt}
+  .wrap{max-width:none;padding:0}
+  .mast{padding-top:0;border-bottom-width:2pt}
+  h1{font-size:26pt}
+  h2{font-size:14pt;page-break-after:avoid;break-after:avoid;margin-top:1.6rem}
+  h3,h4{page-break-after:avoid;break-after:avoid}
+  .f,.note,table,pre,.ledger,.bars{page-break-inside:avoid;break-inside:avoid}
+  .f{border:.5pt solid #000;background:#fff}
+  .f .card,.f.so .card,.f.sb .card,.f.pe .card{background:#000!important}
+  .f .tag,.f.so .tag,.f.sb .tag,.f.pe .tag{color:#000}
+  .ledger .n,.ledger .so .n,.ledger .sb .n,.ledger .pe .n,.ledger .ad .n{color:#000}
+  .ledger div,.toc,.note{background:#fff}
+  .bar .fill,.bar.low .fill{background:#000!important}
+  pre{background:#fff;color:#000;border:.5pt solid #666}
+  a{color:#000;text-decoration:none}
+  .loc{color:#000}
+  tbody tr:hover{background:none}
+  .toc{display:none}
+  footer{border-top-width:2pt}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">Engineering, analytics &amp; parity audit · 26 July 2026</p>
+  <h1>NBAMonitor</h1>
+  <p class="sub">A review of the NBA/WNBA monitor on its own terms, and of what the two codebases are costing each other by being two codebases.</p>
+  <div class="meta">
+    <span>51 Python files · 38,381 lines</span>
+    <span>monitor.py 5,862 · server.py 6,979 · outcomes.py 4,326</span>
+    <span>dashboard.html 1.09 MB</span>
+    <span>Companion to the NRLMonitor review</span>
+  </div>
+</header>
+
+<div class="verdict">
+  <p><strong>This is the more mature of the two projects, and in several places it is genuinely good.</strong> The prediction model uses point-in-time features rather than final scores, so it does not have the leakage that invalidates the NRL model. <code>evaluate_model.py</code> implements rolling-origin validation, Brier score, log loss and calibration bins. <code>parity_check.py</code> replays live-monitored games through backfill and asserts the conditions match. That is real methodological discipline and it is rare.</p>
+  <p><strong>But the good machinery is pointed at the wrong things.</strong> The walk-forward and calibration harness evaluates the frequency and Bayesian models; the scikit-learn model that actually drives predictions is fitted on all rows with no cross-validation, no holdout and no calibration measurement at all. The parity harness is quietly weakened by a <code>functools.partial</code> that is built and never called.</p>
+  <p><strong>Two runtime defects of exactly the same class as the NRL one.</strong> A helper references a variable that lives in <code>main()</code>; another references one that lives in a sibling function. Both raise <code>NameError</code>, both are swallowed, both are found by a one-second lint. Three of these across two repositories is a pattern, not bad luck.</p>
+  <p><strong>Security is worse here than in NRL.</strong> <code>GET /api/config</code> returns the configuration file unfiltered — Slack token, OpenClaw token and Odds API key included. The NRL fork masks two of the three. Conversely, NRL's backup deletion is traversable and NBA's is not. Fixes have flowed in <em>both</em> directions and landed in only one repository each time.</p>
+  <p><strong>The parity question answers itself in the numbers.</strong> Across 17 shared module names, the infrastructure layers share 70–93% of their function names while the sport-specific layers share 6–17%. That gap is the seam where a shared library should be cut, and it is unusually clean.</p>
+</div>
+
+<div class="ledger">
+  <div class="so"><span class="n">6</span><span class="l">Send-off · critical</span></div>
+  <div class="sb"><span class="n">9</span><span class="l">Sin bin · high</span></div>
+  <div class="pe"><span class="n">11</span><span class="l">Penalty · medium</span></div>
+  <div class="ad"><span class="n">15</span><span class="l">Advice · improvement</span></div>
+</div>
+
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#defects">Code defects</a></li>
+    <li><a href="#security">Security</a></li>
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#reliability">Reliability &amp; testing</a></li>
+    <li><a href="#analytics">Prediction &amp; ROI analytics</a></li>
+    <li><a href="#parity">Parity &amp; code reuse</a></li>
+    <li><a href="#features">Further recommendations</a></li>
+    <li><a href="#plan">Prioritised plan</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="defects"><span class="num">Section 01</span>Code defects</h2>
+<p class="lede">Confirmed against source. Line numbers refer to the archive as shipped.</p>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-01</span><span class="tag">Send-off</span>
+      <h4>Pregame odds fallback is dead — <code>_sl_game_ids</code> is out of scope</h4>
+    </div>
+    <p><code>build_pregame_snapshot_for_event()</code> (<span class="loc">monitor.py:2723–2869</span>) reads <code>_sl_game_ids</code> at <span class="loc">line 2796</span> to decide whether a game should be priced against the Summer League sport key. <code>_sl_game_ids</code> is a local of <code>main()</code>, assigned at <span class="loc">line 3200</span>. It is not a module global and it is not a parameter, so the reference raises <code>NameError</code>.</p>
+    <pre><code>_sl_sport = "basketball_nba_summer_league" if str(game_id) in _sl_game_ids else None
+#                                                              ^ local of main()</code></pre>
+    <p>The call sits inside <code>try: … except Exception as _oa_exc:</code>, so the failure is logged and swallowed. The practical effect: whenever ESPN does not supply moneyline or spread for a fixture — which is exactly when the Odds API fallback is supposed to earn its keep — the fallback never runs and the pregame snapshot is written with <code>"--"</code> prices. The other nine call sites (3521, 3565, 4428, 4585, 5016, 5355, 5509, 5660) are inside <code>main()</code> and work correctly, which is why this looks fine on a read-through.</p>
+    <div class="fix"><b>Fix</b>Pass <code>sl_game_ids</code> as an argument to <code>build_pregame_snapshot_for_event()</code>, or hoist it to a module-level cache populated once per cycle. Then check the log for <code>_oa_exc</code> lines to see how long this has been silently failing.</div>
+  </div>
+</div>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-02</span><span class="tag">Send-off</span>
+      <h4>The half filter on game history raises <code>NameError</code></h4>
+    </div>
+    <p><code>_history_matches_filters()</code> (<span class="loc">server.py:3197–3594</span>) references <code>_pw_half_quarters</code> at <span class="loc">line 3528</span>. That name is a local of <code>build_history_list_payload()</code>, assigned at <span class="loc">line 3842</span>:</p>
+    <pre><code>_pw_half_quarters = {"H1": ("Q1","Q2"), "H2": ("Q3","Q4"), "OT": ("OT","2OT")}.get(pw_half, ())</code></pre>
+    <p>The guard is <code>if pw_half and …</code>, so the failure only fires when a user actually selects H1, H2 or OT. <code>build_history_list_payload</code> then calls <code>_history_matches_filters</code> in a list comprehension at <span class="loc">line 3890</span> and the exception surfaces as a 500 from the endpoint.</p>
+    <p>Worth noting <em>why</em> this one hid so well: the near-identical check at <span class="loc">line 4171</span> is fine, because <code>_pw_stat_call_matches</code> is nested inside <code>build_history_list_payload</code> and picks the name up as a closure. Two lines of nearly identical code, one broken, one correct, differing only by nesting depth.</p>
+    <div class="fix"><b>Fix</b>Make the mapping a module-level constant and resolve it inside <code>_history_matches_filters</code> from the <code>filters</code> dict it already receives. Add an endpoint test that exercises every filter parameter once — that class of test would have caught this the day it shipped.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-01</span><span class="tag">Sin bin</span>
+      <h4>The parity harness is weakened by a partial that is never invoked</h4>
+    </div>
+    <p><span class="loc">backfill.py:1119</span> builds <code>_check_b2b = functools.partial(check_b2b_from_index, …)</code> and never calls it. The comment above it states the intent precisely: <em>"Use history-derived B2B index when available (replay/parity mode); falls back to live scoreboard check_b2b for live runs."</em></p>
+    <p>Because the partial is discarded, replay mode uses the live back-to-back path regardless. That matters more here than a normal dead local would, because <code>parity_check.py</code> exists specifically to assert that replayed conditions match live-recorded ones. Any condition sensitive to back-to-back state can now diverge between live and replay, and the harness built to detect divergence is the thing being fooled.</p>
+    <div class="fix"><b>Fix</b>Wire <code>_check_b2b</code> into the condition evaluation call, then re-run <code>parity_check.py</code> over a sample of games and see whether the parity numbers move. If they do, that also tells you how much of the historical backfill was replayed with the wrong B2B semantics.</div>
+  </div>
+</div>
+
+<div class="f pe">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">PE-01</span><span class="tag">Penalty</span>
+      <h4>An abandoned FG% delta feature</h4>
+    </div>
+    <p><span class="loc">conditions.py:693</span> initialises <code>prev_fg_pct = None</code> ahead of the tick-snapshot loop and never assigns or reads it again. This is the same shape as the half-written PBP fallback in the NRL <code>evaluate_red_card</code>: a feature started, left in place, and indistinguishable from working code on a skim.</p>
+    <div class="fix"><b>Fix</b>Finish it or delete it. If a field-goal-percentage delta is wanted as a momentum signal it is a reasonable one — but half-present is worse than absent.</div>
+  </div>
+</div>
+
+<div class="f pe">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">PE-02</span><span class="tag">Penalty</span>
+      <h4>Twelve f-strings with no placeholders in the strategy comparison tool</h4>
+    </div>
+    <p><code>compare_edge_gate.py</code> lines 201, 206, 217, 267–270, 274, 315, 316, 320 are all <code>f"…"</code> literals containing no <code>{}</code>. In a reporting script whose entire job is printing computed comparisons, that is a strong signal that interpolation was intended and the braces were lost — the output lines are probably printing labels where they should be printing numbers.</p>
+    <div class="fix"><b>Fix</b>Read those lines against their surrounding context and restore the intended values. Then run the tool and check its output actually varies with the data.</div>
+  </div>
+</div>
+
+<div class="f pe">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">PE-03</span><span class="tag">Penalty</span>
+      <h4>Dead locals concentrated in the replay path</h4>
+    </div>
+    <p><code>pbp_replay.py</code> alone has five: <code>is_home</code> (207), <code>fired_run_anchors</code> (214), <code>run_anchor</code> (247), <code>last_pred_team_id</code> (947), <code>prior_for_first</code> (976). Two of those names — <code>fired_run_anchors</code> and <code>run_anchor</code> — suggest run-detection bookkeeping that was intended to prevent duplicate firing and now does not exist.</p>
+    <p>Elsewhere: <code>backfill_pw_calls.py:700</code> <code>_edge_frontier</code>; <code>outcomes.py:2379</code> <code>_MATRIX_DIMS</code>; <code>backfill.py:1670</code> <code>_e</code>, <code>:2342</code> <code>yyyymmdd</code>; <code>monitor.py:1522</code> <code>_winner_id</code>, <code>:2289</code> <code>winner_abbr</code>, <code>:3331</code> <code>just_started</code>; <code>server.py:4551</code> <code>away_id</code>; <code>evaluate_pw_improvements.py:210</code> <code>incorrect</code>; <code>analyse_bk_odds.py:1082</code> <code>quarter_mins</code>; <code>evanalytics.py:248</code> an unused <code>global</code> declaration.</p>
+    <div class="fix"><b>Fix</b>Triage the replay ones by hand — they may indicate missing logic — and let a linter clear the rest.</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="security"><span class="num">Section 02</span>Security</h2>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-03</span><span class="tag">Send-off</span>
+      <h4><code>GET /api/config</code> returns every secret you have</h4>
+    </div>
+    <p><span class="loc">server.py:4653</span>:</p>
+    <pre><code>if path == "/api/config":
+    with open(CONFIG_FILE) as f:
+        self.send_json(200, json.load(f))   # no filtering at all</code></pre>
+    <p>That returns <code>slack_bot_token</code>, <code>openclaw_token</code> and <code>odds_api_key</code> to any caller. The NRL fork strips two of the three at this exact endpoint — the masking logic exists, it was written, and it never came back to this repository.</p>
+    <p>The static handler is a second route to the same data. It correctly resolves and containment-checks against the script root (<span class="loc">server.py:6540</span>), which is better than NRL's implementation — but <code>config.json</code> lives inside the script root, so <code>GET /config.json</code> passes the check and returns the file.</p>
+    <div class="fix"><b>Fix</b>Rotate all three credentials on the assumption they are exposed. Add a shared <code>SECRET_KEYS</code> constant, strip on GET and re-merge on POST. Allow-list the static handler to known assets. Then move secrets to environment variables so neither route can leak them.</div>
+  </div>
+</div>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-04</span><span class="tag">Send-off</span>
+      <h4>No authentication, bound to all interfaces, wildcard CORS</h4>
+    </div>
+    <p><span class="loc">server.py:6974</span> binds <code>("0.0.0.0", PORT)</code>. Every response carries <code>Access-Control-Allow-Origin: *</code> (<span class="loc">4633, 4642</span>). There is no token, session, or <code>Origin</code> check anywhere in the file. The POST surface includes config rewrite, backup restore, backup delete, prune, cloud-backup execution and ML training.</p>
+    <p>With no CSRF protection and a wildcard CORS policy, any page in a browser on the same network can drive those endpoints.</p>
+    <div class="fix"><b>Fix</b>Same prescription as NRL: drop the wildcard header, add auth, validate <code>Origin</code> on state-changing requests, and reach it remotely over Tailscale or an authenticating reverse proxy rather than an open port.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-02</span><span class="tag">Sin bin</span>
+      <h4>Restore is unvalidated while delete is — inconsistent hardening</h4>
+    </div>
+    <p><code>/api/recovery/delete-backup</code> (<span class="loc">server.py:6620</span>) does this properly:</p>
+    <pre><code>if not name or ".." in name or "/" in name:
+    errors.append("{}: invalid name".format(name)); continue</code></pre>
+    <p>…and adds a league-ownership check on top. <code>/api/recovery/restore</code> (<span class="loc">server.py:6586</span>) takes <code>body.get("backup", "")</code>, strips whitespace, and passes it straight to <code>restore_from_backup()</code> with no traversal check at all.</p>
+    <p>Restore is the more dangerous of the two — it overwrites live history from a directory you name.</p>
+    <div class="fix"><b>Fix</b>Factor the validation into one <code>_safe_backup_name()</code> helper and call it from all three endpoints. This is also the fix that should be ported to NRL, where the delete path has no validation whatsoever.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-03</span><span class="tag">Sin bin</span>
+      <h4>Model artefacts are pickled</h4>
+    </div>
+    <p><code>ml_model.py:390</code> pickles the bundle, <code>:434</code> unpickles it. Same finding as NRL: unpickling executes arbitrary code, and the restore endpoint above is a path to writing that file. Here the bundle contains a <code>DictVectorizer</code> as well as the model, so the JSON alternative needs the vocabulary too — still entirely feasible, and it removes the scikit-learn version-pinning problem at the same time.</p>
+    <div class="fix"><b>Fix</b>Serialise vocabulary, coefficients, intercept and metadata to JSON; reconstruct at load. Keep the <code>feature_schema_version</code> check you already have.</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="architecture"><span class="num">Section 03</span>Architecture</h2>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-04</span><span class="tag">Sin bin</span>
+      <h4>Importing <code>league_config</code> renames files on disk</h4>
+    </div>
+    <p><code>league_config.py</code> ends with a bare call to <code>_migrate_legacy_files()</code> at module scope. Importing the module renames up to 19 state files, two log files, and relocates the entire <code>espn_cache/</code> tree into a league subdirectory.</p>
+    <p>Three consequences. First, any import triggers it — a test, an ad-hoc script, a REPL session, an IDE's import resolver. Second, it is not concurrency-safe: <code>monitor.py</code> and <code>server.py</code> both import it, and two processes starting together can interleave the <code>os.rename</code> calls and the directory walk. Third, <code>LEAGUE</code> is read from the config file at import time and frozen, so a single process cannot handle two leagues — which is why operation requires <code>NBA_MONITOR_CONFIG=…</code> per process.</p>
+    <div class="fix"><b>Fix</b>Make migration an explicit command (<code>python3 -m tools.migrate</code>) guarded by a lock file, and make league resolution a function call — <code>get_league(config)</code> — rather than import-time module state. That second change is also the prerequisite for the shared-package work in <a href="#parity">Section 06</a>.</div>
+  </div>
+</div>
+
+<h3>Function sizes have passed the point of maintainability</h3>
+<table>
+  <thead><tr><th>Function</th><th class="num">Lines</th><th>Comment</th></tr></thead>
+  <tbody>
+    <tr><td class="k">monitor.py::main</td><td class="num">2,786</td><td>The entire polling cycle in one scope. This is why SO-01 exists: helpers cannot see what <code>main</code> holds, so state gets referenced by hope</td></tr>
+    <tr><td class="k">server.py::do_GET</td><td class="num">1,930</td><td>Every GET route in one <code>if</code> chain</td></tr>
+    <tr><td class="k">outcomes.py::live_analysis_for_game</td><td class="num">825</td><td></td></tr>
+    <tr><td class="k">server.py::build_history_list_payload</td><td class="num">553</td><td>Contains the closure that masks SO-02</td></tr>
+    <tr><td class="k">outcomes.py::compute_predicted_winner_accuracy</td><td class="num">547</td><td></td></tr>
+    <tr><td class="k">server.py::validate_config</td><td class="num">496</td><td>Hand-written validation that a schema library would do declaratively</td></tr>
+  </tbody>
+</table>
+<p class="tnote">For comparison, NRL's equivalents are 1,307 / 989 / 578 — the same shapes, roughly half the size, because the fork is younger.</p>
+
+<p>The two <code>NameError</code> defects are not coincidental to this. A 2,786-line function accumulates local state that helper functions elsewhere in the file want to read, and the only thing preventing them is that Python raises at runtime rather than at import. Extracting a <code>CycleContext</code> object — one dataclass holding <code>config</code>, <code>state</code>, <code>now</code>, <code>season</code>, <code>sl_game_ids</code>, passed explicitly to each helper — would make this class of bug structurally impossible rather than merely lintable.</p>
+
+<h3>Repository hygiene</h3>
+<ul>
+  <li><strong>24 markdown files, 924 KB, at the repository root</strong> — <code>SPEC-*</code>, <code>CHECKLIST-*</code>, <code>ISSUE-*</code>, <code>README_*</code>, <code>PROPOSAL-*</code>, <code>MODULE-OVERVIEW-*</code>, plus a 433 KB <code>CHANGES.md</code> and a 57 KB <code>README.md</code>. Move the specs and checklists to <code>docs/</code>, archive completed ones, and split <code>CHANGES.md</code> by season.</li>
+  <li><strong><code>dashboard.html</code> is 1.09 MB</strong> and committed, with 270 inline <code>onclick</code> handlers and 8 <code>aria-</code> attributes across the whole file.</li>
+  <li><strong>Dependencies are unpinned</strong> — <code>requirements.txt</code> is three lines of <code>&gt;=</code>. Since model artefacts are pickled, a scikit-learn minor release can silently break <code>load_for_inference()</code>. Pin exact versions and keep a lock file.</li>
+  <li><strong>No package structure</strong> — 51 modules flat at the root, with imports inside functions to dodge cycles.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="reliability"><span class="num">Section 04</span>Reliability &amp; testing</h2>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-05</span><span class="tag">Sin bin</span>
+      <h4>Fifteen test files, and CI runs none of them</h4>
+    </div>
+    <p><code>.github/workflows/</code> contains <code>claude.yml</code> and <code>claude-code-review.yml</code>. Both invoke the Claude Code action on pull requests. There is no job that runs <code>pytest</code>, no job that runs a linter, and no job that runs <code>parity_check.py</code>.</p>
+    <p>So the fifteen <code>test_*.py</code> files only execute when someone remembers to run them by hand, and the two <code>NameError</code>s in Section 01 sailed through a review workflow that was, ironically, configured to catch exactly this.</p>
+    <div class="fix"><b>Fix</b>Add a workflow that runs <code>ruff check .</code> and <code>pytest -q</code> on every push. Ruff finds both send-off defects in under a second. Then add <code>parity_check.py</code> as a scheduled job against a fixed sample of games — you already built the hardest part.</div>
+  </div>
+</div>
+
+<div class="note good">
+  <h4>Worth saying plainly: <code>parity_check.py</code> is very good</h4>
+  <p>Replaying live-monitored games through the backfill path and asserting that <code>conditions_fired</code> matches is the correct answer to "is my historical data the same shape as my live data", and it is the check most projects of this kind never write. It supports an alternate baseline history file, config-fingerprint gating, cache-first replay and count-level assertions. It should be in CI, it should gate releases, and it should be the first thing ported to NRL — which has no equivalent at all.</p>
+</div>
+
+<h3>Exception handling, again</h3>
+<p>Same pattern as NRL and for the same reason — both defects in Section 01 were converted into silence by broad handlers. The rule worth adopting across both repositories: catch specific exception types; where a broad catch guards a task boundary, use <code>logging.exception()</code> so the traceback reaches the log, and increment a counter the dashboard displays. A <code>NameError</code> should never be indistinguishable from "the API returned nothing".</p>
+
+<!-- ============================================================ -->
+<h2 id="analytics"><span class="num">Section 05</span>Prediction &amp; ROI analytics</h2>
+<p class="lede">This is where NBAMonitor is clearly ahead of the NRL fork — and where the remaining gap is a matter of connecting things that already exist rather than building them.</p>
+
+<div class="note good">
+  <h4>What is right here</h4>
+  <p><code>build_training_rows()</code> uses <code>score_margin_at_fire</code> and <code>quarter_elapsed_pct</code> — the state <em>at the moment the condition fired</em> — not the final scoreline. The NRL model uses the final margin as a feature against a "did they win" label, which is why it reports 98.9% accuracy and means nothing. This model does not have that flaw. It also carries pregame features, a <code>FEATURE_SCHEMA_VERSION</code> that is checked at inference, and <code>class_weight="balanced"</code>. <code>analyse_bk_odds.py</code> computes Brier scores for synthetic against bookmaker probabilities and is candid in its own output about where vig calibration is not possible.</p>
+</div>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-05</span><span class="tag">Send-off</span>
+      <h4>The production model is fitted with no validation of any kind</h4>
+    </div>
+    <p><code>_fit_variant()</code> (<span class="loc">ml_model.py:277</span>) vectorises every row, fits a <code>LogisticRegression</code>, and returns <code>sample_size</code> and <code>positive_rate</code>. There is no <code>cross_val_score</code>, no <code>train_test_split</code>, no holdout, no calibration measurement — I searched the whole tree and the only appearances of those APIs are in <code>evaluate_model.py</code>, which evaluates the <em>frequency</em> and <em>Bayesian</em> models instead.</p>
+    <p>So you have a walk-forward harness (<code>rolling_origin_predictions</code>), a holdout function, <code>brier()</code>, <code>log_loss()</code> and <code>calibration(bins=10)</code> already written and already wired into the dashboard — and the model that actually produces predicted-winner calls never passes through any of it. Its reported quality is a sample count.</p>
+    <div class="fix"><b>Fix</b>Point the existing harness at <code>ml_model</code>. Add a <code>fit_fn</code> adapter so <code>rolling_origin_predictions</code> can drive it exactly as it drives <code>fit_frequency</code> and <code>fit_bayesian</code>, then publish Brier, log loss and the calibration table for all three side by side, with the de-vigged bookmaker probability as a fourth column. That comparison is the single most decision-useful thing the dashboard could show, and most of the code for it exists.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-06</span><span class="tag">Sin bin</span>
+      <h4>Rows are correlated within games, so naive CV will mislead</h4>
+    </div>
+    <p><code>build_training_rows()</code> emits one row per condition fire, so a single game can contribute a dozen highly correlated rows sharing the same label and the same pregame features. When you add cross-validation per SO-05, an ungrouped <code>KFold</code> will place rows from the same game on both sides of the split and report an inflated score — the same structural error the NRL model makes with its mirrored home/away rows.</p>
+    <div class="fix"><b>Fix</b><code>StratifiedGroupKFold</code> grouped on <code>game_id</code>, and prefer the rolling-origin split by date for anything you intend to bet on.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-07</span><span class="tag">Sin bin</span>
+      <h4>Deduplication keeps the first fire and discards the rest</h4>
+    </div>
+    <p><code>dedupe_key = (game_id, condition_name, team_marker)</code> — a condition that fires five times across a game contributes one row, and which one depends on the order of <code>conditions_fired</code>. That discards information (repeat firing is itself a signal) and makes the training set sensitive to list ordering, which is a property of how records were written rather than of the game.</p>
+    <div class="fix"><b>Fix</b>Either keep every fire and group by game for validation, or make the choice explicit and principled — first fire, last fire, or an aggregate count feature — rather than a side effect of iteration order.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-08</span><span class="tag">Sin bin</span>
+      <h4>The −110 flat-juice assumption is inherited by both repositories</h4>
+    </div>
+    <p><code>outcomes.py:402</code> defines <code>FLAT_WIN_PROFIT = 100 × (100 / abs(FLAT_JUICE_ML))</code> ≈ 90.91, used whenever a real price is absent. It is at least documented and tested here (<code>test_issue143_roi.py</code>), which is better than the bare <code>90.91</code> literal in the NRL server — but it is the same substitution, and it means any ROI series mixing real and assumed prices is measuring two different things.</p>
+    <p>It is also an American convention. For an Australian book, −110 corresponds to decimal 1.909; typical NBA sides sit near 1.91 so it is close, but it should be an explicit configured assumption rather than a constant named after a US price format.</p>
+    <div class="fix"><b>Fix</b>Tag every stored price with provenance (<code>real</code> / <code>synthetic</code> / <code>assumed</code>), report ROI separately by provenance, and exclude assumed-price bets from any figure used for a decision.</div>
+  </div>
+</div>
+
+<div class="f sb">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SB-09</span><span class="tag">Sin bin</span>
+      <h4>The combo leaderboard carries the same multiple-comparisons exposure</h4>
+    </div>
+    <p><code>audit_roi.py</code> shares 72% of its function names with the NRL version, including the combo enumeration. The same critique applies: hundreds of role × margin × selection × period cells ranked by ROI, with no holdout, no minimum sample, no confidence interval and no correction for the number of hypotheses tested. NBA's larger history helps but does not solve it — more games also means more cells.</p>
+    <div class="fix"><b>Fix</b>As per the NRL review: minimum sample size, Wilson or bootstrap intervals displayed next to every ROI, discovery/validation season split, and Benjamini–Hochberg across the grid. Because <code>audit_roi</code> is 72% shared, this is one fix that lands in both projects if the module is shared — see Section 06.</div>
+  </div>
+</div>
+
+<h3>Still missing in both</h3>
+<p>Neither project tracks closing-line value, keeps a bet ledger, models a bankroll, or sizes stakes by anything other than a flat 100. Those recommendations from the NRL review apply here unchanged, and they apply more urgently, because NBA has the larger history and the better-specified model — it is the codebase most likely to produce a strategy worth actually staking, and therefore the one that most needs an honest ledger behind it.</p>
+
+<!-- ============================================================ -->
+<h2 id="parity"><span class="num">Section 06</span>Parity &amp; code reuse</h2>
+<p class="lede">The two projects share 17 module names. Measuring where they still agree, and where they have drifted, points at exactly one seam.</p>
+
+<h3>Where the code is still the same</h3>
+<p>Proportion of the NRL module's function names that also exist in the NBA module:</p>
+
+<div class="bars">
+  <div class="bar"><span class="nm">runtime_backup</span><span class="track"><span class="fill" style="width:93%"></span></span><span class="pc">93%</span></div>
+  <div class="bar"><span class="nm">pw_trend</span><span class="track"><span class="fill" style="width:89%"></span></span><span class="pc">89%</span></div>
+  <div class="bar"><span class="nm">outcomes</span><span class="track"><span class="fill" style="width:87%"></span></span><span class="pc">87%</span></div>
+  <div class="bar"><span class="nm">synthetic_odds</span><span class="track"><span class="fill" style="width:83%"></span></span><span class="pc">83%</span></div>
+  <div class="bar"><span class="nm">audit_roi</span><span class="track"><span class="fill" style="width:72%"></span></span><span class="pc">72%</span></div>
+  <div class="bar"><span class="nm">odds_api</span><span class="track"><span class="fill" style="width:70%"></span></span><span class="pc">70%</span></div>
+  <div class="bar low"><span class="nm">server</span><span class="track"><span class="fill" style="width:38%"></span></span><span class="pc">38%</span></div>
+  <div class="bar low"><span class="nm">monitor</span><span class="track"><span class="fill" style="width:38%"></span></span><span class="pc">38%</span></div>
+  <div class="bar low"><span class="nm">ml_model</span><span class="track"><span class="fill" style="width:17%"></span></span><span class="pc">17%</span></div>
+  <div class="bar low"><span class="nm">conditions</span><span class="track"><span class="fill" style="width:14%"></span></span><span class="pc">14%</span></div>
+</div>
+
+<p>That is an unusually clean split. Backup, trend analysis, outcome storage, synthetic pricing, ROI auditing and the Odds API client are <strong>70–93% common</strong> — they are sport-agnostic and have stayed that way. Conditions and the model are <strong>14–17%</strong> — genuinely sport-specific, as they should be. The monitor and server sit in between because each mixes a shared skeleton with sport-specific bodies.</p>
+
+<h3>What divergence has already cost</h3>
+<table>
+  <thead><tr><th>Fix</th><th>Lives in</th><th>Missing from</th></tr></thead>
+  <tbody>
+    <tr><td>Config secret masking on <code>/api/config</code></td><td>NRL</td><td class="k">NBA — leaks all three</td></tr>
+    <tr><td>Static path containment via <code>realpath</code></td><td>NBA</td><td class="k">NRL — <code>normpath</code> prefix check only</td></tr>
+    <tr><td>Backup name validation before <code>rmtree</code></td><td>NBA</td><td class="k">NRL — fully traversable</td></tr>
+    <tr><td>Point-in-time model features (no leakage)</td><td>NBA</td><td class="k">NRL — trains on final margin</td></tr>
+    <tr><td>Walk-forward / Brier / calibration harness</td><td>Both</td><td class="k">Neither applies it to the sklearn model</td></tr>
+    <tr><td>Live-vs-replay parity harness</td><td>NBA</td><td class="k">NRL — no equivalent</td></tr>
+    <tr><td>Separate API client module</td><td>NRL (<code>nrl_api.py</code>)</td><td class="k">NBA — ESPN URLs inline in <code>monitor.py</code></td></tr>
+    <tr><td>Continuous odds monitoring thread</td><td>NRL (<code>odds_monitor.py</code>)</td><td class="k">NBA</td></tr>
+    <tr><td>League abstraction &amp; state-file scoping</td><td>NBA (<code>league_config.py</code>)</td><td class="k">NRL</td></tr>
+    <tr><td>Timeline momentum feature extraction</td><td>NRL (<code>timeline_features.py</code>)</td><td class="k">NBA — logic embedded in <code>pbp_replay.py</code></td></tr>
+    <tr><td>Restore endpoint validation</td><td>Neither</td><td class="k">Both</td></tr>
+  </tbody>
+</table>
+<p class="tnote">Every row above is a fix that was written once and benefited one project. Several are security fixes.</p>
+
+<div class="f so">
+  <div class="card"></div>
+  <div class="in">
+    <div class="hd">
+      <span class="id">SO-06</span><span class="tag">Send-off</span>
+      <h4>The projects are already coupled — through hardcoded filesystem paths</h4>
+    </div>
+    <p><code>NRLMonitor/pw_roi_report.py:21</code> contains:</p>
+    <pre><code>NBA_DIR = os.path.join(os.path.expanduser("~"), ".openclaw/workspace/scripts/nba-monitor")
+LEAGUES = {"NBA":  os.path.join(NBA_DIR, "game_history_nba.json"),
+           "WNBA": os.path.join(NBA_DIR, "game_history_wnba.json"), …}</code></pre>
+    <p>…and a <code>--copy-to-nba</code> flag that writes the generated report back into the other repository. So a cross-league ROI report already exists, and the integration mechanism is one repository reaching into another repository's working directory by absolute path.</p>
+    <p>That breaks on any machine laid out differently, silently produces a report with a missing league if the path is wrong, and means the schema of <code>game_history_nba.json</code> is now an undeclared public interface that NBAMonitor can break without knowing.</p>
+    <div class="fix"><b>Fix</b>Short term, make the path configurable and validate it, failing loudly rather than silently omitting a league. Properly: define the history record as an explicit versioned schema owned by shared code, and have both projects read and write through it.</div>
+  </div>
+</div>
+
+<h3>The recommended shape</h3>
+<p>The measured overlap suggests the split almost exactly. Extract a shared package, keep two thin sport adapters:</p>
+<pre><code>sportmonitor/                    # installable package, versioned, tested once
+  core/       config, store (sqlite), cyclecontext, logging, secrets
+  odds/       odds_api client, devig, synthetic pricing, price provenance
+  analysis/   outcomes, roi (with CIs + multiple-testing correction),
+              pw_trend, calibration, evaluate (walk-forward/Brier/log-loss)
+  backup/     runtime_backup, restore, wal, safe_backup_name()
+  web/        app skeleton, auth middleware, shared endpoints, static handler
+  ml/         training harness, feature schema versioning, model registry
+  parity/     live-vs-replay harness
+
+adapters/
+  nba/        espn client, basketball conditions, quarter semantics, team map
+  nrl/        nrl.com client, league conditions, half semantics, team map
+</code></pre>
+<p>The adapter interface is small — fetch fixtures, fetch a game, normalise to a common record, evaluate sport conditions, describe period structure. Everything above 70% on the chart moves into <code>sportmonitor</code>; everything below 20% stays in an adapter. The monitor and server become thin: a scheduler and a router that hold a <code>CycleContext</code> and call into shared code.</p>
+
+<p>Two consequences worth naming. First, <code>league_config.py</code>'s <code>VALID_LEAGUES = ("nba", "wnba")</code> becomes an adapter registry, and NRL becomes the third entry rather than a fork — which is what it should have been. Second, the SQLite migration recommended for NRL should be designed once, in <code>core/store</code>, for both.</p>
+
+<h3>Migration without a big-bang rewrite</h3>
+<ol>
+  <li><strong>Freeze the divergence.</strong> Before extracting anything, port the seven fixes in the table above so both repositories are at the same security and correctness baseline. This is a day of work and it is worth doing regardless of whether you proceed further.</li>
+  <li><strong>Extract the easy 90%.</strong> <code>runtime_backup</code>, <code>pw_trend</code>, <code>synthetic_odds</code> and the Odds API client are near-identical. Publish them as <code>sportmonitor</code> installed from a Git URL, and have both repositories import instead of vendor. Low risk, immediate payoff, and it establishes the pattern.</li>
+  <li><strong>Unify the record schema.</strong> Define the game history record explicitly with versioning. This is the prerequisite for sharing <code>outcomes</code>, <code>audit_roi</code> and the evaluation harness, and it retires the hardcoded path in <code>pw_roi_report.py</code>.</li>
+  <li><strong>Share the analysis layer.</strong> <code>outcomes</code>, <code>audit_roi</code>, <code>evaluate_model</code>, calibration and the ROI statistics move across. This is where the multiple-comparisons and confidence-interval work should land, so it is fixed once for every sport.</li>
+  <li><strong>Extract the web skeleton with auth built in.</strong> One authenticating server, two sets of sport-specific endpoints. This is also the natural moment to leave <code>BaseHTTPRequestHandler</code>.</li>
+  <li><strong>Adapters last.</strong> <code>conditions</code> and <code>ml_model</code> stay per-sport; only the training and evaluation <em>harness</em> is shared.</li>
+</ol>
+
+<p>A reasonable stopping point is step 3. Steps 1–3 remove the security asymmetry, end the duplicated maintenance on the infrastructure modules, and give you a real data contract — which is most of the benefit for a fraction of the disruption. Steps 4–6 are worth doing if you expect to add a fourth league or if the analysis layer keeps growing, which on current evidence it will.</p>
+
+<div class="note">
+  <h4>One argument against sharing, taken seriously</h4>
+  <p>Forking let the NRL project move fast without risking a working NBA system, and that was a defensible trade at the time. A shared package means a change to <code>outcomes</code> can break both monitors at once, and that risk is real.</p>
+  <p>It is answerable, though, and cheaply: version the shared package and let each repository pin it, so upgrades are deliberate rather than automatic. Combined with the CI that both projects currently lack, that gives you most of the isolation of a fork with none of the divergence. The current arrangement has the opposite properties — full isolation of fixes, zero isolation of the data format they already share by absolute path.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="features"><span class="num">Section 07</span>Further recommendations</h2>
+
+<h3>Specific to NBA/WNBA</h3>
+<ul>
+  <li><strong>Rest, travel and schedule load.</strong> The <code>_check_b2b</code> machinery in SB-01 shows back-to-backs are already understood as important. Extend it: days of rest for each side, third-game-in-four-nights, time-zone change, and altitude for Denver and Utah. These are among the best-documented effects in basketball betting and the market prices them imperfectly on the second night.</li>
+  <li><strong>Rest-of-season and load management.</strong> Star availability is the dominant NBA variable and the one where an alert on late injury-report changes has clear practical value. WNBA has smaller rosters, so a single absence moves the line further.</li>
+  <li><strong>Separate WNBA models.</strong> <code>league_config</code> already gives WNBA its own state files, and period length differs (10-minute quarters versus 12). Pace, variance and home advantage all differ enough that a shared model is a compromise; train and calibrate per league and compare.</li>
+  <li><strong>Quarter-level live modelling.</strong> NBA has far higher scoring frequency than NRL, which means live win probability is more estimable and more of the value sits in-play. The <code>quarter_elapsed_pct</code> feature is already there — pair it with a time-decayed margin term.</li>
+  <li><strong>Summer League as a separate regime.</strong> Training already excludes it. Worth confirming the same exclusion runs through the ROI analysis, since pricing and roster stability are entirely different.</li>
+</ul>
+
+<h3>Applying across both</h3>
+<ul>
+  <li><strong>De-vig everything</strong> before comparing model to market, and store both raw and fair probabilities.</li>
+  <li><strong>Replace the confidence threshold with expected value</strong>, computed against the de-vigged price with an allowance for estimation error.</li>
+  <li><strong>Closing-line value as the headline KPI</strong>, above ROI — it produces a usable signal in dozens of bets rather than hundreds.</li>
+  <li><strong>A bet ledger and a paper-trading mode</strong>, with a pre-committed number of paper bets before any strategy is allowed to alert.</li>
+  <li><strong>Fractional Kelly with a drawdown circuit-breaker</strong>, gated on the calibration work in SO-05.</li>
+  <li><strong>Multi-book capture</strong> for best price and a better fair-price consensus.</li>
+  <li><strong>Model registry and drift monitoring</strong> — rolling log loss by week, per league, per model variant.</li>
+  <li><strong>Execution assumptions in the backtest</strong> — latency, slippage, and exclusion of signals firing during market suspension.</li>
+</ul>
+
+<div class="note">
+  <h4>The same honest note as the NRL review</h4>
+  <p>Nearly all of this improves measurement rather than return, and better measurement will often show that an apparent edge was not there. That is the point of it. NBA markets are among the most efficient and most heavily modelled in the world, the structural margin is real, and Australian bookmakers restrict accounts that win. An edge that survives everything above can still be difficult to realise at meaningful stakes.</p>
+  <p>Treat CLV as the honest scoreboard, size conservatively, decide the bankroll in advance, and keep the engineering interesting on its own terms — which, on the evidence of <code>parity_check.py</code>, it clearly is.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="plan"><span class="num">Section 08</span>Prioritised plan</h2>
+
+<table>
+  <thead><tr><th>#</th><th>Action</th><th>Scope</th><th>Refs</th><th>Effort</th></tr></thead>
+  <tbody>
+    <tr><td class="k">1</td><td>Rotate Slack, OpenClaw and Odds API credentials; mask <code>/api/config</code>; allow-list the static handler</td><td class="k">NBA</td><td class="k">SO-03</td><td>1 hour</td></tr>
+    <tr><td class="k">2</td><td>Fix <code>_sl_game_ids</code> and <code>_pw_half_quarters</code></td><td class="k">NBA</td><td class="k">SO-01, SO-02</td><td>30 min</td></tr>
+    <tr><td class="k">3</td><td>Add <code>ruff</code> + <code>pytest</code> to CI; run the 15 existing tests</td><td class="k">NBA</td><td class="k">SB-05</td><td>2 hours</td></tr>
+    <tr><td class="k">4</td><td>Port the seven asymmetric fixes so both repos share a baseline</td><td class="k">Both</td><td class="k">Section 06</td><td>1 day</td></tr>
+    <tr><td class="k">5</td><td>Add auth, drop wildcard CORS, validate the restore endpoint</td><td class="k">Both</td><td class="k">SO-04, SB-02</td><td>1 day</td></tr>
+    <tr><td class="k">6</td><td>Wire <code>_check_b2b</code>; re-run <code>parity_check.py</code> and compare</td><td class="k">NBA</td><td class="k">SB-01</td><td>halfday</td></tr>
+    <tr><td class="k">7</td><td>Point the walk-forward / Brier / calibration harness at <code>ml_model</code>, grouped by <code>game_id</code></td><td class="k">NBA</td><td class="k">SO-05, SB-06</td><td>2–3 days</td></tr>
+    <tr><td class="k">8</td><td>Price provenance tagging; ROI with sample size and confidence intervals; correct the combo grid</td><td class="k">Both</td><td class="k">SB-08, SB-09</td><td>2–3 days</td></tr>
+    <tr><td class="k">9</td><td>Make <code>league_config</code> migration explicit and league resolution a function call</td><td class="k">NBA</td><td class="k">SB-04</td><td>1 day</td></tr>
+    <tr><td class="k">10</td><td>Extract <code>sportmonitor</code> steps 1–2: backup, trend, synthetic odds, odds client</td><td class="k">Both</td><td class="k">Section 06</td><td>3–5 days</td></tr>
+    <tr><td class="k">11</td><td>Versioned history record schema; retire the hardcoded cross-repo path</td><td class="k">Both</td><td class="k">SO-06</td><td>3–5 days</td></tr>
+    <tr><td class="k">12</td><td>CLV capture, bet ledger, paper-trading mode</td><td class="k">Both</td><td class="k">Section 07</td><td>1 week</td></tr>
+    <tr><td class="k">13</td><td>Extract <code>CycleContext</code>; break up <code>main()</code> and <code>do_GET</code></td><td class="k">Both</td><td class="k">Section 03</td><td>2 weeks</td></tr>
+  </tbody>
+</table>
+
+<p>Items 1–3 are same-day work on this repository. Item 4 is the one that stops the two projects drifting further apart, and it is worth doing before any extraction work — a shared package built on top of two different security baselines just moves the inconsistency somewhere harder to see. Item 7 is what turns a well-specified model into one whose output you can price against a market.</p>
+
+<footer>
+  NBAMonitor review · prepared 26 July 2026 · findings verified against source at NBAMonitor-main.zip · 38,381 lines of Python reviewed · parity measured against NRLMonitor-master
+</footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,54 @@
+# Runtime state and output
+.alert_state.json
+alerts.json
+live_stats.json
+game_ticker.json
+live_analysis.json
+game_history.json
+game_history.wal
+bayes_state.json
+outcomes_cache.json
+outcomes_cache_*.json
+.log_rotation_state.json
+.monitor_timer_auto_state.json
+nrl_cache/
+backfill_state.json
+model_nrl.pkl
+model_meta_nrl.json
+odds_api_log.json
+odds_api_log.jsonl
+odds_api_log.json.migrated
+odds_monitor_live.jsonl
+pw_export.jsonl
+pw_export_access.jsonl
+bets.jsonl
+odds_monitor_history.json
+odds_cache/
+pw_trend_nrl.json
+model_eval_cache_nrl.json
+model_eval_history_nrl.json
+ml_training_history.json
+ml_train.lock
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Backup files
+*.bak
+*.bak-*
+runtime_backups/
+
+# Config with real credentials (use config.example.json as template)
+config.json
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/

@@ -1,0 +1,11 @@
+[Unit]
+Description=NRL Monitor — daily runtime snapshot (16:00 UTC)
+Requires=nrl-backup.service
+
+[Timer]
+# Run once daily at 16:00 UTC (outside NRL game window 06:00-12:00 UTC)
+OnCalendar=*-*-* 16:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

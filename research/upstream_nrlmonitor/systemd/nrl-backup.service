@@ -1,0 +1,11 @@
+[Unit]
+Description=NRL Monitor — daily runtime snapshot
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor
+ExecStart=/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/.venv/bin/python3 /home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/runtime_backup.py \
+    snapshot --label scheduled --keep-last 10 --prune-label scheduled
+StandardOutput=append:/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/logs/backup.log
+StandardError=append:/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/logs/backup.log

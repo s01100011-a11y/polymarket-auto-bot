@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Addendum B — Issue #214 Thread Review (Chromebook, Residency, Phase 0 Prerequisite)</title>
+<style>
+:root{
+  --paper:#F1F3EE;--paper-2:#E7EAE4;--ink:#16211C;--ink-2:#33423A;
+  --muted:#5D6B62;--rule:#CBD2C8;
+  --critical:#A3231C;--high:#C98A00;--medium:#2C6E8F;--low:#6B7A6F;
+  --green:#2E7D32;--accent:#C97D1A;
+  --display:-apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  --body:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);font-size:17px;line-height:1.62}
+.wrap{max-width:64rem;margin:0 auto;padding:0 1.5rem 6rem}
+.mast{border-bottom:3px solid var(--ink);padding:3rem 0 1.2rem;margin-bottom:2rem}
+.eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin:0 0 .8rem}
+h1{font-family:var(--display);font-weight:800;letter-spacing:-.035em;line-height:.98;font-size:clamp(2rem,5.5vw,3.2rem);margin:0 0 .5rem}
+.sub{font-size:1.05rem;color:var(--ink-2);margin:0;max-width:54ch}
+.meta{font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-top:1.2rem;display:flex;flex-wrap:wrap;gap:.4rem 1.6rem}
+h2{font-family:var(--display);font-weight:800;letter-spacing:-.025em;font-size:clamp(1.4rem,3.4vw,2rem);line-height:1.1;margin:3.5rem 0 .3rem;padding-top:1.2rem;border-top:1px solid var(--rule)}
+h2 .num{font-family:var(--mono);font-size:.66rem;font-weight:400;letter-spacing:.16em;color:var(--muted);display:block;margin-bottom:.6rem}
+.lede{color:var(--ink-2);margin:.4rem 0 1.8rem;max-width:56ch}
+h3{font-family:var(--display);font-weight:700;font-size:1.05rem;letter-spacing:-.01em;margin:2rem 0 .5rem}
+h4{font-family:var(--display);font-weight:700;font-size:.95rem;margin:1.4rem 0 .4rem}
+p{margin:0 0 1rem}
+ul,ol{padding-left:1.25rem;margin:.5rem 0 1.2rem}
+li{margin-bottom:.45rem}
+code{font-family:var(--mono);font-size:.85em;background:var(--paper-2);padding:.08em .32em;border-radius:2px}
+pre{font-family:var(--mono);font-size:.76rem;line-height:1.5;background:var(--ink);color:#DCE4DC;padding:.9rem 1rem;overflow-x:auto;margin:.8rem 0;border-radius:2px}
+pre code{background:none;padding:0;color:inherit;font-size:1em}
+table{width:100%;border-collapse:collapse;margin:1rem 0 1.8rem;font-size:.88rem}
+th,td{text-align:left;padding:.5rem .65rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--mono);font-size:.63rem;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);font-weight:400;border-bottom:2px solid var(--ink)}
+td.k{font-family:var(--mono);font-size:.76rem;white-space:nowrap}
+td.num{font-family:var(--mono);font-size:.78rem;text-align:right}
+tbody tr:hover{background:var(--paper-2)}
+.sev{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;padding:.15rem .45rem;border:1px solid currentColor;border-radius:2px;display:inline-block;margin-right:.4rem}
+.sev.critical{color:var(--critical)}.sev.high{color:var(--high)}.sev.medium{color:var(--medium)}.sev.low{color:var(--low)}.sev.done{color:var(--green);border-color:var(--green)}
+.id{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;color:var(--muted);float:right;padding-top:.2rem}
+.finding{border:1px solid var(--rule);background:#fff;margin:0 0 1.2rem;display:grid;grid-template-columns:5px 1fr}
+.finding .bar{background:var(--low)}
+.finding.critical .bar{background:var(--critical)}
+.finding.high .bar{background:var(--high)}
+.finding.medium .bar{background:var(--medium)}
+.finding.ok .bar{background:var(--green)}
+.finding .body{padding:1rem 1.2rem}
+.finding h4{font-family:var(--display);font-weight:700;font-size:1rem;margin:0 0 .4rem}
+.finding p{margin:0 0 .6rem;font-size:.94rem}
+.finding p:last-child{margin-bottom:0}
+.finding .fix{border-top:1px dashed var(--rule);padding-top:.6rem;margin-top:.7rem;font-size:.92rem;color:var(--ink-2)}
+.finding pre{font-size:.72rem;margin:.6rem 0}
+.ledger{display:grid;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);margin:0 0 2.5rem}
+.ledger div{background:var(--paper);padding:.8rem 1rem}
+.ledger .n{font-family:var(--display);font-weight:800;font-size:2rem;line-height:1;display:block}
+.ledger .l{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);display:block;margin-top:.35rem}
+.ledger .n.crit{color:var(--critical)}.ledger .n.hi{color:var(--high)}.ledger .n.ok{color:var(--green)}
+.note{border:1px solid var(--rule);border-left:5px solid var(--high);background:#fff;padding:1rem 1.2rem;margin:1.5rem 0;font-size:.94rem}
+.note h4{font-family:var(--display);font-weight:700;font-size:.95rem;margin:0 0 .4rem}
+.note.ok{border-left-color:var(--green)}
+.note.critical{border-left-color:var(--critical)}
+footer{margin-top:4rem;padding-top:1rem;border-top:3px solid var(--ink);font-family:var(--mono);font-size:.68rem;color:var(--muted)}
+@media(max-width:620px){body{font-size:16px}.ledger{grid-template-columns:repeat(2,1fr)}}
+@media print{
+  @page{margin:14mm 12mm}html,body{background:#fff;color:#000;font-size:10.5pt}
+  .wrap{max-width:none;padding:0}.mast{padding-top:0}h1{font-size:22pt}h2{font-size:13pt;margin-top:1.4rem}
+  .finding,.note,table,pre,.ledger{page-break-inside:avoid;break-inside:avoid}
+  .finding{border:.5pt solid #000}.finding .bar{background:#000!important}
+  .ledger div,.note{background:#fff}pre{background:#fff;color:#000;border:.5pt solid #666}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+<p class="eyebrow">Addendum B to Rev 2.3</p>
+<h1>Issue #214 Thread Review</h1>
+<p class="sub">Review of the full #214 comment history through 2026-08-26, covering the Chromebook hosting revision, a residency divergence that needs settling, and a sequencing dependency that currently blocks Phase 0.</p>
+<div class="meta">
+  <span>Source: issue-214.md export</span>
+  <span>Thread updated: 2026-08-26T06:03Z</span>
+  <span>Addendum: B</span>
+  <span>Supersedes: Addendum A §A2</span>
+</div>
+</header>
+
+<h2><span class="num">B0</span>What the Thread Now Contains</h2>
+
+<p>Nine comments spanning May to August 2026. The May sequence establishes hosting (Malaysia, then consolidated Singapore VPS, then Oracle free tier, then ARM verification). July records Rev 1 and Rev 2.3. The August sequence is the ChromeOS assessment, a clarification round, and the Chromebook correction.</p>
+
+<div class="ledger">
+  <div><span class="n crit">2</span><span class="l">Critical</span></div>
+  <div><span class="n hi">4</span><span class="l">High</span></div>
+  <div><span class="n">5</span><span class="l">Medium/low</span></div>
+  <div><span class="n ok">1</span><span class="l">Addendum A correction</span></div>
+  <div><span class="n">3</span><span class="l">Phase schemes in use</span></div>
+</div>
+
+<h3>What the thread gets right</h3>
+<p>The August assessment has genuinely absorbed Rev 2.3 rather than acknowledging it. It cites H-05 for reconciliation-on-boot, H-08 for unmonitored exits, §9 for the cursor-based pull surviving bot outages, and §6 for the historical join. The phase-viability table correctly separates batch work from position-holding work. Items 6 and 8 of "What Would Be Required" are exactly the right controls, and the Healthchecks.io cron is correctly placed <em>inside</em> the container so that a dead container stops pinging.</p>
+<p>The Chromebook correction is also substantive engineering rather than rationalisation. Lid-close behaviour, thermals, ethernet access and dev-mode ergonomics are all real differences from a tablet, and the conclusion that the device class matters is correct.</p>
+
+
+<h2><span class="num">B1</span>Critical Findings</h2>
+
+<div class="finding critical">
+<div class="bar"></div>
+<div class="body">
+<span class="id">B-01</span>
+<h4><span class="sev critical">critical</span> The thread records a residency position that contradicts the stated facts</h4>
+<p>Comment 2026-08-26T05:51 answers question 4 with "<strong>Based in Malaysia</strong> — no Polymarket restriction", and the assessment beneath it concludes that "Malaysia-based resolves the jurisdictional question from Rev 2.3 §16".</p>
+<p>That is not the position as described to me directly, which is <strong>an Australian resident temporarily in Malaysia</strong>. Rev 2.3 §16 was rewritten specifically for that case, and its conclusion was the opposite: the eligibility terms exclude persons who <em>reside in</em> or <em>are located in</em> a prohibited locality, the limbs are disjunctive, and temporary presence in Malaysia answers only the second one. Australia is on the restricted list.</p>
+<p>To the thread's credit, the later Residency Note asks precisely the right questions — is residency permanent or temporary, and are the identity documents Malaysian or Australian. But that note sits <em>after</em> a comment that has already recorded the favourable answer and built a recommendation on it. In a decision log, the recorded answer is what gets acted on.</p>
+<p>The direction of the drift is worth naming plainly: across three statements the position has moved from Australian, to Malaysian, to Australian-temporarily-in-Malaysia, and the issue has settled on the reading most permissive of the project proceeding. That is a normal thing to happen and a bad thing to leave in place.</p>
+<div class="fix"><strong>Fix:</strong> Edit the 05:51 comment to state the actual position rather than leaving it to be corrected further down. If residence is Australian, §16 stands unchanged and this remains a gating item requiring Australian legal advice before Phase 2 — not before Phase 4. If residence has genuinely and permanently shifted, say so explicitly with the supporting facts (visa status, domicile, ID documents, intended duration), because that materially changes the analysis and should be recorded once, clearly. Either way, the Betfair path in §16 remains available and removes the question entirely.</div>
+</div>
+</div>
+
+<div class="finding critical">
+<div class="bar"></div>
+<div class="body">
+<span class="id">B-02</span>
+<h4><span class="sev critical">critical</span> Phase 0 cannot yield a valid answer until the calibration defect is fixed</h4>
+<p>The thread correctly makes Phase 0 the gate: join historical PW fire times to market prices and see whether <code>market_price_at_fire &minus; pw_confidence</code> has positive mass. Both August comments treat this as runnable now, on Crostini, as the first step.</p>
+<p>It is not runnable yet, and the reason is Addendum A finding A-01. Phase 0's test statistic has <code>pw_confidence</code> on one side of it. That value is <code>call["pct"]</code>, raw and uncalibrated — a grep across both repositories finds calibration measurement but no fitted calibration transform applied anywhere. If PW confidence runs systematically high, Phase 0 returns a positive edge that is entirely an artefact of the confidence scale, and it returns it convincingly.</p>
+<p>The shipped #412 Phase 4.10 numbers show what this looks like in practice: <strong>4,478 of 5,588 calls flagged +EV, 80.1%</strong>. That figure was produced by the same uncalibrated <code>pct</code>. Phase 0 run today would agree with it, and both would be wrong together.</p>
+<p>This inverts the dependency the thread assumes. Phase 0 was positioned as the cheap step that gates everything else; in fact it now sits downstream of a monitoring-side fix tracked under a different issue.</p>
+<div class="fix"><strong>Fix:</strong> Fit and version a calibration mapping on settled PW calls before running Phase 0, and run the Phase 0 join against calibrated probabilities. Add the calibration model version to the Phase 0 output so the result stays interpretable when the mapping is refitted. Half a day of work that determines whether the project's central measurement means anything. Cross-link #412 Phase 4.10 to this issue so the dependency is visible from both sides.</div>
+</div>
+</div>
+
+
+<h2><span class="num">B2</span>Chromebook Assessment</h2>
+<p class="lede">Supersedes Addendum A §A2, which assessed a tablet. The revised verdict of "viable for Phase 0–3 with caveats" is close to right, but the setup checklist contains instructions that will not work and one that is destructive.</p>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">B-03</span>
+<h4><span class="sev high">high</span> Step 12 recommends a flag that destroys containers</h4>
+<p>The checklist suggests setting Terminal as a startup app "via <code>chrome://flags/#crostini-reset-lxd-db</code> (experimental)". That flag does not control startup apps. It resets the LXD database on every launch, and is a recovery mechanism for corrupted installations that fail with a dqlite migration error. Enabling it means any container not named <code>penguin</code> is lost whenever the termina VM restarts.</p>
+<p>On a device whose defining risk is unexpected reboots, enabling a flag that wipes container state on restart is close to the worst available option.</p>
+<div class="fix"><strong>Fix:</strong> Remove step 12's second bullet. There is no supported mechanism to auto-start Crostini on boot — the container starts when a Linux app or Terminal is launched. A <code>.desktop</code> file in <code>~/.config/autostart</code> runs when the <em>container</em> starts, which does not solve the problem of the container not starting. Treat this as unmitigated (B-06).</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">B-04</span>
+<h4><span class="sev high">high</span> Auto-updates cannot be disabled as described</h4>
+<p>Step 6 offers two methods, and neither works on a consumer device. <code>sudo crossystem disable_dev_request=0</code> relates to developer-mode state, not update policy — enabling dev mode does not stop updates. And <code>chrome://policy</code> is a read-only viewer; <code>DeviceAutoUpdateDisabled</code> is an enterprise policy that requires the device to be enrolled in a managed domain.</p>
+<p>This matters because the thread's own risk table rates auto-updates "High — still reboots without warning, but can be disabled in dev mode". The mitigation does not exist, so the residual risk is higher than recorded, and it compounds directly with B-03/B-06: the reboot happens, and nothing brings the container back.</p>
+<div class="fix"><strong>Fix:</strong> Re-rate auto-update reboots as unmitigated. If the device can be enterprise-enrolled, update scheduling becomes available and is worth doing. Otherwise plan around reboots rather than trying to prevent them.</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">B-05</span>
+<h4><span class="sev high">high</span> The stale Singapore recommendations are still live in the thread</h4>
+<p>Three May comments recommend Singapore hosting — "Vultr Singapore at $12/month is the sweet spot", the Oracle free tier deep-dive with Singapore as the locked home region, and the setup steps that select Singapore at signup. Rev 2.3 finding C-06 established that Singapore has blocked Polymarket since January 2025, and the July comment records that, but the May comments remain unamended above it.</p>
+<p>The specific trap: the agreed fallback plan is "escalate to a VPS if Crostini proves unreliable". The thread's VPS recommendation is Singapore, and the Oracle path involves a <strong>home region that cannot be changed after signup</strong>. A rushed fallback under pressure would land on a permanently wrong region.</p>
+<div class="fix"><strong>Fix:</strong> Edit the May comments with a struck-through correction pointing at C-06, and record the fallback region decision now rather than at the moment it is needed. Rev 2.3 §16 has the revised comparison.</div>
+</div>
+</div>
+
+<div class="finding high">
+<div class="bar"></div>
+<div class="body">
+<span class="id">B-06</span>
+<h4><span class="sev high">high</span> Crostini auto-start is correctly identified as the top risk and left unsolved</h4>
+<p>The thread names it: "If the Chromebook auto-updates and reboots at 3am, the bot stays dead until someone opens the Terminal app." That is the right conclusion, and with B-03 and B-04 removing both proposed mitigations, it is the binding constraint on the whole approach.</p>
+<p>NBA windows span UTC 16:00–08:00, which is overnight in Malaysia. A reboot at hour three of a sixteen-hour window means the remaining thirteen hours are lost, and the dead-man switch alerts to a phone that is next to a sleeping operator.</p>
+<div class="fix"><strong>Fix:</strong> Accept it explicitly rather than engineering around it. For Phase 0 and 1 it is genuinely fine — batch work re-runs. For paper trading it is the thing that makes the results non-comparable to live, so record reboot events as first-class data (B-07). Do not carry it into any phase holding positions.</div>
+</div>
+</div>
+
+<h3>Medium and low</h3>
+<table>
+<thead><tr><th>#</th><th>Sev</th><th>Finding</th><th>Change</th></tr></thead>
+<tbody>
+<tr><td class="k">B-07</td><td class="sev medium">medium</td><td>The proposed gate is "uptime ≥90% during game windows". Uptime is the wrong statistic — what breaks a paper-trading sample is <em>non-random</em> gaps, not their count. A Chromebook that sleeps at a consistent local hour, or drops WiFi under a specific load, produces missing signals that differ systematically from captured ones. 95% uptime with correlated gaps is worse than 85% random.</td><td>Test whether downtime correlates with signal characteristics — hour of day, quarter, market, consensus type. Report that alongside the uptime percentage.</td></tr>
+<tr><td class="k">B-08</td><td class="sev medium">medium</td><td>Step 13 suggests <code>sudo iw dev wlan0 set power_save off</code> inside Crostini. The container has no direct access to the host wireless interface — it sees a virtual ethernet device. The command will not find <code>wlan0</code>.</td><td>Remove. WiFi power management is a ChromeOS host concern not reachable from the container. The USB ethernet adapter is the real fix and is already recommended.</td></tr>
+<tr><td class="k">B-09</td><td class="sev medium">medium</td><td>Step 8 says to allocate 2–4GB RAM to the container. Crostini exposes a disk-size control, not a RAM allocation — memory is managed dynamically by the VM.</td><td>Correct the instruction. The disk figure matters more: 10GB is suggested, but the thread's own resource table lists a 4.9GB ESPN cache and 2.5GB of backups. Confirm whether the Chromebook runs the bot only or the monitor too — the two comments disagree.</td></tr>
+<tr><td class="k">B-10</td><td class="sev medium">medium</td><td>The issue body specifies <code>py-clob-client-v2</code> as "purpose-built for programmatic trading", but the ARM verification table and the setup instructions both use <code>py-clob-client</code>. Different packages, potentially different dependency trees.</td><td>Settle which SDK, then re-run the ARM check against that one. The v2 tree may not match what was verified.</td></tr>
+<tr><td class="k">B-11</td><td class="sev low">low</td><td>Three phase-numbering schemes coexist: the original body's Phase 1/2/3 (relay/bot/risk), Rev 2.3's Phase 0–5, and "Phase A/B" in the clarification answers. The August comments mix all three.</td><td>Adopt Rev 2.3's numbering throughout and edit the body, or the go/no-go gates will be argued about later.</td></tr>
+<tr><td class="k">B-12</td><td class="sev low">low</td><td>ChromeOS is migrating Linux support to a new backend ("Baguette") as the default from M147, with multi-container support and ansible-based setup deprecated.</td><td>Not blocking, but a long-lived Crostini deployment sits on a platform that is changing underneath it. Another reason not to build anything load-bearing on it.</td></tr>
+</tbody>
+</table>
+
+
+<h2><span class="num">B3</span>Correction to Addendum A</h2>
+
+<div class="finding ok">
+<div class="bar"></div>
+<div class="body">
+<h4><span class="sev done">corrected</span> ARM compatibility — the thread's verification beats my caution</h4>
+<p>Addendum A §A2 flagged that "the Polymarket path pulls in native signing dependencies (<code>eth-account</code>, <code>coincurve</code>/secp256k1) where ARM wheel coverage is less reliable and source builds may be needed."</p>
+<p>The 2026-05-12T04:51 comment tested this properly and found the tree is pure Python apart from <code>bitarray</code>, which ships prebuilt aarch64 wheels. That is a real verification against my speculation, and it wins. The concern is withdrawn.</p>
+<p>One caveat that keeps it honest: the check should be re-run against whichever SDK is finally chosen (B-10) and against pinned versions at install time, since dependency trees shift — newer <code>eth-account</code> releases have pulled in C extensions that older ones did not.</p>
+</div>
+</div>
+
+
+<h2><span class="num">B4</span>Revised Sequence</h2>
+<p class="lede">Reordered to reflect B-02, which moves the calibration fix ahead of everything.</p>
+
+<table>
+<thead><tr><th>#</th><th>Step</th><th>Where</th><th>Blocking?</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td>Correct the residency record in the thread; obtain Australian legal advice if residence is Australian</td><td>—</td><td class="sev critical">gates Phase 2</td></tr>
+<tr><td class="num">2</td><td>Fit and version a calibration mapping on settled PW calls (#412, A-01)</td><td>Anywhere</td><td class="sev critical">gates Phase 0</td></tr>
+<tr><td class="num">3</td><td>Gate <code>edge</code> on a live at-fire quote; stop using the pregame baseline (A-02)</td><td>Anywhere</td><td class="sev high">gates interpretation</td></tr>
+<tr><td class="num">4</td><td>Run Phase 0 against <em>calibrated</em> probabilities</td><td>Chromebook fine</td><td class="sev critical">gates everything</td></tr>
+<tr><td class="num">5</td><td>Phase 1 market survey</td><td>Chromebook fine</td><td>—</td></tr>
+<tr><td class="num">6</td><td>Amend the stale Singapore comments; decide the fallback region now (B-05)</td><td>—</td><td class="sev high">before fallback needed</td></tr>
+<tr><td class="num">7</td><td>Remove the destructive flag and the two non-working instructions from the checklist (B-03, B-04, B-08)</td><td>—</td><td class="sev high">before setup</td></tr>
+<tr><td class="num">8</td><td>Paper trading, with gap-correlation instrumentation rather than an uptime percentage (B-07)</td><td>Chromebook, caveated</td><td>—</td></tr>
+<tr><td class="num">9</td><td>Anything holding a position</td><td class="sev critical">not Chromebook</td><td>—</td></tr>
+</tbody>
+</table>
+
+<div class="note ok">
+<h4>The Chromebook decision is smaller than it looks</h4>
+<p>Steps 2 through 5 are the ones that decide this project, and every one of them is batch analysis that runs fine on the Chromebook — or on any machine, including the AU server already running 24/7. The reliability debate only becomes load-bearing at step 8, and only matters at step 9, which the thread already correctly rules out.</p>
+<p>So the honest framing is that the hardware question has been given more weight than it can carry. Using existing hardware to save VPS cost during a testing phase is a perfectly reasonable call, and the phase-viability table in the thread already lands in the right place. The two critical findings above are worth considerably more attention than the Crostini setup checklist.</p>
+</div>
+
+<div class="note">
+<h4>One thing worth watching in how this issue is developing</h4>
+<p>Between the August comments, the assessment moved from "not recommended" to "viable for Phase 0–3 with caveats", and the residency position moved to the reading most favourable to proceeding. Both movements may be correct on the facts. But they moved in the same direction within the same hour, and the supporting details in each — the update-disabling method, the startup flag, the residency answer — do not hold up individually.</p>
+<p>That pattern is worth noticing early, because the parent review's central argument is that this project's value lies in finding out cheaply whether an edge exists. A decision log that resolves ambiguity toward continuing is the mechanism by which that value gets lost.</p>
+</div>
+
+<footer>
+<p>Addendum B &middot; Parent: Polymarket Trading Bot Technical Review Rev 2.3 &middot; Supersedes Addendum A §A2 &middot; NBAMonitor #214</p>
+<p>Reviewed against the issue-214.md export, thread updated 2026-08-26T06:03Z. ChromeOS platform behaviour verified at time of writing and subject to change.</p>
+</footer>
+
+</div>
+</body>
+</html>

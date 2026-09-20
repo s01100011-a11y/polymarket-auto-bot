@@ -1,0 +1,18 @@
+{
+  "rules": [
+    {
+      "id": "pw-default-v1",
+      "name": "PW Default (65% threshold)",
+      "registered": "2026-07-29T00:00:00Z",
+      "description": "Standard PW call: blended ML+Bayesian >= 65%, margin gate -15/-10, edge gate enabled",
+      "params": {
+        "threshold": 65,
+        "source": "blended",
+        "edge_gate": 0,
+        "margin_gate_general": -15,
+        "margin_gate_late": -10
+      },
+      "locked": true
+    }
+  ]
+}

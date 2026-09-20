@@ -1,0 +1,12 @@
+[Unit]
+Description=NRL Monitor — daily ML training check (13:00 UTC)
+Requires=nrl-ml-train.service
+
+[Timer]
+# Run daily at 13:00 UTC (matching config ml_training_schedule)
+# Training only proceeds if interval elapsed AND game_history changed
+OnCalendar=*-*-* 13:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

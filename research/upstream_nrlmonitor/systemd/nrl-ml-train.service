@@ -1,0 +1,11 @@
+[Unit]
+Description=NRL Monitor — ML model training
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor
+ExecStart=/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/.venv/bin/python3 \
+    /home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/ml_train_runner.py
+StandardOutput=append:/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/logs/ml_train.log
+StandardError=append:/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/logs/ml_train.log

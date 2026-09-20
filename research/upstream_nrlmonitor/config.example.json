@@ -1,0 +1,448 @@
+{
+  "season": 2026,
+  "teams": [],
+  "monitor_all_teams": true,
+  "slack_channel": "YOUR_SLACK_CHANNEL_ID",
+  "slack_channel_name": "#nrl-alerts",
+  "slack_bot_token": "xoxb-YOUR-BOT-TOKEN-HERE",
+  "openclaw_gateway": "http://127.0.0.1:18789",
+  "openclaw_token": "YOUR_OPENCLAW_GATEWAY_TOKEN",
+  "odds_api_enabled": false,
+  "odds_api_key": "",
+  "odds_api_markets": "h2h,spreads",
+  "odds_api_upcoming_cache_ttl": 900,
+  "odds_api_fallback_save_enabled": false,
+  "odds_api_fallback_retention_days": 7,
+  "odds_poll_interval_h1": 5,
+  "odds_poll_interval_late": 2,
+  "odds_poll_late_threshold_min": 70,
+  "alert_cooldown_minutes": 5,
+  "end_of_game_alerts": true,
+  "outcomes_decay_lambda": 0.0,
+  "predicted_winner_enabled": false,
+  "predicted_winner_threshold": 65,
+  "predicted_winner_alert": {
+    "enabled": true,
+    "threshold_pct": 65,
+    "threshold_pct_favorite": 70,
+    "threshold_pct_underdog": 60
+  },
+  "pw_half_weights": {
+    "H1": 0.90,
+    "H2": 1.05,
+    "ET": 1.10
+  },
+  "pw_margin_gate": -12,
+  "pw_margin_gate_late": -8,
+  "pw_polarity_gate": 0,
+  "pw_edge_gate": 0,
+  "pw_alert_filters": {
+    "enabled": false,
+    "quarter": "",
+    "spread_role": "",
+    "margin_at_fire": "",
+    "half": "",
+    "consensus": "",
+    "polarity": "",
+    "source": "",
+    "strict_bk": false,
+    "min_pct": null,
+    "edge_min": null,
+    "edge_max": null,
+    "game_summary": false,
+    "sc_ml_roi_on": false,
+    "sc_ml_roi_min": null,
+    "sc_spr_roi_on": false,
+    "sc_spr_roi_min": null,
+    "sc_q_ml_roi_on": false,
+    "sc_q_ml_roi_min": null,
+    "sc_q_spr_roi_on": false,
+    "sc_q_spr_roi_min": null,
+    "sc_roi_logic": "and",
+    "sc_min_calls": 0,
+    "sc_min_games": 0
+  },
+  "pw_eval_interval_h1": 10,
+  "pw_eval_interval_h2": 5,
+  "pw_eval_interval_late": 2,
+  "pw_eval_late_threshold_min": 60,
+  "pw_eval_on_score_change": true,
+  "pw_blend_weights": {
+    "ml": 0.70,
+    "historical": 0.30
+  },
+  "pw_margin_boost_leading": 1.0,
+  "pw_margin_boost_leading_late": 1.05,
+  "pw_consensus_boost_strong": 1.0,
+  "pw_consensus_penalty_conflicted": 1.0,
+  "pw_version": "v1.0",
+  "compound_conditions": [
+    {
+      "name": "Dominant half - trailing team errors",
+      "operator": "AND",
+      "description": "Team trailing at HT with high errors — likely to lose",
+      "condition_refs": [
+        "Trailing at halftime",
+        "High error count (8+)"
+      ],
+      "suppress_base_alerts": true
+    }
+  ],
+  "conditions": [
+    {
+      "name": "Trailing at halftime",
+      "type": "score_diff",
+      "color": "yellow",
+      "alert": true,
+      "description": "Team trailing at halftime by less than 12 points",
+      "period": "1H",
+      "team_status": "trailing",
+      "max_deficit": 12
+    },
+    {
+      "name": "Winning at halftime by 13+",
+      "type": "score_diff",
+      "color": "green",
+      "alert": true,
+      "description": "Team leading at halftime by 13+ points (2+ converted tries)",
+      "period": "1H",
+      "team_status": "winning",
+      "min_lead": 13
+    },
+    {
+      "name": "Blowout margin 20+",
+      "type": "score_diff",
+      "color": "red",
+      "alert": true,
+      "description": "Team leading by 20+ points during the game",
+      "period": "game",
+      "team_status": "winning",
+      "min_lead": 20
+    },
+    {
+      "name": "Trailing by 18+ in 2H",
+      "type": "score_diff",
+      "color": "orange",
+      "alert": true,
+      "description": "Team trailing by 18+ in second half — comeback territory",
+      "period": "2H",
+      "team_status": "trailing",
+      "min_deficit": 18
+    },
+    {
+      "name": "High error count (8+)",
+      "type": "error_rate",
+      "color": "yellow",
+      "alert": true,
+      "description": "Team has committed 8+ errors (handling + general)",
+      "threshold": 8,
+      "quarter_scale": true
+    },
+    {
+      "name": "Critical errors (12+)",
+      "type": "error_rate",
+      "color": "red",
+      "alert": true,
+      "description": "Team has committed 12+ errors — discipline breakdown",
+      "threshold": 12,
+      "quarter_scale": true
+    },
+    {
+      "name": "Low completion rate (<65%)",
+      "type": "completion_rate",
+      "color": "yellow",
+      "alert": true,
+      "description": "Team set completion below 65%",
+      "threshold": 65,
+      "direction": "below"
+    },
+    {
+      "name": "Very low completion (<55%)",
+      "type": "completion_rate",
+      "color": "red",
+      "alert": true,
+      "description": "Team set completion below 55% — poor ball control",
+      "threshold": 55,
+      "direction": "below"
+    },
+    {
+      "name": "High penalties (6+)",
+      "type": "penalty_count",
+      "color": "yellow",
+      "alert": true,
+      "description": "Team conceded 6+ penalties",
+      "threshold": 6,
+      "quarter_scale": true
+    },
+    {
+      "name": "Critical penalties (10+)",
+      "type": "penalty_count",
+      "color": "red",
+      "alert": true,
+      "description": "Team conceded 10+ penalties — referee pressure",
+      "threshold": 10,
+      "quarter_scale": true
+    },
+    {
+      "name": "Losing possession battle (<45%)",
+      "type": "possession",
+      "color": "yellow",
+      "alert": true,
+      "description": "Team possession below 45%",
+      "threshold": 45,
+      "direction": "below"
+    },
+    {
+      "name": "Dominating possession (>60%)",
+      "type": "possession",
+      "color": "green",
+      "alert": true,
+      "description": "Team possession above 60%",
+      "threshold": 60,
+      "direction": "above"
+    },
+    {
+      "name": "12+ unanswered points",
+      "type": "points_run",
+      "color": "green",
+      "alert": true,
+      "description": "Team has scored 12+ unanswered points",
+      "threshold": 12
+    },
+    {
+      "name": "Missed tackles (25+)",
+      "type": "missed_tackles",
+      "color": "orange",
+      "alert": true,
+      "description": "Team has 25+ missed tackles — defensive breakdown",
+      "threshold": 25,
+      "quarter_scale": true
+    },
+    {
+      "name": "Momentum shift (18+ unanswered)",
+      "type": "momentum_shift",
+      "color": "green",
+      "alert": true,
+      "description": "Team scored 18+ unanswered points — strong momentum",
+      "threshold": 18
+    },
+    {
+      "name": "Error streak (4+ consecutive)",
+      "type": "error_streak",
+      "color": "orange",
+      "alert": true,
+      "description": "Team committed 4+ consecutive errors",
+      "threshold": 4
+    },
+    {
+      "name": "Penalty pressure (3 in 10min)",
+      "type": "penalty_pressure",
+      "color": "yellow",
+      "alert": true,
+      "description": "Team conceded 3+ penalties in a 10-minute window",
+      "threshold": 3
+    },
+    {
+      "name": "Sin bin",
+      "type": "sin_bin",
+      "color": "red",
+      "alert": true,
+      "description": "Player sin-binned — team down to 12",
+      "threshold": 1
+    },
+    {
+      "name": "Line break surge (3 in 10min)",
+      "type": "line_break_surge",
+      "color": "green",
+      "alert": true,
+      "description": "Team made 3+ line breaks in a 10-minute window — attacking dominance",
+      "threshold": 3
+    },
+    {
+      "name": "Halftime turnaround",
+      "type": "halftime_turnaround",
+      "color": "green",
+      "alert": true,
+      "description": "Team was trailing by 6+ at halftime but now leading",
+      "min_ht_deficit": 6
+    },
+    {
+      "name": "Dominant run metres (2000+)",
+      "type": "run_metres",
+      "color": "green",
+      "alert": true,
+      "description": "Team has 2000+ all run metres — dominant forward pack",
+      "threshold": 2000,
+      "direction": "above",
+      "quarter_scale": true
+    },
+    {
+      "name": "Poor run metres (<1400)",
+      "type": "run_metres",
+      "color": "orange",
+      "alert": true,
+      "description": "Team has less than 1400 run metres — being pushed back",
+      "threshold": 1400,
+      "direction": "below",
+      "quarter_scale": true
+    },
+    {
+      "name": "Physical dominance (700+ PCM)",
+      "type": "post_contact_metres",
+      "color": "green",
+      "alert": true,
+      "description": "Team has 700+ post-contact metres — hard to bring down",
+      "threshold": 700,
+      "direction": "above",
+      "quarter_scale": true
+    },
+    {
+      "name": "High tackle breaks (40+)",
+      "type": "tackle_breaks",
+      "color": "green",
+      "alert": true,
+      "description": "Team has 40+ tackle breaks — very hard to stop",
+      "threshold": 40,
+      "direction": "above",
+      "quarter_scale": true
+    },
+    {
+      "name": "Attacking line breaks (7+)",
+      "type": "line_breaks",
+      "color": "green",
+      "alert": true,
+      "description": "Team has 7+ line breaks — creating lots of chances",
+      "threshold": 7,
+      "direction": "above",
+      "quarter_scale": true
+    },
+    {
+      "name": "Creative offloads (14+)",
+      "type": "offloads",
+      "color": "green",
+      "alert": true,
+      "description": "Team has 14+ offloads — creative ball-playing attack",
+      "threshold": 14,
+      "direction": "above",
+      "quarter_scale": true
+    },
+    {
+      "name": "Intercepts (2+)",
+      "type": "intercepts",
+      "color": "green",
+      "alert": true,
+      "description": "Team has 2+ intercepts — reading the play well",
+      "threshold": 2,
+      "quarter_scale": true
+    },
+    {
+      "name": "Ineffective tackles (18+)",
+      "type": "ineffective_tackles",
+      "color": "orange",
+      "alert": true,
+      "description": "Team has 18+ ineffective tackles — weak contact",
+      "threshold": 18,
+      "quarter_scale": true
+    },
+    {
+      "name": "Poor tackle efficiency (<85%)",
+      "type": "effective_tackle_pct",
+      "color": "yellow",
+      "alert": true,
+      "description": "Team effective tackle rate below 85% — leaking metres",
+      "threshold": 85,
+      "direction": "below"
+    },
+    {
+      "name": "Dominant tackle efficiency (>92%)",
+      "type": "effective_tackle_pct",
+      "color": "green",
+      "alert": false,
+      "description": "Team effective tackle rate above 92% — brick wall defence",
+      "threshold": 92,
+      "direction": "above"
+    },
+    {
+      "name": "Poor kick defusal (<60%)",
+      "type": "kick_defusal",
+      "color": "orange",
+      "alert": true,
+      "description": "Team kick defusal below 60% — vulnerable under high ball",
+      "threshold": 60,
+      "direction": "below"
+    },
+    {
+      "name": "Strong kick returns (250+m)",
+      "type": "kick_return_metres",
+      "color": "green",
+      "alert": false,
+      "description": "Team has 250+ kick return metres — gaining territory",
+      "threshold": 250,
+      "direction": "above",
+      "quarter_scale": true
+    },
+    {
+      "name": "Slow play-the-ball (>4.0s)",
+      "type": "play_the_ball_speed",
+      "color": "yellow",
+      "alert": true,
+      "description": "Team average PTB above 4.0s — fatigued, losing tempo",
+      "threshold": 4.0,
+      "direction": "above"
+    },
+    {
+      "name": "Red card (sent off)",
+      "type": "red_card",
+      "color": "red",
+      "alert": true,
+      "description": "Player sent off — team down to 12 permanently",
+      "threshold": 1
+    },
+    {
+      "name": "First team to score",
+      "type": "first_team_scores",
+      "color": "green",
+      "alert": true,
+      "description": "First team to score in the match — key PW indicator"
+    },
+    {
+      "name": "Predicted Winner 60%",
+      "type": "predicted_winner_threshold",
+      "threshold": 60,
+      "min_half": 1,
+      "color": "green",
+      "alert": true,
+      "alert_once": "game",
+      "description": "Predicted winner confidence crossed 60%"
+    },
+    {
+      "name": "Predicted Winner 75%",
+      "type": "predicted_winner_threshold",
+      "threshold": 75,
+      "min_half": 2,
+      "color": "yellow",
+      "alert": true,
+      "alert_once": "game",
+      "description": "Predicted winner confidence crossed 75%"
+    },
+    {
+      "name": "Predicted Winner 90%",
+      "type": "predicted_winner_threshold",
+      "threshold": 90,
+      "min_half": 2,
+      "color": "red",
+      "alert": true,
+      "alert_once": "game",
+      "description": "Predicted winner confidence crossed 90%"
+    }
+  ],
+  "odds_monitor_activate_minute": 65,
+  "odds_monitor_leading_threshold": 3.0,
+  "auto_recovery_enabled": true,
+  "auto_recovery_pw_calls": true,
+  "backup_retention": {
+    "keep_scheduled": 10,
+    "keep_preconfig": 10,
+    "prune_days": 60
+  }
+}

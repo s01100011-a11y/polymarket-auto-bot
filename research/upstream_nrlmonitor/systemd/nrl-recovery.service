@@ -1,0 +1,11 @@
+[Unit]
+Description=NRL Monitor — auto-recovery scan for missed games (#136)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor
+ExecStart=/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/.venv/bin/python3 /home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/recovery.py \
+    scan --season 2026
+StandardOutput=append:/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/logs/recovery.log
+StandardError=append:/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/logs/recovery.log

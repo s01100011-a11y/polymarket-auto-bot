@@ -1,0 +1,15 @@
+[Unit]
+Description=NRL Monitor Dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor
+ExecStart=/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/.venv/bin/python3 /home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/server.py 8898
+StandardOutput=append:/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/logs/dashboard.log
+StandardError=append:/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/logs/dashboard.log
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

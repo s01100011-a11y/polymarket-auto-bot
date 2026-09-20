@@ -1,0 +1,10 @@
+[Unit]
+Description=NRL Monitor — one-shot polling run
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor
+ExecStart=/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/.venv/bin/python3 /home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/monitor.py
+StandardOutput=append:/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/logs/monitor.log
+StandardError=append:/home/bobcheong/.openclaw/workspace/scripts/nrl-monitor/logs/monitor.log
