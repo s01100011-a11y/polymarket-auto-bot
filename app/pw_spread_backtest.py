@@ -114,16 +114,25 @@ def install(*, history: Any, ingest: Any) -> None:
         return data if isinstance(data, dict) and data.get("markets") else None
 
     def threshold(market: dict[str, Any]) -> float | None:
-        direct = num(market.get("groupItemThreshold"))
-        if direct is not None:
-            return direct
-        title = str(market.get("groupItemTitle") or "")
-        match = re.search(r"[-+]?\d+(?:\.\d+)?", title)
-        if match:
-            return num(match.group(0))
-        question = str(market.get("question") or "")
-        match = re.search(r"[-+]\d+(?:\.\d+)?", question)
-        return num(match.group(0)) if match else None
+        # Archived sports markets can expose groupItemThreshold=1 even when the
+        # actual handicap is carried in the human-readable market title/question.
+        # Prefer an explicit signed spread from those labels and only fall back to
+        # the numeric Gamma field.
+        for text in (
+            str(market.get("question") or ""),
+            str(market.get("groupItemTitle") or ""),
+        ):
+            match = re.search(r"[-+]\d+(?:\.\d+)?", text)
+            if match:
+                return num(match.group(0))
+        for text in (
+            str(market.get("question") or ""),
+            str(market.get("groupItemTitle") or ""),
+        ):
+            match = re.search(r"(?:spread|points?|by)\D{0,12}(\d+(?:\.\d+)?)", text, re.I)
+            if match:
+                return num(match.group(1))
+        return num(market.get("groupItemThreshold"))
 
     def spread_markets(event: dict[str, Any], team_a: str, team_b: str) -> tuple[list[dict[str, Any]], int]:
         out: list[dict[str, Any]] = []
@@ -414,7 +423,13 @@ def install(*, history: Any, ingest: Any) -> None:
                     "pick": pick,
                     "quarter": str(alert.get("quarter") or "").upper(),
                     "bk_ml": num(alert.get("bk_ml")),
+                    "bk_spread": num(alert.get("bk_spread")),
                     "pw_result": str(alert.get("result") or ""),
+                    "final_margin": (
+                        abs(int(alert.get("score_a")) - int(alert.get("score_b")))
+                        if alert.get("score_a") is not None and alert.get("score_b") is not None
+                        else None
+                    ),
                     "same_side_call_no": call_no,
                     "poly_line": float(chosen["line"]),
                     "pw_price": float(chosen["own_px"]),
@@ -428,6 +443,16 @@ def install(*, history: Any, ingest: Any) -> None:
                     "available_spread_markets": len(markets),
                     "event_slug": event.get("slug"),
                     "group_title": chosen["market"].get("group_title"),
+                    "available_spreads": [
+                        {
+                            "line": float(x["line"]),
+                            "price": float(x["own_px"]),
+                            "lag_s": x.get("own_lag"),
+                            "win": bool(x["own_win"]),
+                            "question": x["market"].get("question"),
+                        }
+                        for x in sorted(candidates, key=lambda x: float(x["line"]))
+                    ],
                 }
                 records.append(rec)
 
@@ -511,6 +536,105 @@ def install(*, history: Any, ingest: Any) -> None:
             stats = aggregate(rows, side)
             print(f"PW_SPREAD_STRATEGY name={name} side={side} " + " ".join(f"{k}={v}" for k, v in stats.items()), flush=True)
         print("PW_SPREAD_DIAGNOSTIC " + json.dumps(diagnostic, sort_keys=True), flush=True)
+
+        # A 0.5238 Polymarket share price is approximately American -110.
+        dog_losses = filt(
+            lambda r: r.get("bk_ml") is not None
+            and float(r["bk_ml"]) > 0
+            and r.get("pw_result") == "L"
+        )
+        dog_losses_1_10 = [
+            r for r in dog_losses
+            if r.get("final_margin") is not None and 1 <= int(r["final_margin"]) <= 10
+        ]
+
+        def line_audit(rows: list[dict[str, Any]], target: float) -> dict[str, Any]:
+            poly_any = poly_near110 = poly_tight110 = 0
+            poly_covering = poly_near110_covering = 0
+            dk_present = dk_at_least = dk_covering = 0
+            unique_games_any: set[str] = set()
+            unique_games_near110: set[str] = set()
+            nearest_prices: list[float] = []
+            examples: list[dict[str, Any]] = []
+
+            for r in rows:
+                margin = int(r["final_margin"])
+                bk = num(r.get("bk_spread"))
+                if bk is not None:
+                    dk_present += 1
+                    if bk >= target:
+                        dk_at_least += 1
+                    if bk > margin:
+                        dk_covering += 1
+
+                candidates_at_target = [
+                    x for x in (r.get("available_spreads") or [])
+                    if num(x.get("line")) is not None and float(x["line"]) >= target
+                ]
+                if not candidates_at_target:
+                    continue
+                poly_any += 1
+                unique_games_any.add(str(r.get("game_id")))
+                nearest = min(candidates_at_target, key=lambda x: abs(float(x["price"]) - 0.5238))
+                nearest_prices.append(float(nearest["price"]))
+                near = [x for x in candidates_at_target if 0.50 <= float(x["price"]) <= 0.55]
+                tight = [x for x in candidates_at_target if 0.515 <= float(x["price"]) <= 0.535]
+                covering = [x for x in candidates_at_target if float(x["line"]) > margin]
+                if covering:
+                    poly_covering += 1
+                if near:
+                    poly_near110 += 1
+                    unique_games_near110.add(str(r.get("game_id")))
+                    if any(float(x["line"]) > margin for x in near):
+                        poly_near110_covering += 1
+                    if len(examples) < 12:
+                        chosen_near = min(near, key=lambda x: abs(float(x["price"]) - 0.5238))
+                        examples.append({
+                            "game_id": r.get("game_id"),
+                            "quarter": r.get("quarter"),
+                            "bk_ml": r.get("bk_ml"),
+                            "bk_spread": r.get("bk_spread"),
+                            "final_margin": margin,
+                            "poly_line": chosen_near.get("line"),
+                            "poly_price": round(float(chosen_near["price"]), 4),
+                            "lag_s": chosen_near.get("lag_s"),
+                        })
+                if tight:
+                    poly_tight110 += 1
+
+            nearest_prices.sort()
+            median_nearest = nearest_prices[len(nearest_prices) // 2] if nearest_prices else None
+            return {
+                "target_plus": target,
+                "signals": len(rows),
+                "dk_spread_present": dk_present,
+                "dk_at_least_target": dk_at_least,
+                "dk_would_cover_final_margin": dk_covering,
+                "poly_target_or_better_available": poly_any,
+                "poly_target_or_better_unique_games": len(unique_games_any),
+                "poly_near_minus110_50_55c": poly_near110,
+                "poly_near_minus110_unique_games": len(unique_games_near110),
+                "poly_tight_minus110_51_5_53_5c": poly_tight110,
+                "poly_target_or_better_would_cover": poly_covering,
+                "poly_near_minus110_would_cover": poly_near110_covering,
+                "median_price_nearest_52_38c": round(median_nearest, 4) if median_nearest is not None else None,
+                "examples": examples,
+            }
+
+        loss_audit = {
+            "all_underdog_losses": {
+                "signals": len(dog_losses),
+                "unique_games": len({str(r.get("game_id")) for r in dog_losses}),
+                "bk_spread_present": sum(1 for r in dog_losses if r.get("bk_spread") is not None),
+            },
+            "underdog_losses_1_10": {
+                "signals": len(dog_losses_1_10),
+                "unique_games": len({str(r.get("game_id")) for r in dog_losses_1_10}),
+                "bk_spread_present": sum(1 for r in dog_losses_1_10 if r.get("bk_spread") is not None),
+                "targets": {str(t): line_audit(dog_losses_1_10, t) for t in (6.5, 7.5, 8.5)},
+            },
+        }
+        print("PW_SPREAD_UNDERDOG_LOSS_AUDIT " + json.dumps(loss_audit, sort_keys=True), flush=True)
 
         best = sorted(
             [
