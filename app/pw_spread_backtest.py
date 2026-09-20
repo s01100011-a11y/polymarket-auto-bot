@@ -285,10 +285,15 @@ def install(*, history: Any, ingest: Any) -> None:
                     SELECT a.id,a.event_ts,a.game_id,a.predicted_winner,a.predicted_winner_abbr,
                            a.quarter,a.win_probability,a.bk_ml,a.live_spread,a.bk_spread,a.result,
                            a.backtest_eligible,
-                           g.team_a,g.team_b,g.score_a,g.score_b
+                           COALESCE(g.team_a,c.team_a) AS team_a,
+                           COALESCE(g.team_b,c.team_b) AS team_b,
+                           g.score_a,g.score_b
                     FROM alerts a
-                    JOIN games g ON g.game_id=a.game_id
+                    LEFT JOIN games g ON g.game_id=a.game_id
+                    LEFT JOIN pw_game_reconstruction_coverage c ON c.game_id=a.game_id
                     WHERE a.game_id IS NOT NULL AND a.game_id<>''
+                      AND COALESCE(g.team_a,c.team_a) IS NOT NULL
+                      AND COALESCE(g.team_b,c.team_b) IS NOT NULL
                     ORDER BY a.event_ts,a.id
                     """
                 ).fetchall()
