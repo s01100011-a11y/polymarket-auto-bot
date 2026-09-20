@@ -677,3 +677,45 @@ Implementation / ops:
 - Research deployment `09fb33e6-099d-4352-916a-236e94788049` reached SUCCESS and completed the 151-game scan.
 - One-off `PW_SPREAD_BACKTEST_ENABLED` returned to `false`.
 - Research only. No live execution path, sizing, routing, dashboard live-control, or real-money setting was changed.
+
+
+## 2026-09-20 — Broad WNBA spread scan + fixed walk-forward (#14)
+
+Expanded the historical spread research to avoid overfitting tiny +6.5/+7.5/+8.5 samples.
+
+Method:
+- 1,361 matched graded PW calls with usable Polymarket spread history.
+- One position per game/team per rule (first qualifying PW signal only).
+- Absolute spread family: +2.5 through +12.5, price caps 45/50/55/60/65c (55 configs).
+- DK-gap family: where stored BK Spread is positive, allow max sacrifice of 0/1/2/3/4/6 points vs DraftKings and price caps 40/45/50/55/60/65c (36 configs). Select cheapest PM spread satisfying the cushion constraint.
+- 70/30 chronological game split retained.
+- Added fixed-rule expanding OOS blocks (60-70%, 70-80%, 80-90%, 90-100%) with no fold-by-fold rule selection.
+- Adverse entry stress +0.5c / +1.0c.
+- Historical PM pricing is still ~1-minute proxy data, not executable order-book reconstruction.
+
+Higher-volume absolute-spread findings:
+- +2.5 <=65c: 79 total, 50-29, +24.67% ROI; train 56 +16.74%; final holdout 23 +43.98%; fixed OOS 31 +36.66%; +1c stress +33.11%. Fold ROIs +15.60%, +85.09%, +37.68%, +11.64%.
+- +2.5 <=60c: 76 total, 47-29, +25.77%; train 53 +17.64%; holdout 23 +44.50%; fixed OOS 31 +37.04%; +1c stress +33.48%. Fold ROIs +15.60%, +86.57%, +37.68%, +11.64%.
+- +2.5 <=55c: 68 total, 40-28, +25.29%; train 48 +18.91%; holdout 20 +40.61%; fixed OOS 27 +41.50%; +1c stress +37.62%. Fold ROIs +44.05%, +89.22%, +31.38%, +3.85%.
+- +3.5 <=60c: 65 total +25.02%; train 46 +18.78%; holdout 19 +40.12%; fixed OOS 26 +29.69%; +1c stress +26.18%. Last fold was -6.89%.
+- +4.5 <=60c: 57 total +21.52%; train 42 +20.90%; holdout 15 +23.24%; fixed OOS 22 +16.29%; +1c stress +13.97%.
+- +5.5 <=60c: 51 total, 35-16, +33.44%; train 38 +30.44%; holdout 13 +42.20%; fixed OOS 19 +37.05%; +1c stress +34.27%. All four fixed OOS folds positive (+25.88%, +44.60%, +40.79%, +39.67%).
+
+Interpretation:
+- Broadening to smaller positive spreads materially increases independent sample size without destroying the historical signal.
+- The best volume/stability candidate from this pass is not +8.5; it is the broad +2.5-or-better family around a 55-60c cap.
+- +5.5 <=60c is lower-volume but also notably stable across all four fixed OOS blocks.
+- None of these has 100+ independent historical WNBA positions yet, so forward validation remains necessary.
+
+DK-gap findings:
+- Stored BK Spread is present on 570 matched signal records overall, but positive-BK-spread gap rules still produce only ~30-37 independent positions.
+- Several DK-gap rules were strongly positive in historical holdout/OOS, e.g. <=4-point sacrifice, <=60c: 36 total, +52.42%; fixed OOS 26 +47.20%; +1c stress +42.05%.
+- Some selected PM spreads were actually larger than the stored BK spread (negative average sacrifice). Because historical PM pricing is proxy data and timestamps can differ by up to the allowed lag, these unusually strong gap results must be treated as suspect until confirmed with natural live executable captures.
+- This directly motivates forward executable spread capture issue #15.
+
+Implementation:
+- Commit `5a74028eacacbad8698c16d21c0067ccfdd43095`: broad absolute-spread + DK-gap scan.
+- Commit `b50394a88d7ae9a2db867b8cd291cf529c9427ff`: fixed-rule walk-forward.
+- Research deployment `496d2674-2c9b-42be-9065-662c76d01a3b` completed successfully.
+- Research flag returned OFF.
+- Issue #15 created for natural live executable spread capture.
