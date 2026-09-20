@@ -423,3 +423,47 @@ For every future code change, append an entry containing: objective, files chang
 - **Implementation commits:** `4c922660`, `0699cda0`, `13256839`, `6480513d`.
 - **Verified research deployment:** Railway production deployment `9e63e70e-6bb0-44f1-bbe6-4df9ae2fbda3` reached SUCCESS.
 - **Outstanding:** Decode archived Polymarket spread handicap metadata; run chronological holdout/walk-forward validation; apply 0.5c/1.0c adverse-entry/exit friction stress; validate against natural live executable bid/ask captures before considering automation.
+
+
+## 2026-09-20 — WNBA underdog loss spread audit (#14)
+
+Research-only rerun after fixing archived Gamma spread-line decoding. The decoder now prefers the signed handicap embedded in the market question/title before falling back to `groupItemThreshold`. This fixed the previous bogus all-`1.0` line metadata. Verified reconstructed Polymarket spread line distribution now spans 1.5 through 16.5.
+
+Scope:
+- Canonical graded PW alerts: 1,362.
+- Historical Polymarket spread price matched: 1,361.
+- Plus-money/underdog PW moneyline losses represented in matched spread records: 207.
+- Underdog losses by 1–10 points with matched Polymarket spread history: 177 signals across 48 games.
+- Canonical raw count before Polymarket-price matching is 178 signals, so one 1–10 point underdog-loss call lacks a usable Polymarket historical spread price.
+- BK Spread is available on 92/177 matched calls in this subset (93/178 in the canonical raw subset).
+
+DraftKings BK Spread in the matched 1–10-point-loss subset:
+- +6.5 or higher: 37/92 calls with BK Spread present.
+- +7.5 or higher: 22/92.
+- +8.5 or higher: 15/92.
+
+Polymarket historical availability at the PW signal time:
+- +6.5 or better existed on 126/177 signals (32 games); 29 signals / 15 games had +6.5-or-better priced 50–55c, and 17 signals were in the tighter 51.5–53.5c band around theoretical -110.
+- +7.5 or better existed on 109/177 signals (27 games); 25 signals / 12 games were 50–55c, 14 were 51.5–53.5c.
+- +8.5 or better existed on 92/177 signals (23 games); 18 signals / 9 games were 50–55c, 10 were 51.5–53.5c.
+
+Typical cost when each target-or-better line existed, measured as the listed spread nearest to 52.38c:
+- +6.5 or better median 60.5c (~-153 equivalent).
+- +7.5 or better median 65.5c (~-190).
+- +8.5 or better median 70.5c (~-239).
+
+For the near--110 50–55c opportunities, the selected target-or-better spread would have covered the actual final losing margin on:
+- +6.5-or-better: 18/29 signals.
+- +7.5-or-better: 15/25.
+- +8.5-or-better: 14/18.
+
+Interpretation:
+- Larger live Polymarket cushions were real and sometimes available around 52c, but they were not the normal price state.
+- +8.5-or-better near -110 was relatively rare (18/177 matched signals) but 14 of those 18 would have covered the eventual final margin in this conditional loss-only sample.
+- This is a retrospective diagnostic on calls already known to have lost the moneyline; it is not an ex-ante ROI estimate and must not be treated as a standalone live edge.
+- Historical `prices-history` remains approximate one-minute midpoint/proxy data, not reconstructed executable bid/ask/depth.
+
+Implementation:
+- Commit `dc1b4f07a79c328c70b0c8ed9852d374bb2982ea`: fix archived spread-line decoding and add underdog-loss audit output.
+- Research deployment `5d1bf581-ff59-4d43-afaf-e47b1353caba` reached SUCCESS.
+- One-off `PW_SPREAD_BACKTEST_ENABLED` was returned to `false` after the scan.
