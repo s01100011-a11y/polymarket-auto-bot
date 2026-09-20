@@ -467,3 +467,46 @@ Implementation:
 - Commit `dc1b4f07a79c328c70b0c8ed9852d374bb2982ea`: fix archived spread-line decoding and add underdog-loss audit output.
 - Research deployment `5d1bf581-ff59-4d43-afaf-e47b1353caba` reached SUCCESS.
 - One-off `PW_SPREAD_BACKTEST_ENABLED` was returned to `false` after the scan.
+
+
+## 2026-09-20 — All PW underdog spread-target backtest (#14)
+
+Extended the corrected Polymarket spread-line audit from losing PW underdog calls to every matched graded PW underdog signal.
+
+Scope:
+- 313 matched PW underdog signals with usable historical Polymarket spread pricing.
+- 106 PW moneyline winners, 207 PW moneyline losers.
+- 88 unique games represented.
+- Strategy rule is ex-ante/deterministic: when a positive spread at or above the target exists under the price cap, buy the largest cushion available under that cap and hold to settlement.
+- Flat $100 stake per signal. Historical prices-history remains ~1-minute proxy pricing, not executable bid/ask/depth.
+
+Results:
++6.5 or better:
+- <=55c: 76 trades, 46-30, 60.53% win, +$1,827.73, +24.05% ROI, avg entry 49.34c, avg line +8.67, 30 unique games.
+- 50-55c: 46 trades, 29-17, 63.04%, +$919.10, +19.98% ROI, avg entry 52.52c, avg line +8.80, 24 unique games.
+- 51.5-53.5c: 26 trades, 18-8, 69.23%, +$820.07, +31.54% ROI, avg entry 52.69c, avg line +8.58, 19 unique games.
+- <=60c: 95 trades, 62-33, 65.26%, +$2,460.48, +25.90% ROI, avg entry 52.08c, avg line +8.95, 36 unique games.
+
++7.5 or better:
+- <=55c: 58 trades, 30-28, 51.72%, +$163.54, +2.82% ROI, avg entry 50.06c, avg line +9.34, 23 unique games.
+- 50-55c: 36 trades, 20-16, 55.56%, +$206.01, +5.72% ROI, avg entry 52.51c, avg line +9.44, 19 unique games.
+- 51.5-53.5c: 18 trades, 11-7, 61.11%, +$282.97, +15.72% ROI, avg entry 52.83c, avg line +9.50, 14 unique games.
+- <=60c: 78 trades, 48-30, 61.54%, +$1,094.13, +14.03% ROI, avg entry 53.08c, avg line +9.49, 29 unique games.
+
++8.5 or better:
+- <=55c: 43 trades, 27-16, 62.79%, +$1,086.95, +25.28% ROI, avg entry 49.80c, avg line +9.99, 16 unique games.
+- 50-55c: 27 trades, 18-9, 66.67%, +$735.60, +27.24% ROI, avg entry 52.41c, avg line +10.09, 14 unique games.
+- 51.5-53.5c: 14 trades, 10-4, 71.43%, +$496.05, +35.43% ROI, avg entry 52.75c, avg line +10.07, 11 unique games.
+- <=60c: 55 trades, 37-18, 67.27%, +$1,461.43, +26.57% ROI, avg entry 52.48c, avg line +10.32, 22 unique games.
+
+Interpretation:
+- +8.5-or-better is the strongest target in the 50-55c near--110 band in this in-sample test: 27 trades, 18-9, +27.24% ROI.
+- +6.5-or-better also performed strongly and produced more opportunities: 46 near--110 trades, +19.98% ROI.
+- +7.5-or-better was notably weaker in the broad 50-55c band (+5.72% ROI).
+- The tight 51.5-53.5c bands look stronger but are small samples (14-26 trades) and highly correlated because repeated PW calls can occur in the same game.
+- These are not yet forward/executable edge estimates. Next robustness checks should include one-per-game-side deduplication, chronological holdout/walk-forward, and entry-friction stress using live executable bid/ask captures where available.
+
+Implementation:
+- Commit `6cce44cc6aa3bacf899093e98667a4969e8d89c2`: add all-underdog target/price-cap strategy audit.
+- Research deployment `a4309b00-0ed5-4e6e-aec0-bf67226bbddd` reached SUCCESS.
+- One-off `PW_SPREAD_BACKTEST_ENABLED` returned to `false`.
