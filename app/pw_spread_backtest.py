@@ -284,10 +284,11 @@ def install(*, history: Any, ingest: Any) -> None:
                     """
                     SELECT a.id,a.event_ts,a.game_id,a.predicted_winner,a.predicted_winner_abbr,
                            a.quarter,a.win_probability,a.bk_ml,a.live_spread,a.bk_spread,a.result,
+                           a.backtest_eligible,
                            g.team_a,g.team_b,g.score_a,g.score_b
                     FROM alerts a
                     JOIN games g ON g.game_id=a.game_id
-                    WHERE a.backtest_eligible=1
+                    WHERE a.game_id IS NOT NULL AND a.game_id<>''
                     ORDER BY a.event_ts,a.id
                     """
                 ).fetchall()
@@ -339,7 +340,10 @@ def install(*, history: Any, ingest: Any) -> None:
             for m in markets:
                 line_values[abs(float(m["a_line"]))] += 1
 
-            times = [int(parse_dt(a["event_ts"]).timestamp()) for a in game_alerts if parse_dt(a.get("event_ts"))]
+            eligible_game_alerts = [a for a in game_alerts if int(a.get("backtest_eligible") or 0) == 1]
+            if not eligible_game_alerts:
+                continue
+            times = [int(parse_dt(a["event_ts"]).timestamp()) for a in eligible_game_alerts if parse_dt(a.get("event_ts"))]
             if not times:
                 continue
             start_ts, end_ts = min(times) - max_lag, max(times) + max_lag
@@ -353,7 +357,7 @@ def install(*, history: Any, ingest: Any) -> None:
                         if not pts:
                             price_errors += 1
 
-            for alert in game_alerts:
+            for alert in eligible_game_alerts:
                 dt = parse_dt(alert.get("event_ts"))
                 if dt is None:
                     continue
@@ -486,6 +490,7 @@ def install(*, history: Any, ingest: Any) -> None:
             "market_count_hist": dict(sorted(market_count_hist.items())),
             "unmatched_spread_markets": unmatched_spread_markets,
             "alerts_total": len(alerts),
+            "alerts_graded_eligible": sum(1 for a in alerts if int(a.get("backtest_eligible") or 0) == 1),
             "alerts_with_executable_spread_price": len(records),
             "live_spread_comparable_calls": len(live_rows),
             "exact_pw_live_line_calls": exact,
