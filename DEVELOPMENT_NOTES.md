@@ -405,3 +405,21 @@ For every future code change, append an entry containing: objective, files chang
 - **Commit:** `2f01949` — Add walk-forward scalp robustness analysis (#13).
 - **Verified deployment:** Railway deployment `7f5f0d95-8258-434c-bc9a-53915f133ebf` reached SUCCESS. Startup preserved the canonical PW history at 1,921 alerts / 1,362 graded.
 - **Outstanding:** Validate actual spread/slippage with natural 1-second live bid/ask captures before considering any strategy execution change. A live forward paper test should use fixed predeclared parameters rather than reoptimizing after each result.
+
+
+## 2026-09-20 — Actual Polymarket WNBA spread-market backtest (#14)
+
+- **Objective:** Backtest WNBA PW signals against only spread markets that were actually listed by Polymarket, respecting the platform's limited alternate-spread inventory rather than synthesizing sportsbook-style lines.
+- **Files changed:** Added `app/pw_spread_backtest.py`; wired it into `app/wnba_pw_research_v13.py`.
+- **Research controls:** Added one-off `PW_SPREAD_BACKTEST_ENABLED`, `PW_SPREAD_BACKTEST_REQUEST_SLEEP`, and `PW_SPREAD_BACKTEST_MAX_PRICE_LAG_SECONDS` controls. The backtest flag was returned to `false` after the scan.
+- **Availability:** All 151 reconstructed WNBA games had at least one archived Polymarket spread market. There were 380 actual spread markets total (2.52/game average). Distribution by game: 17 had 1, 70 had 2, 43 had 3, 14 had 4, 5 had 5, 1 had 6, and 1 had 7. Thus 57.6% of games had only 1-2 spread markets and 86.1% had at most 3.
+- **Historical price coverage:** 1,361 of 1,362 graded PW calls had a usable historical spread-token price aligned to the signal. Historical CLOB `prices-history` data is approximately minute fidelity and was aligned within 120 seconds; it is not reconstructed executable bid/ask depth.
+- **Flat-$100 historical results on actual listed spread tokens:** All PW side: 1,361 trades, 935-426, +$6,368.50, +4.68% ROI. Plus-money PW: 313 trades, 198-115, +$3,888.85, +12.42%. Q4 PW: 704 trades, 499-205, +$4,592.97, +6.52%. Repeat same-side PW: 1,138 trades, 802-336, +$6,232.55, +5.48%. Q3 PW: 497 trades, 342-155, +$1,392.61, +2.80%. Q4 fade: 704 trades, 205-499, -$14,047.42, -19.95%.
+- **PW-winner diagnostic:** Of the 970 PW calls that ultimately won moneyline, 774 (79.79%) also won the selected available Polymarket spread token; conditional historical spread P/L was +$20,195.85 / +20.82% ROI. This is diagnostic because it conditions on knowing the eventual PW moneyline winner and is not an ex-ante strategy.
+- **Data-quality limitation:** The archived WNBA Gamma spread objects continue to expose a numeric handicap value of 1.0 through the fields tested (`groupItemThreshold`, title parsing, and `line`). Actual spread-market identification, token prices, availability and resolved outcomes remain usable, but handicap-number comparisons against PW's stored `live_spread` are not trusted. Exact-line / within-N-points strategy results must not be used until raw archived handicap metadata is decoded correctly.
+- **Interpretation:** The strongest unvalidated historical buckets are plus-money PW, Q4 PW and repeated same-side PW. Q4 fading is strongly negative for spread settlement even though earlier moneyline-price scalp work found short-horizon early-Q4 fade behavior; these are different hypotheses/outcomes.
+- **Robustness caveat:** These new spread-market results are historical/in-sample and exclude historical order-book spread, depth, slippage and fees. They require chronological holdout/walk-forward testing and execution-friction stress before any trading-route change is considered.
+- **Safety:** Research/reporting only. No order placement, cancellation, sizing, routing, execution gate or risk control was changed.
+- **Implementation commits:** `4c922660`, `0699cda0`, `13256839`, `6480513d`.
+- **Verified research deployment:** Railway production deployment `9e63e70e-6bb0-44f1-bbe6-4df9ae2fbda3` reached SUCCESS.
+- **Outstanding:** Decode archived Polymarket spread handicap metadata; run chronological holdout/walk-forward validation; apply 0.5c/1.0c adverse-entry/exit friction stress; validate against natural live executable bid/ask captures before considering automation.
