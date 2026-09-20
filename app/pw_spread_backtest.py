@@ -988,6 +988,158 @@ def install(*, history: Any, ingest: Any) -> None:
         }
         print("PW_SPREAD_ROBUSTNESS " + json.dumps(robustness_audit, sort_keys=True), flush=True)
 
+        # Broad search intended to increase independent sample size rather than
+        # maximize a tiny in-sample ROI. Two families:
+        #   1) absolute PM spread + price cap;
+        #   2) DK-live-spread sacrifice gap + price cap, where available.
+        broad_configs: list[dict[str, Any]] = []
+        for target in (2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5):
+            for max_price in (0.45, 0.50, 0.55, 0.60, 0.65):
+                trades = dedup_config_trades(records, target, 0.0, max_price)
+                broad_configs.append({
+                    "family": "absolute_spread",
+                    "name": f"pm_plus{target}_cap{int(max_price*100)}",
+                    "target": target,
+                    "max_price": max_price,
+                    "trades": trades,
+                })
+
+        def dedup_gap_trades(
+            rows: list[dict[str, Any]],
+            max_sacrifice: float,
+            max_price: float,
+            min_poly_line: float = 2.5,
+        ) -> list[dict[str, Any]]:
+            trades: list[dict[str, Any]] = []
+            seen_side: set[tuple[str, str]] = set()
+            ordered = sorted(
+                rows,
+                key=lambda r: (
+                    parse_dt(r.get("event_ts")) or datetime.max.replace(tzinfo=timezone.utc),
+                    int(r.get("alert_id") or 0),
+                ),
+            )
+            for r in ordered:
+                side_key = (str(r.get("game_id") or ""), str(r.get("pick") or ""))
+                if side_key in seen_side:
+                    continue
+                bk = num(r.get("bk_spread"))
+                if bk is None or bk <= 0:
+                    continue
+                floor_line = max(min_poly_line, float(bk) - float(max_sacrifice))
+                eligible = [
+                    x for x in (r.get("available_spreads") or [])
+                    if num(x.get("line")) is not None
+                    and float(x["line"]) >= floor_line
+                    and float(x["price"]) <= max_price
+                ]
+                if not eligible:
+                    continue
+                # Maximize payout while respecting the allowed DK cushion sacrifice.
+                # If prices tie, prefer the larger spread.
+                chosen = sorted(
+                    eligible,
+                    key=lambda x: (float(x["price"]), -float(x["line"])),
+                )[0]
+                price = float(chosen["price"])
+                line = float(chosen["line"])
+                won = bool(chosen["win"])
+                trades.append({
+                    "game_id": side_key[0],
+                    "pick": side_key[1],
+                    "event_ts": r.get("event_ts"),
+                    "price": price,
+                    "line": line,
+                    "bk_spread": float(bk),
+                    "sacrifice": round(float(bk) - line, 2),
+                    "won": won,
+                    "pnl": pnl(price, won),
+                })
+                seen_side.add(side_key)
+            return trades
+
+        gap_configs: list[dict[str, Any]] = []
+        for max_sacrifice in (0.0, 1.0, 2.0, 3.0, 4.0, 6.0):
+            for max_price in (0.40, 0.45, 0.50, 0.55, 0.60, 0.65):
+                trades = dedup_gap_trades(records, max_sacrifice, max_price)
+                gap_configs.append({
+                    "family": "dk_gap",
+                    "name": f"dk_gap_le{max_sacrifice}_cap{int(max_price*100)}",
+                    "max_sacrifice": max_sacrifice,
+                    "max_price": max_price,
+                    "trades": trades,
+                })
+
+        def chronological_config_rows(configs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            out: list[dict[str, Any]] = []
+            for cfg in configs:
+                tr = [t for t in cfg["trades"] if t["game_id"] in train_games]
+                te = [t for t in cfg["trades"] if t["game_id"] in test_games]
+                row = {
+                    "family": cfg["family"],
+                    "name": cfg["name"],
+                    "all": settlement_summary(cfg["trades"]),
+                    "train_70": settlement_summary(tr),
+                    "test_30": settlement_summary(te),
+                    "test_stress_0_5c": settlement_summary(te, 0.5),
+                    "test_stress_1c": settlement_summary(te, 1.0),
+                }
+                for key in ("target", "max_sacrifice", "max_price"):
+                    if key in cfg:
+                        row[key] = cfg[key]
+                if cfg["family"] == "dk_gap" and cfg["trades"]:
+                    row["avg_sacrifice"] = round(mean(float(t["sacrifice"]) for t in cfg["trades"]), 2)
+                    row["bk_rows"] = len(cfg["trades"])
+                out.append(row)
+            return out
+
+        broad_rows = chronological_config_rows(broad_configs)
+        gap_rows = chronological_config_rows(gap_configs)
+
+        def robust_shortlist(rows: list[dict[str, Any]], min_all: int, min_train: int, min_test: int) -> list[dict[str, Any]]:
+            eligible = [
+                row for row in rows
+                if int((row.get("all") or {}).get("trades") or 0) >= min_all
+                and int((row.get("train_70") or {}).get("trades") or 0) >= min_train
+                and int((row.get("test_30") or {}).get("trades") or 0) >= min_test
+                and float((row.get("train_70") or {}).get("roi_pct") or -999) > 0
+                and float((row.get("test_30") or {}).get("roi_pct") or -999) > 0
+            ]
+            eligible.sort(
+                key=lambda row: (
+                    int((row.get("all") or {}).get("trades") or 0),
+                    float((row.get("test_30") or {}).get("roi_pct") or -999),
+                    float((row.get("train_70") or {}).get("roi_pct") or -999),
+                ),
+                reverse=True,
+            )
+            return eligible[:15]
+
+        broad_audit = {
+            "absolute_config_count": len(broad_rows),
+            "gap_config_count": len(gap_rows),
+            "bk_spread_records": sum(1 for r in records if num(r.get("bk_spread")) is not None),
+            "absolute_top_by_sample_positive_train_test": robust_shortlist(broad_rows, 30, 20, 8),
+            "gap_top_by_sample_positive_train_test": robust_shortlist(gap_rows, 20, 12, 5),
+            "absolute_top_all_sample": sorted(
+                broad_rows,
+                key=lambda row: (
+                    int((row.get("all") or {}).get("trades") or 0),
+                    float((row.get("all") or {}).get("roi_pct") or -999),
+                ),
+                reverse=True,
+            )[:20],
+            "gap_top_all_sample": sorted(
+                gap_rows,
+                key=lambda row: (
+                    int((row.get("all") or {}).get("trades") or 0),
+                    float((row.get("all") or {}).get("roi_pct") or -999),
+                ),
+                reverse=True,
+            )[:20],
+        }
+        print("PW_SPREAD_BROAD_SCAN " + json.dumps(broad_audit, sort_keys=True), flush=True)
+
         best = sorted(
             [
                 (name, aggregate(rows, side))
