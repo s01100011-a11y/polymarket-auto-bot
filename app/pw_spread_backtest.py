@@ -737,6 +737,37 @@ def install(*, history: Any, ingest: Any) -> None:
         }
         print("PW_SPREAD_ALL_UNDERDOG_AUDIT " + json.dumps(all_dog_audit, sort_keys=True), flush=True)
 
+        # Full-feed version of the same strategy audit. This intentionally includes
+        # every matched graded PW call (favorites + underdogs, winners + losers).
+        all_pw_calls = list(records)
+        all_pw_price_gap_audit = {
+            "signals": len(all_pw_calls),
+            "unique_games": len({str(r.get("game_id")) for r in all_pw_calls}),
+            "pw_ml_wins": sum(1 for r in all_pw_calls if r.get("pw_result") == "W"),
+            "pw_ml_losses": sum(1 for r in all_pw_calls if r.get("pw_result") == "L"),
+            "underdog_signals": sum(
+                1 for r in all_pw_calls
+                if r.get("bk_ml") is not None and float(r["bk_ml"]) > 0
+            ),
+            "favorite_signals": sum(
+                1 for r in all_pw_calls
+                if r.get("bk_ml") is not None and float(r["bk_ml"]) < 0
+            ),
+            "targets": {
+                str(t): {
+                    "cap_50c_plus_money": dog_strategy(all_pw_calls, t, 0.50, 0.0),
+                    "cap_40c_plus150_or_better": dog_strategy(all_pw_calls, t, 0.40, 0.0),
+                    "cap_33_33c_plus200_or_better": dog_strategy(all_pw_calls, t, 1.0 / 3.0, 0.0),
+                    "cap_25c_plus300_or_better": dog_strategy(all_pw_calls, t, 0.25, 0.0),
+                    "cap_55c": dog_strategy(all_pw_calls, t, 0.55, 0.0),
+                    "near_minus110_50_55c": dog_strategy(all_pw_calls, t, 0.55, 0.50),
+                    "cap_60c": dog_strategy(all_pw_calls, t, 0.60, 0.0),
+                }
+                for t in (6.5, 7.5, 8.5)
+            },
+        }
+        print("PW_SPREAD_ALL_CALLS_AUDIT " + json.dumps(all_pw_price_gap_audit, sort_keys=True), flush=True)
+
         best = sorted(
             [
                 (name, aggregate(rows, side))
