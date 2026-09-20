@@ -719,3 +719,21 @@ Implementation:
 - Research deployment `496d2674-2c9b-42be-9065-662c76d01a3b` completed successfully.
 - Research flag returned OFF.
 - Issue #15 created for natural live executable spread capture.
+
+
+## 2026-09-20 — Vendor NBAMonitor PW research snapshot (#16)
+
+Created `research/upstream_nbamonitor/` as a read-only reference snapshot of the upstream PW generator.
+
+Source:
+- Repository: `bobcheong/NBAMonitor`
+- Pinned commit: `7fc3285823eb7190b737edd8580ec69229e4b5ae`
+- Commit date: 2026-09-19
+- Purpose: inspect exact PW firing logic, bookmaker live-odds capture, `bk_spread`/`bk_ts` semantics, repeat/suppression behavior, export generation, grading and replay.
+
+Copied research-relevant files:
+`README.md`, `CLAUDE.md`, `monitor.py`, `odds_api.py`, `conditions.py`, `server.py`, `outcomes.py`, `pw_trend.py`, `backfill_pw_calls.py`, `export_pw_jsonl.py`, `league_config.py`, and `synthetic_odds.py`.
+
+The snapshot is isolated under `research/` and is not imported by the live trading path. `SNAPSHOT.md` records provenance and the pinned upstream revision.
+
+Initial source inspection confirms the upstream system explicitly stores `bk_spread`, `bk_spread_price`, `bk_spread_source`, and `bk_ts`, and `odds_api.py` describes `fetch_live_game_odds()` as capturing real-time spread and moneyline when a PW call fires. These fields will be used to tighten the DK-vs-Polymarket timing analysis in #14/#15.
