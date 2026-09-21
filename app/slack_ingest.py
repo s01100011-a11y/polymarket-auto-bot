@@ -112,6 +112,41 @@ def _parse_alert(text: str) -> dict[str, Any]:
     }
 
 
+def _pw_signal_key(parsed: dict[str, Any]) -> str | None:
+    """Stable cross-source key for the same PW call arriving via export + Slack."""
+    pw = parsed.get("pw") or {}
+    game_id = str(pw.get("game_id") or "").strip()
+    pick = str(pw.get("predicted_winner") or parsed.get("selection") or "").strip()
+    event_ts = str(pw.get("event_ts") or "").strip()
+    quarter = str(pw.get("quarter") or "").strip().upper()
+    probability = pw.get("win_probability")
+    if not game_id or not pick:
+        return None
+    prob = ""
+    try:
+        if probability is not None:
+            prob = f"{float(probability):.2f}"
+    except Exception:
+        prob = str(probability or "")
+    # event_ts is the strongest discriminator for repeated same-team PW calls.
+    return "|".join((game_id, pick.casefold(), event_ts, quarter, prob))
+
+
+def _existing_pw_signal(alerts: dict[str, Any], parsed: dict[str, Any], exclude_event_id: str | None = None) -> str | None:
+    key = _pw_signal_key(parsed)
+    if not key:
+        return None
+    for event_id, rec in alerts.items():
+        if exclude_event_id and str(event_id) == str(exclude_event_id):
+            continue
+        if not isinstance(rec, dict):
+            continue
+        other = rec.get("parsed")
+        if isinstance(other, dict) and _pw_signal_key(other) == key:
+            return str(event_id)
+    return None
+
+
 def _verify_slack_signature(raw_body: bytes, timestamp: str | None, signature: str | None) -> None:
     if not SLACK_SIGNING_SECRET:
         raise HTTPException(status_code=503, detail="SLACK_SIGNING_SECRET is not configured")
@@ -793,6 +828,16 @@ async def slack_events(request: Request):
         return {"ok": True, "ignored": "stale alert", "event_id": event_id}
 
     parsed = _parse_alert(text)
+    existing_signal = _existing_pw_signal(alerts, parsed, event_id)
+    if existing_signal:
+        return {
+            "ok": True,
+            "duplicate": True,
+            "duplicate_signal": True,
+            "event_id": event_id,
+            "existing_event_id": existing_signal,
+        }
+
     rec: dict[str, Any] = {
         "event_id": event_id,
         "received_at": _now_iso(),
