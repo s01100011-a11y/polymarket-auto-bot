@@ -519,6 +519,16 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
             "source": "pw-export",
         }
         parsed = ingest._parse_alert(text)
+        existing_signal = None
+        try:
+            existing_signal = ingest._existing_pw_signal(
+                core._load(ingest.SLACK_ALERTS_FILE),
+                parsed,
+                event_id,
+            )
+        except Exception:
+            existing_signal = None
+
         alert: dict[str, Any] = {
             "event_id": event_id,
             "received_at": ingest._now_iso(),
@@ -531,6 +541,12 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
             "paper_only": not bool(core.auto_trading_enabled()),
             "status": "RECEIVED",
         }
+
+        if existing_signal:
+            alert["status"] = "DUPLICATE_SIGNAL"
+            alert["duplicate_of"] = existing_signal
+            ingest._save_alert(event_id, alert)
+            return "DUPLICATE_SIGNAL", None
 
         try:
             trade = ingest._paper_trade_from_alert(parsed, event_id, event)
