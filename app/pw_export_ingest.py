@@ -20,6 +20,103 @@ _INSTALLED = False
 _THREAD: threading.Thread | None = None
 
 
+def _tailnet_https_json(
+    url: str,
+    params: dict[str, Any],
+    proxy: str,
+    tailnet_peer: str = "",
+    *,
+    timeout: float = 8.0,
+    user_agent: str = "railway-pw-export/3",
+) -> tuple[Any, str]:
+    """GET JSON through tailscaled's outbound HTTP proxy.
+
+    Prefer the MagicDNS hostname so Tailscale resolves/routes the current node.
+    Fall back to the configured peer IP for compatibility. Use a fresh tunnel
+    per request so a stale TLS socket cannot poison later polls (#23).
+    """
+    target = urlsplit(url)
+    if target.scheme.lower() != "https" or not target.hostname:
+        raise RuntimeError("PW export URL must be a valid https URL")
+
+    proxy_url = urlsplit(proxy)
+    proxy_host = proxy_url.hostname or "127.0.0.1"
+    proxy_port = proxy_url.port or 1055
+    target_port = target.port or 443
+    path = target.path or "/"
+    query = urlencode(params)
+    request_path = f"{path}?{query}" if query else path
+    host_header = target.hostname if target_port == 443 else f"{target.hostname}:{target_port}"
+
+    routes: list[str] = []
+    for candidate in (target.hostname, tailnet_peer):
+        if candidate and candidate not in routes:
+            routes.append(candidate)
+
+    last_exc: Exception | None = None
+    for connect_host in routes:
+        raw = None
+        tls = None
+        try:
+            raw = socket.create_connection((proxy_host, proxy_port), timeout=timeout)
+            raw.settimeout(timeout)
+            authority = f"{connect_host}:{target_port}"
+            raw.sendall(
+                (
+                    f"CONNECT {authority} HTTP/1.1\r\n"
+                    f"Host: {authority}\r\n"
+                    "Proxy-Connection: close\r\n"
+                    "\r\n"
+                ).encode("ascii")
+            )
+            header = bytearray()
+            while b"\r\n\r\n" not in header and len(header) < 16384:
+                chunk = raw.recv(4096)
+                if not chunk:
+                    break
+                header.extend(chunk)
+            status_line = bytes(header).split(b"\r\n", 1)[0].decode("ascii", "replace")
+            if " 200 " not in f" {status_line} " and not status_line.endswith(" 200"):
+                raise RuntimeError(f"Tailscale CONNECT failed via {connect_host}: {status_line}")
+
+            context = ssl.create_default_context()
+            tls = context.wrap_socket(raw, server_hostname=target.hostname)
+            raw = None  # tls owns the underlying socket now
+            tls.settimeout(timeout)
+            tls.sendall(
+                (
+                    f"GET {request_path} HTTP/1.1\r\n"
+                    f"Host: {host_header}\r\n"
+                    "Accept: application/json\r\n"
+                    "Connection: close\r\n"
+                    f"User-Agent: {user_agent}\r\n"
+                    "\r\n"
+                ).encode("ascii")
+            )
+            response = http.client.HTTPResponse(tls)
+            response.begin()
+            body = response.read()
+            if response.status >= 400:
+                preview = body[:240].decode("utf-8", "replace").replace("\n", " ")
+                raise RuntimeError(f"PW export HTTP {response.status}: {preview}")
+            return json.loads(body.decode("utf-8")), connect_host
+        except Exception as exc:
+            last_exc = exc
+        finally:
+            if tls is not None:
+                try:
+                    tls.close()
+                except Exception:
+                    pass
+            if raw is not None:
+                try:
+                    raw.close()
+                except Exception:
+                    pass
+
+    raise RuntimeError(f"PW export fetch failed on routes {routes}: {last_exc}")
+
+
 def _first(row: dict[str, Any], *keys: str) -> Any:
     for key in keys:
         if key in row and row.get(key) is not None:
@@ -333,7 +430,6 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
     ts_socket = os.getenv("TS_SOCKET", "/tmp/tailscale/tailscaled.sock").strip()
     state_file = core.DATA_DIR / "pw_export_ingest_state.json"
     stop = threading.Event()
-    connection: dict[str, Any] = {"tls": None}
 
     def load_state() -> dict[str, Any]:
         try:
@@ -379,109 +475,31 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
                 flush=True,
             )
 
-    def close_connection() -> None:
-        tls = connection.get("tls")
-        connection["tls"] = None
-        if tls is not None:
-            try:
-                tls.close()
-            except Exception:
-                pass
-
-    def open_connection(target: Any) -> Any:
-        ensure_tailnet_ready()
-        proxy_url = urlsplit(proxy)
-        proxy_host = proxy_url.hostname or "127.0.0.1"
-        proxy_port = proxy_url.port or 1055
-        target_port = target.port or 443
-        connect_host = tailnet_peer or target.hostname
-
-        raw = socket.create_connection((proxy_host, proxy_port), timeout=6.0)
-        raw.settimeout(6.0)
-        try:
-            authority = f"{connect_host}:{target_port}"
-            raw.sendall(
-                (
-                    f"CONNECT {authority} HTTP/1.1\r\n"
-                    f"Host: {authority}\r\n"
-                    "Proxy-Connection: keep-alive\r\n"
-                    "\r\n"
-                ).encode("ascii")
-            )
-            header = bytearray()
-            while b"\r\n\r\n" not in header and len(header) < 16384:
-                chunk = raw.recv(4096)
-                if not chunk:
-                    break
-                header.extend(chunk)
-            status_line = bytes(header).split(b"\r\n", 1)[0].decode("ascii", "replace")
-            if " 200 " not in f" {status_line} " and not status_line.endswith(" 200"):
-                raise RuntimeError(f"Tailscale CONNECT failed: {status_line}")
-
-            context = ssl.create_default_context()
-            tls = context.wrap_socket(raw, server_hostname=target.hostname)
-            tls.settimeout(6.0)
-            connection["tls"] = tls
-            return tls
-        except Exception:
-            try:
-                raw.close()
-            except Exception:
-                pass
-            raise
-
-    def fetch_rows() -> tuple[list[dict[str, Any]], Any]:
+    def fetch_rows() -> tuple[list[dict[str, Any]], Any, str]:
         params = {
             "source": source,
             "since": query_since(),
             "include_suppressed": include_suppressed,
         }
-
-        target = urlsplit(url)
-        if target.scheme.lower() != "https":
-            raise RuntimeError("PW export URL must use https")
-        if not target.hostname:
-            raise RuntimeError("PW export URL is missing a hostname")
-
-        target_port = target.port or 443
-        path = target.path or "/"
-        query = urlencode(params)
-        request_path = f"{path}?{query}" if query else path
-        host_header = target.hostname if target_port == 443 else f"{target.hostname}:{target_port}"
-
+        ensure_tailnet_ready()
         last_exc: Exception | None = None
         for attempt in range(3):
             try:
-                tls = connection.get("tls") or open_connection(target)
-                request = (
-                    f"GET {request_path} HTTP/1.1\r\n"
-                    f"Host: {host_header}\r\n"
-                    "Accept: application/json\r\n"
-                    "Connection: keep-alive\r\n"
-                    "User-Agent: railway-pw-export-poller/2\r\n"
-                    "\r\n"
+                payload, route = _tailnet_https_json(
+                    url,
+                    params,
+                    proxy,
+                    tailnet_peer,
+                    timeout=8.0,
+                    user_agent="railway-pw-export-poller/3",
                 )
-                tls.sendall(request.encode("ascii"))
-                response = http.client.HTTPResponse(tls)
-                response.begin()
-                body = response.read()
-                if response.status >= 400:
-                    preview = body[:240].decode("utf-8", "replace").replace("\n", " ")
-                    raise RuntimeError(f"PW export HTTP {response.status}: {preview}")
-
-                payload = json.loads(body.decode("utf-8"))
-                # Keep the tunnel alive between 3-second polls when the server allows it.
-                if response.will_close or str(response.getheader("Connection") or "").lower() == "close":
-                    close_connection()
-                return _records(payload), payload
+                return _records(payload), payload, route
             except Exception as exc:
                 last_exc = exc
-                close_connection()
                 if attempt < 2:
                     time.sleep(0.75 * (attempt + 1))
                     continue
                 raise
-
         raise RuntimeError(f"PW export fetch failed: {last_exc}")
 
     def mark_seen(state: dict[str, Any], ids: list[str]) -> None:
@@ -501,6 +519,16 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
             "source": "pw-export",
         }
         parsed = ingest._parse_alert(text)
+        existing_signal = None
+        try:
+            existing_signal = ingest._existing_pw_signal(
+                core._load(ingest.SLACK_ALERTS_FILE),
+                parsed,
+                event_id,
+            )
+        except Exception:
+            existing_signal = None
+
         alert: dict[str, Any] = {
             "event_id": event_id,
             "received_at": ingest._now_iso(),
@@ -513,6 +541,12 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
             "paper_only": not bool(core.auto_trading_enabled()),
             "status": "RECEIVED",
         }
+
+        if existing_signal:
+            alert["status"] = "DUPLICATE_SIGNAL"
+            alert["duplicate_of"] = existing_signal
+            ingest._save_alert(event_id, alert)
+            return "DUPLICATE_SIGNAL", None
 
         try:
             trade = ingest._paper_trade_from_alert(parsed, event_id, event)
@@ -561,13 +595,16 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
         while not stop.is_set():
             started = time.time()
             try:
-                rows, payload = fetch_rows()
+                rows, payload, route = fetch_rows()
                 ids = [_identity(r) for r in rows]
                 state["last_poll_at"] = datetime.now(timezone.utc).isoformat()
                 state["last_poll_records"] = len(rows)
                 state["last_http_status"] = 200
                 state["last_error"] = None
                 state["successful_polls"] = int(state.get("successful_polls") or 0) + 1
+                state["consecutive_errors"] = 0
+                state["last_success_at"] = datetime.now(timezone.utc).isoformat()
+                state["last_route"] = route
 
                 if not state.get("schema_logged") and rows:
                     print(
@@ -638,12 +675,13 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
                     if not fresh:
                         save_state(state)
                         print(
-                            f"PW_EXPORT_POLL_OK records={len(rows)} fresh=0 poll={state.get('successful_polls')}",
+                            f"PW_EXPORT_POLL_OK records={len(rows)} fresh=0 poll={state.get('successful_polls')} route={route}",
                             flush=True,
                         )
 
             except Exception as exc:
                 state["errors"] = int(state.get("errors") or 0) + 1
+                state["consecutive_errors"] = int(state.get("consecutive_errors") or 0) + 1
                 state["last_error"] = f"{type(exc).__name__}: {exc}"
                 state["last_error_at"] = datetime.now(timezone.utc).isoformat()
                 try:

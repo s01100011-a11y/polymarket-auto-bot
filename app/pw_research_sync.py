@@ -119,64 +119,16 @@ def install(*, app: Any, history: Any, core: Any, dashboard: Any) -> None:
             "since": since,
             "include_suppressed": "0",
         }
-        target = urlsplit(export_url)
-        if target.scheme.lower() != "https" or not target.hostname:
-            raise RuntimeError("PW_WNBA_EXPORT_URL must be a valid https URL")
-
-        proxy_url = urlsplit(proxy)
-        proxy_host = proxy_url.hostname or "127.0.0.1"
-        proxy_port = proxy_url.port or 1055
-        target_port = target.port or 443
-        connect_host = tailnet_peer or target.hostname
-        raw = socket.create_connection((proxy_host, proxy_port), timeout=8.0)
-        raw.settimeout(45.0)
-        try:
-            authority = f"{connect_host}:{target_port}"
-            raw.sendall(
-                (
-                    f"CONNECT {authority} HTTP/1.1\r\n"
-                    f"Host: {authority}\r\n"
-                    "Proxy-Connection: keep-alive\r\n\r\n"
-                ).encode("ascii")
-            )
-            header = bytearray()
-            while b"\r\n\r\n" not in header and len(header) < 16384:
-                chunk = raw.recv(4096)
-                if not chunk:
-                    break
-                header.extend(chunk)
-            status_line = bytes(header).split(b"\r\n", 1)[0].decode("ascii", "replace")
-            if " 200 " not in f" {status_line} " and not status_line.endswith(" 200"):
-                raise RuntimeError(f"Tailscale CONNECT failed: {status_line}")
-
-            context = ssl.create_default_context()
-            tls = context.wrap_socket(raw, server_hostname=target.hostname)
-            tls.settimeout(45.0)
-            query = urlencode(params)
-            path = target.path or "/"
-            request_path = f"{path}?{query}" if query else path
-            host_header = target.hostname if target_port == 443 else f"{target.hostname}:{target_port}"
-            tls.sendall(
-                (
-                    f"GET {request_path} HTTP/1.1\r\n"
-                    f"Host: {host_header}\r\n"
-                    "Accept: application/json\r\n"
-                    "Connection: close\r\n"
-                    "User-Agent: railway-pw-research-sync/1\r\n\r\n"
-                ).encode("ascii")
-            )
-            response = http.client.HTTPResponse(tls)
-            response.begin()
-            body = response.read()
-            if response.status >= 400:
-                raise RuntimeError(f"PW export HTTP {response.status}: {body[:200].decode('utf-8','replace')}")
-            payload = json.loads(body.decode("utf-8"))
-            return pwexp._records(payload)
-        finally:
-            try:
-                raw.close()
-            except Exception:
-                pass
+        payload, route = pwexp._tailnet_https_json(
+            export_url,
+            params,
+            proxy,
+            tailnet_peer,
+            timeout=45.0,
+            user_agent="railway-pw-research-sync/2",
+        )
+        print(f"PW_RESEARCH_EXPORT_OK route={route}", flush=True)
+        return pwexp._records(payload)
 
     def natural_duplicate(con: Any, row: dict[str, Any]) -> bool:
         game_id = row.get("game_id")
