@@ -1,3 +1,15 @@
+## 2026-09-21 — PW direct-feed recovery + Slack failover (#23)
+
+- **Incident:** A WNBA PW call was present in NBA Monitor history but never reached the Railway trading bot. Railway logs during the game showed continuous `PW_EXPORT_POLL_ERROR` TLS handshake timeouts to the private WNBA `/api/pw-export` endpoint.
+- **Primary feed:** The trading bot receives PW calls directly from NBA Monitor `/api/pw-export`; Slack is not required for the primary path.
+- **Transport fix:** The Tailscale outbound proxy connection now prefers the configured MagicDNS hostname and falls back to the peer IP, instead of forcing the peer IP for every HTTPS CONNECT. Each poll uses a fresh TLS tunnel so a stale connection cannot poison later polls.
+- **Research sync:** The historical/research export sync reuses the same hardened transport.
+- **Health:** Direct feed state now records `last_success_at`, `last_route`, and `consecutive_errors`.
+- **Slack backup:** Existing `POST /slack/events` remains an independent second ingestion path. Cross-source PW deduplication was added so the same call arriving through both direct export and Slack cannot create two trades.
+- **Slack Events callback:** `https://polymarket-auto-bot-production.up.railway.app/slack/events`. Slack Event Subscriptions must send message events for the WNBA alert channel to this URL, and Railway `SLACK_EVENTS_ENABLED=true` with the matching signing secret/channel ID.
+- **Notification behavior:** NBA Monitor continues to send PW alerts to Slack for human notification. The bot's direct feed and Slack backup are independent delivery paths.
+- **Safety:** No PW strategy filters, trade sizing, auto-trading authorization, or risk rules were changed.
+
 ## 2026-09-21 — Pregame-spread resting limit-order backtest (#20)
 
 - **Objective:** Test every stored graded WNBA PW call as a hypothetical resting Polymarket BUY limit order on the exact stored pregame spread (`alerts.handicap`) for the PW-predicted team.
