@@ -1,3 +1,14 @@
+## 2026-09-21 — Pregame-spread resting limit-order backtest (#20)
+
+- **Objective:** Test every stored graded WNBA PW call as a hypothetical resting Polymarket BUY limit order on the exact stored pregame spread (`alerts.handicap`) for the PW-predicted team.
+- **Limit levels:** Decimal 1.90, 1.95 and 2.00, corresponding to maximum share prices 52.632c, 51.282c and 50.000c.
+- **Order lifetime:** From the PW fire timestamp through the final recorded play-by-play timestamp for that game.
+- **Fill model:** First historical spread-token `prices-history` point at or below the limit price. This is an indicative/proxy fill test because archived prices-history is approximately minute fidelity and does not reconstruct historical executable ask/depth.
+- **Settlement:** Uses the resolved Polymarket spread token outcome. Threshold-price P/L is reported conservatively at the submitted limit odds; first-observed proxy-price P/L is also reported separately.
+- **Reports:** All PW calls as the primary sample, plus first-call-per-game/team deduplication to remove repeat-call correlation; includes coverage, fill rate, unique games, W/L/pushes, win rate, unit P/L, ROI, time-to-fill and quarter breakdowns.
+- **Implementation:** `app/pw_spread_backtest.py` now reads `alerts.handicap`, extends spread-token historical price capture through game end, locates the exact listed Polymarket pregame spread market, and emits `PW_PREGAME_LIMIT_BACKTEST`.
+- **Safety:** Research/reporting only. No live order placement, cancellation, sizing, routing, auto-trading, risk gates or execution controls changed.
+
 # Development Notes
 
 > This file is the permanent engineering log for changes made to the Polymarket auto bot. It was added retrospectively on 2026-09-19 from the repository's actual commit history, then is intended to be updated alongside future code changes.
