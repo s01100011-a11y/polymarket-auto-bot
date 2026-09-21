@@ -292,7 +292,7 @@ def install(*, history: Any, ingest: Any) -> None:
                 dict(r) for r in con.execute(
                     """
                     SELECT a.id,a.event_ts,a.game_id,a.predicted_winner,a.predicted_winner_abbr,
-                           a.quarter,a.win_probability,a.bk_ml,a.live_spread,a.bk_spread,a.result,
+                           a.quarter,a.win_probability,a.bk_ml,a.handicap,a.live_spread,a.bk_spread,a.result,
                            a.backtest_eligible,
                            COALESCE(g.team_a,c.team_a) AS team_a,
                            COALESCE(g.team_b,c.team_b) AS team_b,
@@ -307,6 +307,22 @@ def install(*, history: Any, ingest: Any) -> None:
                     """
                 ).fetchall()
             ]
+            game_end_rows = [
+                dict(r) for r in con.execute(
+                    """
+                    SELECT game_id, MAX(event_ts) AS event_ts
+                    FROM play_by_play
+                    WHERE game_id IS NOT NULL AND game_id<>''
+                    GROUP BY game_id
+                    """
+                ).fetchall()
+            ]
+
+        game_end_ts_by_id: dict[str, int] = {}
+        for row in game_end_rows:
+            dt = parse_dt(row.get("event_ts"))
+            if dt is not None:
+                game_end_ts_by_id[str(row.get("game_id") or "")] = int(dt.timestamp()) + 30
 
         by_game: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for a in alerts:
@@ -314,6 +330,7 @@ def install(*, history: Any, ingest: Any) -> None:
 
         calls_by_side: dict[tuple[str, str], int] = defaultdict(int)
         records: list[dict[str, Any]] = []
+        pregame_limit_calls: list[dict[str, Any]] = []
         games_event_found = 0
         games_with_spread = 0
         total_spread_markets = 0
@@ -360,7 +377,14 @@ def install(*, history: Any, ingest: Any) -> None:
             times = [int(parse_dt(a["event_ts"]).timestamp()) for a in eligible_game_alerts if parse_dt(a.get("event_ts"))]
             if not times:
                 continue
-            start_ts, end_ts = min(times) - max_lag, max(times) + max_lag
+            start_ts = min(times) - max_lag
+            # For the resting-limit backtest, keep historical spread pricing
+            # through the last recorded play so we can tell whether an order
+            # placed at the PW fire would have crossed later in the game (#20).
+            game_end_ts = game_end_ts_by_id.get(str(game_id))
+            if game_end_ts is None:
+                game_end_ts = max(times) + 3600
+            end_ts = max(max(times) + max_lag, game_end_ts)
 
             token_points: dict[str, list[tuple[int, float]]] = {}
             for m in markets:
@@ -381,6 +405,83 @@ def install(*, history: Any, ingest: Any) -> None:
                     continue
                 calls_by_side[(game_id, pick)] += 1
                 call_no = calls_by_side[(game_id, pick)]
+
+                # Research-only resting limit order on the exact stored pregame
+                # spread line (alerts.handicap). Historical CLOB price history is
+                # minute-fidelity proxy data, so these are indicative fills only.
+                pregame_line = num(alert.get("handicap"))
+                limit_row: dict[str, Any] = {
+                    "alert_id": alert.get("id"),
+                    "event_ts": alert.get("event_ts"),
+                    "call_ts": ts,
+                    "game_id": game_id,
+                    "pick": pick,
+                    "quarter": str(alert.get("quarter") or "").upper(),
+                    "same_side_call_no": call_no,
+                    "pregame_spread": pregame_line,
+                    "market_found": False,
+                    "price_history": False,
+                    "settlement": None,
+                    "fills": {},
+                }
+                if pregame_line is not None:
+                    exact_market = None
+                    for m in markets:
+                        if pick == team_a:
+                            own_token = m["a_token"]
+                            own_line = float(m["a_line"])
+                            own_resolved = m["a_resolved"]
+                        else:
+                            own_token = m["b_token"]
+                            own_line = float(m["b_line"])
+                            own_resolved = m["b_resolved"]
+                        if abs(own_line - float(pregame_line)) < 0.01:
+                            exact_market = {
+                                "token": str(own_token),
+                                "line": own_line,
+                                "resolved": own_resolved,
+                                "question": m.get("question"),
+                            }
+                            break
+                    if exact_market is not None:
+                        limit_row["market_found"] = True
+                        limit_row["poly_line"] = exact_market["line"]
+                        points = [
+                            (int(t), float(p))
+                            for t, p in token_points.get(exact_market["token"], [])
+                            if ts <= int(t) <= int(game_end_ts)
+                        ]
+                        limit_row["price_history"] = bool(points)
+                        resolved = num(exact_market["resolved"])
+                        if resolved is not None:
+                            if resolved >= 0.99:
+                                limit_row["settlement"] = "W"
+                            elif resolved <= 0.01:
+                                limit_row["settlement"] = "L"
+                            elif 0.45 <= resolved <= 0.55:
+                                limit_row["settlement"] = "P"
+                        for decimal_odds in (1.90, 1.95, 2.00):
+                            max_price = 1.0 / decimal_odds
+                            first_fill = next(
+                                ((pt, px) for pt, px in points if px <= max_price),
+                                None,
+                            )
+                            key_odds = f"{decimal_odds:.2f}"
+                            if first_fill:
+                                ft, fp = first_fill
+                                limit_row["fills"][key_odds] = {
+                                    "filled": True,
+                                    "fill_ts": ft,
+                                    "seconds_to_fill": max(0, int(ft - ts)),
+                                    "observed_price": fp,
+                                    "limit_price": max_price,
+                                }
+                            else:
+                                limit_row["fills"][key_odds] = {
+                                    "filled": False,
+                                    "limit_price": max_price,
+                                }
+                pregame_limit_calls.append(limit_row)
 
                 candidates: list[dict[str, Any]] = []
                 for m in markets:
@@ -463,6 +564,109 @@ def install(*, history: Any, ingest: Any) -> None:
                     f"games_with_spread={games_with_spread} records={len(records)}",
                     flush=True,
                 )
+
+        # Exact pregame-spread resting-limit audit (#20).
+        # A BUY limit at decimal odds X maps to max Polymarket share price 1/X.
+        # Historical prices-history is a minute-fidelity proxy, not executable ask/depth.
+        def _limit_summary(rows: list[dict[str, Any]], decimal_odds: float) -> dict[str, Any]:
+            key_odds = f"{decimal_odds:.2f}"
+            total = len(rows)
+            spread_defined = sum(1 for r in rows if r.get("pregame_spread") is not None)
+            market_found = sum(1 for r in rows if r.get("market_found"))
+            evaluable_rows = [
+                r for r in rows
+                if r.get("market_found") and r.get("price_history")
+                and r.get("settlement") in ("W", "L", "P")
+            ]
+            fills = [
+                r for r in evaluable_rows
+                if (r.get("fills") or {}).get(key_odds, {}).get("filled")
+            ]
+            wins = sum(1 for r in fills if r.get("settlement") == "W")
+            losses = sum(1 for r in fills if r.get("settlement") == "L")
+            pushes = sum(1 for r in fills if r.get("settlement") == "P")
+            settled_nonpush = wins + losses
+            threshold_pnl = wins * (decimal_odds - 1.0) - losses
+            observed_pnl = 0.0
+            fill_secs: list[int] = []
+            for r in fills:
+                fill = (r.get("fills") or {}).get(key_odds) or {}
+                px = num(fill.get("observed_price"))
+                if r.get("settlement") == "W" and px and px > 0:
+                    observed_pnl += (1.0 / px) - 1.0
+                elif r.get("settlement") == "L":
+                    observed_pnl -= 1.0
+                fill_secs.append(int(fill.get("seconds_to_fill") or 0))
+            fill_secs.sort()
+            median_s = None
+            if fill_secs:
+                mid = len(fill_secs) // 2
+                median_s = (
+                    fill_secs[mid]
+                    if len(fill_secs) % 2
+                    else (fill_secs[mid - 1] + fill_secs[mid]) / 2.0
+                )
+            by_quarter: dict[str, dict[str, Any]] = {}
+            for quarter in ("Q1", "Q2", "Q3", "Q4", "OT"):
+                qrows = [r for r in evaluable_rows if str(r.get("quarter") or "").upper().startswith(quarter)]
+                qfills = [r for r in qrows if (r.get("fills") or {}).get(key_odds, {}).get("filled")]
+                qw = sum(1 for r in qfills if r.get("settlement") == "W")
+                ql = sum(1 for r in qfills if r.get("settlement") == "L")
+                qp = sum(1 for r in qfills if r.get("settlement") == "P")
+                qpnl = qw * (decimal_odds - 1.0) - ql
+                by_quarter[quarter] = {
+                    "evaluable": len(qrows),
+                    "fills": len(qfills),
+                    "fill_pct": round(100.0 * len(qfills) / len(qrows), 2) if qrows else None,
+                    "wins": qw, "losses": ql, "pushes": qp,
+                    "pnl_units_threshold": round(qpnl, 2),
+                    "roi_pct_threshold": round(100.0 * qpnl / len(qfills), 2) if qfills else None,
+                }
+            return {
+                "decimal_odds": decimal_odds,
+                "limit_price_cents": round(100.0 / decimal_odds, 3),
+                "pw_calls": total,
+                "pregame_spread_defined": spread_defined,
+                "exact_pregame_market_found": market_found,
+                "evaluable_price_history": len(evaluable_rows),
+                "fills": len(fills),
+                "fill_pct_of_evaluable": round(100.0 * len(fills) / len(evaluable_rows), 2) if evaluable_rows else None,
+                "unique_games_filled": len({str(r.get("game_id")) for r in fills}),
+                "wins": wins, "losses": losses, "pushes": pushes,
+                "win_pct_ex_push": round(100.0 * wins / settled_nonpush, 2) if settled_nonpush else None,
+                "pnl_units_threshold": round(threshold_pnl, 2),
+                "roi_pct_threshold": round(100.0 * threshold_pnl / len(fills), 2) if fills else None,
+                "pnl_units_first_observed_proxy": round(observed_pnl, 2),
+                "roi_pct_first_observed_proxy": round(100.0 * observed_pnl / len(fills), 2) if fills else None,
+                "avg_seconds_to_fill": round(mean(fill_secs), 1) if fill_secs else None,
+                "median_seconds_to_fill": round(median_s, 1) if median_s is not None else None,
+                "by_quarter": by_quarter,
+            }
+
+        primary_limit = {
+            f"{odds:.2f}": _limit_summary(pregame_limit_calls, odds)
+            for odds in (1.90, 1.95, 2.00)
+        }
+        first_by_side: list[dict[str, Any]] = []
+        seen_limit_sides: set[tuple[str, str]] = set()
+        for row in sorted(
+            pregame_limit_calls,
+            key=lambda r: (int(r.get("call_ts") or 0), int(r.get("alert_id") or 0)),
+        ):
+            skey = (str(row.get("game_id") or ""), str(row.get("pick") or ""))
+            if skey in seen_limit_sides:
+                continue
+            seen_limit_sides.add(skey)
+            first_by_side.append(row)
+        dedup_limit = {
+            f"{odds:.2f}": _limit_summary(first_by_side, odds)
+            for odds in (1.90, 1.95, 2.00)
+        }
+        print("PW_PREGAME_LIMIT_BACKTEST " + json.dumps({
+            "method": "exact stored pregame spread; order rests from PW fire to last PBP timestamp; prices-history proxy",
+            "all_calls": primary_limit,
+            "dedup_first_game_team": dedup_limit,
+        }, sort_keys=True), flush=True)
 
         def filt(pred):
             return [r for r in records if pred(r)]
