@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, HttpUrl
 from polymarket import PublicClient, SecureClient
 from app.structured_logging import configure_logging, log_event
@@ -47,7 +47,7 @@ def auto_trading_enabled() -> bool:
 
 AUTO_TRADING = auto_trading_enabled()
 
-WATCH_HEALTH = {"last_started_at": None, "last_completed_at": None, "last_error": None, "cycles": 0}
+WATCH_HEALTH = {"loop_started_at": None, "last_started_at": None, "last_completed_at": None, "last_error": None, "cycles": 0}
 SIGNAL_SECRET = os.getenv("SIGNAL_SECRET", "")
 MAX_TRADE_USDC = Decimal(os.getenv("MAX_TRADE_USDC", "100"))
 MAX_AUTO_TRADE_USDC = Decimal(os.getenv("MAX_AUTO_TRADE_USDC", "25"))
@@ -453,6 +453,7 @@ def _process_watchlist_once() -> None:
 
 
 async def _watch_loop() -> None:
+    WATCH_HEALTH["loop_started_at"] = _now().isoformat()
     while True:
         try:
             await asyncio.to_thread(_process_watchlist_once)
@@ -460,6 +461,41 @@ async def _watch_loop() -> None:
             WATCH_HEALTH["last_error"] = f"{type(exc).__name__}: {exc}"
             log_event(logger, "watch_cycle_failed", stage="watch_loop", status="error", reason=WATCH_HEALTH["last_error"])
         await asyncio.sleep(AUTO_POLL_SECONDS)
+
+
+def _watch_health_snapshot(now: datetime | None = None) -> dict:
+    current = (now or _now()).astimezone(timezone.utc)
+    stale_after_seconds = max(30, AUTO_POLL_SECONDS * 3)
+
+    def parsed(key: str) -> datetime | None:
+        raw = WATCH_HEALTH.get(key)
+        if not raw:
+            return None
+        try:
+            value = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    loop_started = parsed("loop_started_at")
+    last_started = parsed("last_started_at")
+    last_completed = parsed("last_completed_at")
+    reference = last_completed or last_started or loop_started
+    age_seconds = None if reference is None else max(0.0, (current - reference).total_seconds())
+
+    # A task that has not started yet gets a short startup grace period. Once
+    # there is any watch-loop timestamp, missing progress beyond 3 poll
+    # intervals is considered unhealthy so Railway receives a failing healthcheck.
+    healthy = True if reference is None else age_seconds <= stale_after_seconds
+    return {
+        "healthy": bool(healthy),
+        "stale": not bool(healthy),
+        "stale_after_seconds": stale_after_seconds,
+        "age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
+        **dict(WATCH_HEALTH),
+    }
 
 
 @asynccontextmanager
@@ -480,12 +516,14 @@ app = FastAPI(title="Polymarket Auto Bot", version="0.3.0", lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    return {
-        "ok": True,
+    watch_health = _watch_health_snapshot()
+    payload = {
+        "ok": bool(watch_health["healthy"]),
         "version": "0.3.0",
         "live_trading": live_trading_enabled(),
         "auto_trading": auto_trading_enabled(),
-        "watch_loop": dict(WATCH_HEALTH),
+        "watch_loop_healthy": bool(watch_health["healthy"]),
+        "watch_loop": watch_health,
         "poll_seconds": AUTO_POLL_SECONDS,
         "max_trade_usdc": str(MAX_TRADE_USDC),
         "max_auto_trade_usdc": str(MAX_AUTO_TRADE_USDC),
@@ -494,6 +532,9 @@ def health():
         "max_spread": str(MAX_SPREAD),
         "block_political_auto": BLOCK_POLITICAL_AUTO,
     }
+    if not watch_health["healthy"]:
+        return JSONResponse(status_code=503, content=payload)
+    return payload
 
 
 @app.post("/prepare")
