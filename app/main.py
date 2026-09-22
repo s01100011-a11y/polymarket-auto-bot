@@ -122,6 +122,14 @@ def _check_geoblock() -> dict:
     r.raise_for_status()
     geo = r.json()
     if geo.get("blocked"):
+        log_event(
+            logger,
+            "geoblock_blocked",
+            level=logging.WARNING,
+            stage="geoblock",
+            status="blocked",
+            reason="location_blocked",
+        )
         raise HTTPException(
             status_code=451,
             detail=f"Polymarket trading is not available from this location ({geo.get('country')}/{geo.get('region')}).",
@@ -237,13 +245,37 @@ def _decimal(value) -> Decimal:
 def _risk_checks(intent: TradeIntent, spread: Decimal | None, *, auto: bool = False) -> None:
     cap = MAX_AUTO_TRADE_USDC if auto else MAX_TRADE_USDC
     if intent.budget_usdc > cap:
+        log_event(
+            logger,
+            "risk_check_failed",
+            level=logging.WARNING,
+            stage="risk",
+            reason="budget_cap",
+            budget_usdc=str(intent.budget_usdc),
+        )
         raise HTTPException(
             status_code=400,
             detail=f"Trade budget ${intent.budget_usdc} exceeds {'MAX_AUTO_TRADE_USDC' if auto else 'MAX_TRADE_USDC'}=${cap}.",
         )
     if intent.max_price > MAX_PRICE:
+        log_event(
+            logger,
+            "risk_check_failed",
+            level=logging.WARNING,
+            stage="risk",
+            reason="price_cap",
+            price=str(intent.max_price),
+        )
         raise HTTPException(status_code=400, detail=f"Limit price {intent.max_price} exceeds MAX_PRICE={MAX_PRICE}.")
     if spread is not None and spread > MAX_SPREAD:
+        log_event(
+            logger,
+            "risk_check_failed",
+            level=logging.WARNING,
+            stage="risk",
+            reason="spread_cap",
+            spread=str(spread),
+        )
         raise HTTPException(status_code=400, detail=f"Spread {spread} exceeds MAX_SPREAD={MAX_SPREAD}.")
 
 
@@ -259,6 +291,16 @@ def _quote(intent: TradeIntent, *, auto: bool = False) -> dict:
         spread = _decimal(client.get_spread(asset_id=asset_id))
 
     _risk_checks(intent, spread, auto=auto)
+    log_event(
+        logger,
+        "quote_ready",
+        level=logging.DEBUG,
+        stage="quote",
+        asset_id=str(asset_id),
+        price=str(buy_price),
+        spread=str(spread),
+        budget_usdc=str(intent.budget_usdc),
+    )
 
     best_ask = None
     ask_size = None
@@ -389,8 +431,10 @@ def _execute_limit(intent: TradeIntent, quote: dict, *, auto: bool, signal_id: s
 
 def _require_signal_secret(value: str | None) -> None:
     if not SIGNAL_SECRET:
+        log_event(logger, "signal_auth_failed", level=logging.ERROR, stage="auth", reason="secret_not_configured")
         raise HTTPException(status_code=503, detail="SIGNAL_SECRET is not configured.")
     if value is None or not secrets.compare_digest(value, SIGNAL_SECRET):
+        log_event(logger, "signal_auth_failed", level=logging.WARNING, stage="auth", reason="invalid_secret")
         raise HTTPException(status_code=401, detail="Invalid signal secret.")
 
 
@@ -535,6 +579,14 @@ def approve(trade_id: str, approval: Approval):
 def auto_execute(signal: AutoSignal, x_signal_secret: str | None = Header(default=None)):
     _require_signal_secret(x_signal_secret)
     _validate_auto_signal(signal)
+    log_event(
+        logger,
+        "signal_received",
+        stage="auto_execute",
+        signal_id=signal.signal_id,
+        budget_usdc=str(signal.budget_usdc),
+        price=str(signal.max_price),
+    )
     return _try_execute_signal(signal)
 
 
@@ -542,6 +594,14 @@ def auto_execute(signal: AutoSignal, x_signal_secret: str | None = Header(defaul
 def auto_watch(signal: AutoSignal, x_signal_secret: str | None = Header(default=None)):
     _require_signal_secret(x_signal_secret)
     _validate_auto_signal(signal)
+    log_event(
+        logger,
+        "signal_received",
+        stage="auto_watch",
+        signal_id=signal.signal_id,
+        budget_usdc=str(signal.budget_usdc),
+        price=str(signal.max_price),
+    )
 
     executions = _load(EXECUTIONS_FILE)
     if signal.signal_id in executions:

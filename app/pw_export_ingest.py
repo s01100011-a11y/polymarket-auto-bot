@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import http.client
 import json
+import logging
 import os
 import re
 import ssl
@@ -16,8 +17,11 @@ from typing import Any
 
 from fastapi import Depends
 
+from app.structured_logging import log_event
+
 _INSTALLED = False
 _THREAD: threading.Thread | None = None
+logger = logging.getLogger("polymarket_bot.pw_export")
 
 
 def _tailnet_https_json(
@@ -465,14 +469,23 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
             )
             if proc.returncode != 0:
                 detail = (proc.stderr or proc.stdout or "").strip().replace("\n", " ")[:180]
-                print(
-                    f"PW_EXPORT_TAILNET_WAIT peer={tailnet_peer} rc={proc.returncode} detail={detail}",
-                    flush=True,
+                log_event(
+                    logger,
+                    "pw_export_tailnet_wait",
+                    level=logging.WARNING,
+                    stage="pw_export",
+                    status="waiting",
+                    reason=detail or f"return_code_{proc.returncode}",
                 )
         except Exception as exc:
-            print(
-                f"PW_EXPORT_TAILNET_WAIT peer={tailnet_peer} error={type(exc).__name__}:{exc}",
-                flush=True,
+            log_event(
+                logger,
+                "pw_export_tailnet_wait",
+                level=logging.WARNING,
+                stage="pw_export",
+                status="waiting",
+                reason=type(exc).__name__,
+                exc_info=True,
             )
 
     def fetch_rows() -> tuple[list[dict[str, Any]], Any, str]:
