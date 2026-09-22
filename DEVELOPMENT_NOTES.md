@@ -1,3 +1,12 @@
+## 2026-09-22 — Core trading test suite (#7)
+
+- Added pytest coverage for manual/automatic risk caps, signal expiry/political blocking, daily-budget aggregation in the configured trading timezone, market selection/outcome resolution, geoblocking and signal-secret authentication.
+- Added watch-loop tests for expiry, successful execution, error recovery and execution deduplication.
+- Added API integration coverage for `/auto/execute`, `/auto/watch`, `/prepare` and `/approve/{trade_id}` with network/order execution mocked.
+- Added dashboard-auth tests for valid, invalid and missing credentials.
+- Added `requirements-dev.txt` with pytest and pytest-asyncio; production requirements remain unchanged.
+- All test storage is isolated to temporary paths and mocks; tests do not place Polymarket orders or require real credentials.
+
 ## 2026-09-21 — PW direct-feed recovery + Slack failover (#23)
 
 - **Incident:** A WNBA PW call was present in NBA Monitor history but never reached the Railway trading bot. Railway logs during the game showed continuous `PW_EXPORT_POLL_ERROR` TLS handshake timeouts to the private WNBA `/api/pw-export` endpoint.
