@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import time
@@ -18,8 +19,10 @@ from polymarket import PublicClient
 
 from app import dashboard
 from app import main as core
+from app.structured_logging import log_event
 
 app = dashboard.app
+logger = logging.getLogger("polymarket_bot.slack")
 
 SLACK_ALERTS_FILE = core.DATA_DIR / "slack_alerts.json"
 SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID", "").strip()
@@ -392,10 +395,14 @@ def _resolved_market_outcome(client: PublicClient, asset_id: str) -> dict[str, A
             ).iter_items()
         )
     except Exception as exc:
-        print(
-            f"MARKET_SETTLEMENT_LOOKUP_ERROR asset={asset_id} "
-            f"error={type(exc).__name__}:{exc}",
-            flush=True,
+        log_event(
+            logger,
+            "market_settlement_lookup_failed",
+            level=logging.ERROR,
+            stage="settlement",
+            asset_id=str(asset_id),
+            reason=type(exc).__name__,
+            exc_info=True,
         )
         return None
 
@@ -497,9 +504,14 @@ def _live_fill_snapshot(client: PublicClient, wallet: str, rec: dict[str, Any], 
         return None
     notional = sum((size * price for size, price, _ in matched), Decimal("0"))
     avg = notional / matched_size
-    print(
-        f"LIVE_FILL_RECONCILED trade={rec.get('id')} shares={matched_size} avg={avg} cost={notional} txs={len(set(tx for _, _, tx in matched if tx))}",
-        flush=True,
+    log_event(
+        logger,
+        "live_fill_reconciled",
+        stage="reconcile",
+        trade_id=str(rec.get("id") or ""),
+        status="filled",
+        price=str(avg),
+        budget_usdc=str(notional),
     )
     return {
         "shares": matched_size,
