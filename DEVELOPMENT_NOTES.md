@@ -1,3 +1,12 @@
+## 2026-09-22 — Structured production logging (#1)
+
+- Added JSON structured logging with UTC timestamps, severity, logger name and common trading context fields.
+- Added Railway-configurable `LOG_LEVEL` with DEBUG/INFO/WARNING/ERROR/CRITICAL support and INFO fallback.
+- Added structured events for signal receipt/auth failures, geoblock/risk rejections, quote diagnostics, watch-loop cycles, live-auth startup checks, Slack fill reconciliation and PW-export transport warnings.
+- Replaced production-path startup/reconciliation `print()` calls in the touched runtime modules with logger events; research/report CLI output remains stdout by design.
+- Added unit coverage for log-level parsing, handler configuration and structured event serialization.
+- No trading limits, live-mode switches, secrets or Railway deployment settings were changed.
+
 ## 2026-09-21 — PW direct-feed recovery + Slack failover (#23)
 
 - **Incident:** A WNBA PW call was present in NBA Monitor history but never reached the Railway trading bot. Railway logs during the game showed continuous `PW_EXPORT_POLL_ERROR` TLS handshake timeouts to the private WNBA `/api/pw-export` endpoint.
