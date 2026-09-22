@@ -1,3 +1,10 @@
+## 2026-09-22 — Runtime LIVE_TRADING consistency (#2)
+
+- Removed the cached module-level `LIVE_TRADING` value from `app/main.py`; `live_trading_enabled()` is now the single runtime source of truth.
+- Replaced stale `core.LIVE_TRADING` reads in the dashboard, live test endpoints, wallet dashboard, Termux executor dashboard and live-test dashboard with `core.live_trading_enabled()`.
+- Added regression coverage that verifies the switch changes without a module reload, that no cached `main.LIVE_TRADING` constant remains, and that active modules no longer reference `core.LIVE_TRADING`.
+- No Railway variables, credentials, risk limits, sizing rules or deployment settings were changed.
+
 ## 2026-09-21 — PW direct-feed recovery + Slack failover (#23)
 
 - **Incident:** A WNBA PW call was present in NBA Monitor history but never reached the Railway trading bot. Railway logs during the game showed continuous `PW_EXPORT_POLL_ERROR` TLS handshake timeouts to the private WNBA `/api/pw-export` endpoint.
