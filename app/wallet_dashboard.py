@@ -33,7 +33,7 @@ def _wallet_snapshot() -> dict:
             "usdc_balance": str(balance.quantize(Decimal("0.01"))),
             "raw_balance_base_units": str(int(raw_balance)),
             "portfolio_value": str(portfolio_value.quantize(Decimal("0.01"))) if portfolio_value is not None else None,
-            "live_trading": core.LIVE_TRADING,
+            "live_trading": core.live_trading_enabled(),
             "auto_trading": core.auto_trading_enabled(),
             "slack_paper_only": base.ingest.SLACK_PAPER_ONLY,
         }

@@ -39,7 +39,6 @@ def live_trading_enabled() -> bool:
     """Railway LIVE_TRADING is the authoritative live-mode switch."""
     return os.getenv("LIVE_TRADING", "false").strip().lower() in {"1", "true", "yes", "on"}
 
-LIVE_TRADING = live_trading_enabled()
 
 def auto_trading_enabled() -> bool:
     """Railway AUTO_TRADING is the authoritative automation switch."""
