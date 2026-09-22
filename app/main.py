@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import secrets
@@ -10,7 +9,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
-from threading import Lock
 from typing import Literal
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -22,6 +20,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, HttpUrl
 from polymarket import PublicClient, SecureClient
 from app.structured_logging import configure_logging, log_event
+from app.storage import SQLiteStateStore
 
 load_dotenv()
 configure_logging()
@@ -33,7 +32,11 @@ DATA_DIR.mkdir(exist_ok=True)
 PENDING_FILE = DATA_DIR / "pending.json"
 WATCH_FILE = DATA_DIR / "watchlist.json"
 EXECUTIONS_FILE = DATA_DIR / "executions.json"
-FILE_LOCK = Lock()
+STATE_DB_FILE = Path(os.getenv("STATE_DB_PATH", str(DATA_DIR / "state.sqlite3")))
+STATE_STORE = SQLiteStateStore(STATE_DB_FILE)
+# Import any pre-cutover JSON state once. Files remain untouched as rollback
+# evidence, but all reads/writes below use SQLite after this point.
+STATE_STORE.migrate_many(DATA_DIR.glob("*.json"))
 
 def live_trading_enabled() -> bool:
     """Railway LIVE_TRADING is the authoritative live-mode switch."""
@@ -59,31 +62,12 @@ TRADING_TIMEZONE = ZoneInfo(os.getenv("TRADING_TIMEZONE", "Asia/Kuala_Lumpur"))
 BLOCK_POLITICAL_AUTO = os.getenv("BLOCK_POLITICAL_AUTO", "true").lower() == "true"
 
 
-def _read_json(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text())
-    except json.JSONDecodeError:
-        return {}
-
-
-def _write_json(path: Path, data: dict) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, default=str))
-    tmp.replace(path)
-
-
 def _load(path: Path) -> dict:
-    with FILE_LOCK:
-        return _read_json(path)
+    return STATE_STORE.load(path)
 
 
 def _save(path: Path, data: dict) -> None:
-    with FILE_LOCK:
-        _write_json(path, data)
-
-
+    STATE_STORE.save(path, data)
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
