@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import secrets
 import time
@@ -14,11 +15,13 @@ from pydantic import BaseModel, Field
 from polymarket import PublicClient, SecureClient
 
 from app import slack_dashboard_v2 as base
+from app.structured_logging import log_event
 
 app = base.app
 core = base.core
 dashboard = base.dashboard
 ingest = base.ingest
+logger = logging.getLogger("polymarket_bot.live_trading")
 
 LIVE_TEST_MAX_USDC = Decimal(os.getenv("LIVE_TEST_MAX_USDC", "5"))
 LIVE_TEST_FILL_WAIT_SECONDS = max(2, min(15, int(os.getenv("LIVE_TEST_FILL_WAIT_SECONDS", "6"))))
@@ -435,6 +438,19 @@ dashboard._dashboard_snapshot = _snapshot_with_sell_rows
 if os.getenv("POLYMARKET_PRIVATE_KEY", "").strip() and os.getenv("POLYMARKET_DEPOSIT_WALLET", "").strip():
     try:
         probe = _auth_probe()
-        print(f"POLYMARKET_AUTH_CHECK OK wallet={probe['wallet']} wallet_type={probe['wallet_type']}", flush=True)
+        log_event(
+            logger,
+            "polymarket_auth_check",
+            stage="startup",
+            status="ok",
+        )
     except Exception as exc:
-        print(f"POLYMARKET_AUTH_CHECK FAILED {type(exc).__name__}: {exc}", flush=True)
+        log_event(
+            logger,
+            "polymarket_auth_check",
+            level=logging.ERROR,
+            stage="startup",
+            status="error",
+            reason=type(exc).__name__,
+            exc_info=True,
+        )
