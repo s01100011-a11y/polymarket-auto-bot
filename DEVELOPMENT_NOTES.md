@@ -1,3 +1,11 @@
+## 2026-09-22 — Watch-loop health monitoring (#3)
+
+- Added explicit watch-loop startup, last-started, last-completed, error and cycle tracking to the health model.
+- `/health` now calculates staleness using three polling intervals (minimum 30 seconds) instead of always returning `ok: true`.
+- A stale or hung watch loop returns HTTP 503 with `watch_loop_healthy=false`, allowing Railway's configured health check to detect and restart an unhealthy service.
+- Added regression tests for startup grace, recent cycles, stale cycles, a hung first cycle and the HTTP 503 health response.
+- No trading, risk, sizing, credentials or Railway deployment configuration was changed.
+
 ## 2026-09-21 — PW direct-feed recovery + Slack failover (#23)
 
 - **Incident:** A WNBA PW call was present in NBA Monitor history but never reached the Railway trading bot. Railway logs during the game showed continuous `PW_EXPORT_POLL_ERROR` TLS handshake timeouts to the private WNBA `/api/pw-export` endpoint.
