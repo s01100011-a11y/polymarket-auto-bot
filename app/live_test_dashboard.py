@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import Depends, HTTPException
 
 from app import wallet_dashboard as base
 from app import live_trading
+from app.structured_logging import log_event
 
 app = base.app
 dashboard = base.dashboard
 core = base.core
+logger = logging.getLogger("polymarket_bot.live_test")
 
 
 # Hard-lock the protected live-test BUY path to sports moneyline markets.
@@ -133,4 +137,4 @@ if(ltEl('ltSell'))ltEl('ltSell').addEventListener('click',sellLiveTest);
 
 
 _install_live_test_ui()
-print("LIVE_TEST_MONEYLINE_LOCK enabled max_usdc=" + str(live_trading.LIVE_TEST_MAX_USDC), flush=True)
+log_event(\n    logger,\n    "live_test_moneyline_lock",\n    stage="startup",\n    status="enabled",\n    budget_usdc=str(live_trading.LIVE_TEST_MAX_USDC),\n)
