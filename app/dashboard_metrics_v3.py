@@ -36,18 +36,9 @@ def _d(value: Any, default: str = "0") -> Decimal:
 
 
 def _wallet_for_reconciliation() -> str | None:
-    # Railway keeps the full deposit/funder address. The Termux heartbeat stores
-    # a masked display value, which must never be sent back to Polymarket APIs.
     wallet = os.getenv("POLYMARKET_DEPOSIT_WALLET", "").strip()
     if wallet and "…" not in wallet and wallet.startswith("0x") and len(wallet) == 42:
         return wallet
-    try:
-        state = remote._state()
-        candidate = str(state.get("wallet") or "").strip()
-        if candidate and "…" not in candidate and candidate.startswith("0x") and len(candidate) == 42:
-            return candidate
-    except Exception:
-        pass
     return None
 
 
@@ -63,7 +54,7 @@ def _full_wallet_positions(wallet: str) -> dict[str, Any]:
 
 
 def _executor_confirmed_closed_trade_ids() -> set[str]:
-    """Return trades for which Termux already confirmed the tracked wallet shares are zero."""
+    """Return trades for which Railway already confirmed the tracked wallet shares are zero."""
     marker = "Wallet no longer holds the tracked test shares"
     try:
         queue = remote._queue_load()
@@ -96,7 +87,7 @@ def _reconcile_live_positions(force: bool = False) -> dict[str, Any]:
         active = [
             rec
             for rec in executions.values()
-            if rec.get("source") == "termux_executor"
+            if rec.get("source") in {"railway_executor", "termux_executor", "slack_live"}
             and not rec.get("paper")
             and rec.get("status") in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}
         ]
@@ -119,7 +110,7 @@ def _reconcile_live_positions(force: bool = False) -> dict[str, Any]:
             rec["wallet_reconciled_at"] = stamp
             rec["wallet_position_size"] = "0"
             rec["reconciliation_note"] = (
-                "Termux checked the Polymarket wallet before SELL and found zero tracked shares. "
+                "Railway checked the Polymarket wallet before SELL and found zero tracked shares. "
                 "The position was already closed outside this SELL request; exit price and realized P/L remain unknown."
             )
             changed += 1
@@ -136,7 +127,7 @@ def _reconcile_live_positions(force: bool = False) -> dict[str, Any]:
                 _RECONCILE_LAST = now
             return {
                 "ok": bool(changed),
-                "reason": "Termux wallet is not known yet",
+                "reason": "Railway wallet is not configured",
                 "checked": len(active) - len(unresolved),
                 "changed": changed,
             }
