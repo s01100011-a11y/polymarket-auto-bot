@@ -62,6 +62,7 @@ def _executor_ready() -> tuple[bool, dict[str, Any]]:
 
 
 def _active_or_pending(asset_id: str, market_url: str, outcome: str) -> bool:
+    remote._expire_stale_buys_persisted()
     executions = core._load(core.EXECUTIONS_FILE)
     for rec in executions.values():
         if rec.get("paper") or rec.get("source") != "slack_live":
@@ -91,6 +92,16 @@ _PAPER_HANDLER = ingest._paper_trade_from_alert
 
 
 def _prepare_remote_buy(payload: dict[str, Any]) -> dict[str, Any]:
+    if core.auto_trading_enabled():
+        ready, state = _executor_ready()
+
+        if not ready:
+            if state.get("geo_blocked"):
+                raise ValueError("Termux executor is geoblocked")
+
+            raise ValueError(
+                "Termux executor is offline; live BUY was not queued"
+            )
     req_id = f"exec-{uuid.uuid4().hex[:14]}"
     record = {
         "id": req_id,

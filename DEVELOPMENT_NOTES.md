@@ -1,3 +1,16 @@
+## 2026-09-23 — Executor offline/stale BUY protection (#29)
+
+- Incident: automatic LIVE BUYs were left PENDING while the Termux executor was offline.
+- Root cause: automatic BUY creation did not require a live executor heartbeat and queued BUYs had no expiry.
+- Fix: unattended BUYs now fail closed when Termux is offline/geoblocked.
+- Queued BUYs expire after EXECUTOR_BUY_TTL_SECONDS, default 180 seconds.
+- Expired BUYs cannot be picked up later when the executor reconnects.
+- Active leases are preserved; late executor results remain reconcilable.
+- Stale queue entries are expired on startup and before executor pickup/status display.
+- No change to SELL handling, stake sizing, market filters, or Polymarket credentials.
+- Tests: executor queue safety tests, runtime switch tests, compileall, diff check.
+- Issue: #29.
+
 ## 2026-09-21 — PW direct-feed recovery + Slack failover (#23)
 
 - **Incident:** A WNBA PW call was present in NBA Monitor history but never reached the Railway trading bot. Railway logs during the game showed continuous `PW_EXPORT_POLL_ERROR` TLS handshake timeouts to the private WNBA `/api/pw-export` endpoint.
