@@ -46,19 +46,8 @@ def _save_mode(auto_prepare_enabled: bool, stake_usdc: Decimal) -> dict[str, Any
 
 
 def _executor_ready() -> tuple[bool, dict[str, Any]]:
-    state = remote._state()
-    last_seen = float(state.get("last_seen_unix") or 0)
-    connected = bool(
-        state.get("token_hash")
-        and last_seen
-        and time.time() - last_seen <= remote.CONNECTED_SECONDS
-    )
-    ready = bool(
-        remote.REMOTE_EXECUTION_ENABLED
-        and connected
-        and not state.get("geo_blocked")
-    )
-    return ready, state
+    state = remote._railway_execution_status()
+    return bool(state.get("ready")), state
 
 
 def _active_or_pending(asset_id: str, market_url: str, outcome: str) -> bool:
@@ -93,20 +82,16 @@ _PAPER_HANDLER = ingest._paper_trade_from_alert
 
 def _prepare_remote_buy(payload: dict[str, Any]) -> dict[str, Any]:
     if core.auto_trading_enabled():
-        ready, state = _executor_ready()
+        executed = remote._enqueue("BUY", payload)
+        if executed.get("status") == "FAILED":
+            raise ValueError(str(executed.get("error") or "Railway BUY failed"))
+        return executed
 
-        if not ready:
-            if state.get("geo_blocked"):
-                raise ValueError("Termux executor is geoblocked")
-
-            raise ValueError(
-                "Termux executor is offline; live BUY was not queued"
-            )
     req_id = f"exec-{uuid.uuid4().hex[:14]}"
     record = {
         "id": req_id,
         "action": "BUY",
-        "status": "PENDING" if core.auto_trading_enabled() else "WAITING_APPROVAL",
+        "status": "WAITING_APPROVAL",
         "payload": payload,
         "created_at": ingest._now_iso(),
         "created_unix": time.time(),
@@ -185,7 +170,8 @@ def _slack_trade_handler(
         "id": trade_id,
         "trade_id": trade_id,
         "paper": False,
-        "queued": bool(core.auto_trading_enabled()),
+        "queued": not bool(core.auto_trading_enabled()),
+        "executed_on_railway": bool(core.auto_trading_enabled()),
         "prepared": True,
         "requires_approval": not bool(core.auto_trading_enabled()),
         "request_id": queued["id"],
@@ -209,12 +195,7 @@ ingest.SLACK_PAPER_ONLY = not _mode()["auto_prepare_enabled"]
 def slack_trading_mode_get():
     mode = _mode()
     ready, state = _executor_ready()
-    last_seen = float(state.get("last_seen_unix") or 0)
-    connected = bool(
-        state.get("token_hash")
-        and last_seen
-        and time.time() - last_seen <= remote.CONNECTED_SECONDS
-    )
+    connected = bool(state.get("ready"))
     return {
         **mode,
         "paper_only": not mode["auto_prepare_enabled"],
@@ -223,6 +204,7 @@ def slack_trading_mode_get():
         "executor_geo_blocked": state.get("geo_blocked"),
         "executor_country": state.get("geo_country"),
         "executor_region": state.get("geo_region"),
+        "executor_backend": "railway",
         "max_stake_usdc": str(core.MAX_AUTO_TRADE_USDC),
         "moneyline_only": True,
         "duplicate_position_guard": True,
@@ -233,6 +215,7 @@ def slack_trading_mode_get():
 
 @app.get("/api/slack/pending-live", dependencies=[Depends(dashboard._auth)])
 def slack_pending_live():
+    remote._expire_stale_buys_persisted()
     queue = remote._queue_load()
     rows = []
     for rec in queue.values():
@@ -254,11 +237,6 @@ def slack_pending_live():
 
 @app.post("/api/slack/approve-live/{request_id}", dependencies=[Depends(dashboard._auth)])
 def slack_approve_live(request_id: str):
-    ready, state = _executor_ready()
-    if not ready:
-        if state.get("geo_blocked"):
-            raise HTTPException(status_code=409, detail="Termux executor is geoblocked")
-        raise HTTPException(status_code=409, detail="Termux executor is not connected")
     with remote._QUEUE_LOCK:
         queue = remote._queue_load()
         rec = queue.get(request_id)
@@ -269,7 +247,20 @@ def slack_approve_live(request_id: str):
         rec["updated_at"] = ingest._now_iso()
         queue[request_id] = rec
         remote._queue_save(queue)
-    return {"ok": True, "request_id": request_id, "status": "PENDING"}
+
+    executed = remote._execute_existing(request_id, approved=True)
+    if executed.get("status") == "FAILED":
+        raise HTTPException(
+            status_code=409,
+            detail=str(executed.get("error") or "Railway BUY failed"),
+        )
+    return {
+        "ok": True,
+        "request_id": request_id,
+        "status": executed.get("status"),
+        "result": executed.get("result"),
+        "execution_backend": "railway",
+    }
 
 
 @app.post("/api/slack/reject-live/{request_id}", dependencies=[Depends(dashboard._auth)])
@@ -321,7 +312,7 @@ def _install_slack_live_controls() -> None:
         <button type="button" class="mode-paper-btn" id="slackPaperBtn">PAPER</button>
         <button type="button" class="mode-live-btn" id="slackLiveBtn">ENABLE AUTO-PREPARE</button>
       </div>
-      <div class="slack-mode-note">AUTO-PREPARE builds qualifying Predicted Winner moneyline orders from Slack alerts and places them in the approval queue. The Configuration → Auto trade cap is the maximum stake. No real order is sent to the Termux executor until you approve that specific order.</div><div id="slackPendingApprovals" class="slack-pending"></div>
+      <div class="slack-mode-note">AUTO-PREPARE builds qualifying Predicted Winner moneyline orders from Slack alerts and places them in the approval queue. The Configuration → Auto trade cap is the maximum stake. When approval is required, the order stays in Railway and is executed directly by Railway only after you approve it. No phone/Termux worker is used.</div><div id="slackPendingApprovals" class="slack-pending"></div>
     </div>
 """
     html = html.replace('<form id="settingsForm">', box + '<form id="settingsForm">', 1)
@@ -340,7 +331,7 @@ async function loadSlackTradingMode(){
   const mode=document.getElementById('slackTradingMode'),state=document.getElementById('slackExecutorState'),stake=document.getElementById('slackLiveStake');
   mode.textContent=d.railway_override?'LIVE AUTO · RAILWAY OVERRIDE':(live?'LIVE AUTO-PREPARE · APPROVAL REQUIRED':'PAPER ONLY');
   mode.className='slack-mode-value '+(live?'red':'green');
-  state.textContent=(d.executor_connected?'Termux connected':'Termux offline')+(d.executor_geo_blocked?' · BLOCKED':'')+(d.executor_country?' · '+d.executor_country+'/'+(d.executor_region||''):'');
+  state.textContent=(d.executor_connected?'Railway direct ready':'Railway direct unavailable')+(d.executor_geo_blocked?' · BLOCKED':'')+(d.executor_country?' · '+d.executor_country+'/'+(d.executor_region||''):'');
   try{const pr=await fetch('/api/slack/pending-live',{cache:'no-store'}),pd=await pr.json();const box=document.getElementById('slackPendingApprovals');const rows=(pd.pending||[]);box.innerHTML=rows.length?'<div class="label" style="margin-bottom:5px">Awaiting approval</div>'+rows.map(x=>`<div class="slack-pending-row"><div><b>${x.outcome||'Order'}</b><div class="muted">${Number(x.budget_usdc||0).toFixed(2)} · max ${Number(x.max_price||0).toFixed(3)}</div></div><div class="slack-pending-actions"><button class="slack-approve-btn" data-slack-approve="${x.request_id}">APPROVE</button><button class="slack-reject-btn" data-slack-reject="${x.request_id}">REJECT</button></div></div>`).join(''):''}catch(_e){}
   if(stake&&!stake.dataset.dirty)stake.value=d.stake_usdc;
   document.getElementById('slackStakeMax').textContent='$'+Number(d.max_stake_usdc).toFixed(2);
