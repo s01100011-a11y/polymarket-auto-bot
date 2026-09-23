@@ -1,3 +1,16 @@
+## 2026-09-23 — Railway-only live execution; Termux retired (#31)
+
+- **Architecture:** Live Polymarket BUY/SELL orders now execute directly inside the Railway service using the configured `POLYMARKET_PRIVATE_KEY` and `POLYMARKET_DEPOSIT_WALLET`.
+- **No phone dependency:** Remote pairing, heartbeat, polling, and result-callback endpoints are retired with HTTP 410 responses. The legacy Termux scripts are hard-stop stubs.
+- **Automatic PW/Slack trades:** With `AUTO_TRADING=true`, qualifying BUYs execute immediately on Railway instead of waiting for a remote worker.
+- **Approval mode:** Prepared live BUYs remain in Railway storage and execute on Railway only after approval; stale approvals still expire.
+- **SELLs:** Dashboard live SELL actions execute directly on Railway and keep duplicate/reconciliation protections.
+- **Risk controls retained:** max stake, daily auto budget, max price, max spread, moneyline-only restriction, duplicate-position guard, and Polymarket's geoblock check remain fail-closed.
+- **Compatibility:** Existing dashboard `/api/executor/request-*` and status routes remain as a Railway-local facade so the UI does not break.
+- **Telegram bridge:** Verified `telegram-chatgpt-bridge` already runs Telethon directly on its Railway service with `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and `TELEGRAM_SESSION`; repository search found no Termux or Tailscale runtime dependency.
+- **Deployment note:** Railway itself must pass Polymarket's location check before real orders can execute. This change does not bypass that check.
+- **Issue:** #31.
+
 ## 2026-09-23 — Executor offline/stale BUY protection (#29)
 
 - Incident: automatic LIVE BUYs were left PENDING while the Termux executor was offline.
