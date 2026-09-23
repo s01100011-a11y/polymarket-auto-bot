@@ -30,6 +30,15 @@ _QUEUE_LOCK = threading.Lock()
 PAIR_TTL_SECONDS = 1800
 LEASE_SECONDS = 20
 CONNECTED_SECONDS = 60
+EXECUTOR_BUY_TTL_SECONDS = max(
+    30,
+    int(
+        os.getenv(
+            "EXECUTOR_BUY_TTL_SECONDS",
+            str(getattr(ingest, "SLACK_MAX_ALERT_AGE_SECONDS", 180)),
+        )
+    ),
+)
 MAX_QUEUE_ITEMS = 500
 
 
@@ -216,9 +225,95 @@ def _queue_save(data: dict[str, Any]) -> None:
     core._save(EXECUTOR_QUEUE_FILE, data)
 
 
+def _expire_stale_buys(
+    data: dict[str, Any],
+    *,
+    now: float | None = None,
+) -> list[str]:
+    """Fail stale BUYs before they can be picked up or retried late."""
+    current = time.time() if now is None else float(now)
+    expired_ids: list[str] = []
+
+    for rec in data.values():
+        if rec.get("action") != "BUY":
+            continue
+
+        status = str(rec.get("status") or "")
+        if status not in {"PENDING", "LEASED"}:
+            continue
+
+        created = float(rec.get("created_unix") or 0)
+        if not created or current - created <= EXECUTOR_BUY_TTL_SECONDS:
+            continue
+
+        lease_until = float(rec.get("lease_until_unix") or 0)
+
+        # Do not invalidate a BUY that is still actively leased.
+        if status == "LEASED" and lease_until > current:
+            continue
+
+        stamp = _now_iso()
+        rec["status"] = "FAILED"
+        rec["expired_at"] = stamp
+        rec["updated_at"] = stamp
+        rec.pop("lease_until_unix", None)
+
+        if status == "PENDING":
+            rec["error"] = (
+                f"BUY expired after {EXECUTOR_BUY_TTL_SECONDS}s before executor pickup; "
+                "no order was submitted"
+            )
+        else:
+            rec["error"] = (
+                f"BUY executor lease expired after {EXECUTOR_BUY_TTL_SECONDS}s without a result; "
+                "automatic late retry was blocked. Reconcile the wallet before retrying"
+            )
+
+        expired_ids.append(str(rec.get("id") or ""))
+
+    return [request_id for request_id in expired_ids if request_id]
+
+
+def _expire_stale_buys_persisted() -> list[str]:
+    with _QUEUE_LOCK:
+        data = _queue_load()
+        expired = _expire_stale_buys(data)
+        if expired:
+            _queue_save(data)
+
+    if expired:
+        print(
+            f"EXECUTOR_EXPIRED_BUYS count={len(expired)} ids={','.join(expired)}",
+            flush=True,
+        )
+
+    return expired
+
+
 def _enqueue(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not REMOTE_EXECUTION_ENABLED:
         raise HTTPException(status_code=409, detail="Remote execution is disabled")
+    if action == "BUY":
+        state = _state()
+        last_seen = float(state.get("last_seen_unix") or 0)
+
+        connected = bool(
+            state.get("token_hash")
+            and last_seen
+            and time.time() - last_seen <= CONNECTED_SECONDS
+        )
+
+        if state.get("geo_blocked"):
+            raise HTTPException(
+                status_code=409,
+                detail="Termux executor is geoblocked",
+            )
+
+        if not connected:
+            raise HTTPException(
+                status_code=409,
+                detail="Termux executor is offline; BUY was not queued",
+            )
     req_id = f"exec-{uuid.uuid4().hex[:14]}"
     record = {
         "id": req_id,
@@ -306,6 +401,7 @@ def _executor_event(rec: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/executor/recent-actions", dependencies=[Depends(dashboard._auth)])
 def recent_executor_actions(limit: int = 12):
+    _expire_stale_buys_persisted()
     limit = max(1, min(50, int(limit)))
     data = _queue_load()
     ordered = sorted(
@@ -412,6 +508,7 @@ def request_sell(trade_id: str):
 
 @app.get("/api/executor/request-status/{request_id}", dependencies=[Depends(dashboard._auth)])
 def request_status(request_id: str):
+    _expire_stale_buys_persisted()
     rec = _queue_load().get(request_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Unknown executor request")
@@ -430,6 +527,11 @@ def executor_next(_: dict[str, Any] = Depends(_executor_auth)):
     now = time.time()
     with _QUEUE_LOCK:
         data = _queue_load()
+
+        expired = _expire_stale_buys(data, now=now)
+        if expired:
+            _queue_save(data)
+
         candidates = []
         for rec in data.values():
             status = rec.get("status")
@@ -586,7 +688,10 @@ def executor_result(request_id: str, body: ExecutorResult, _: dict[str, Any] = D
         rec = data.get(request_id)
         if not rec:
             raise HTTPException(status_code=404, detail="Unknown executor request")
-        if rec.get("status") in {"DONE", "FAILED"}:
+        if rec.get("status") == "DONE" or (
+            rec.get("status") == "FAILED"
+            and not rec.get("expired_at")
+        ):
             return {"ok": True, "duplicate": True}
         result = body.result or {}
         already_closed = bool(
@@ -704,6 +809,7 @@ remoteStatus();setInterval(remoteStatus,3000);
     dashboard.DASHBOARD_HTML = html
 
 
+_expire_stale_buys_persisted()
 _install_remote_executor_ui()
 try:
     _recent_queue = sorted(
