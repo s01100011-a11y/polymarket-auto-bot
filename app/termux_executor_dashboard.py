@@ -22,8 +22,11 @@ dashboard = base.dashboard
 core = base.core
 ingest = live_trading.ingest
 
-REMOTE_EXECUTION_ENABLED = os.getenv("REMOTE_EXECUTION_ENABLED", "true").lower() == "true"
+RAILWAY_EXECUTION_ENABLED = os.getenv("RAILWAY_EXECUTION_ENABLED", "true").lower() == "true"
+# Compatibility alias for older modules. Execution is local to Railway.
+REMOTE_EXECUTION_ENABLED = RAILWAY_EXECUTION_ENABLED
 REMOTE_MAX_USDC = Decimal(os.getenv("REMOTE_MAX_USDC", "5"))
+EXECUTION_BACKEND = "railway"
 EXECUTOR_QUEUE_FILE = core.DATA_DIR / "termux_executor_queue.json"
 EXECUTOR_STATE_FILE = core.DATA_DIR / "termux_executor_state.json"
 _QUEUE_LOCK = threading.Lock()
@@ -110,93 +113,87 @@ def _executor_auth(authorization: str = Header(default="")) -> dict[str, Any]:
 
 @app.post("/api/executor/pair")
 def executor_pair(req: PairRequest):
-    code, state = _ensure_pair_code()
-    if state.get("token_hash"):
-        raise HTTPException(status_code=409, detail="An executor is already paired")
-    if not code or not secrets.compare_digest(req.code.strip(), code):
-        raise HTTPException(status_code=401, detail="Invalid pairing code")
-    if float(state.get("pair_expires_unix") or 0) <= time.time():
-        raise HTTPException(status_code=401, detail="Pairing code expired")
-    token = secrets.token_urlsafe(40)
-    state.pop("pair_code", None)
-    state.pop("pair_expires_unix", None)
-    state["token_hash"] = _token_hash(token)
-    state["paired_at"] = _now_iso()
-    state["worker_name"] = req.name
-    state["last_seen_unix"] = time.time()
-    state["last_seen_at"] = _now_iso()
-    _save_state(state)
-    return {"ok": True, "token": token, "worker_name": req.name}
+    raise HTTPException(
+        status_code=410,
+        detail="Remote executor pairing is retired; Railway executes orders directly",
+    )
 
 
 @app.post("/api/executor/unpair", dependencies=[Depends(dashboard._auth)])
 def executor_unpair():
-    _save_state({})
-    code, _ = _ensure_pair_code()
-    return {"ok": True, "pair_code": code}
+    raise HTTPException(
+        status_code=410,
+        detail="Remote executor pairing is retired; Railway executes orders directly",
+    )
 
 
 @app.get("/api/executor/status", dependencies=[Depends(dashboard._auth)])
 def executor_status():
-    code, state = _ensure_pair_code()
-    last_seen = float(state.get("last_seen_unix") or 0)
-    paired = bool(state.get("token_hash"))
+    state = _railway_execution_status()
     return {
-        "enabled": REMOTE_EXECUTION_ENABLED,
-        "paired": paired,
-        "connected": bool(paired and last_seen and time.time() - last_seen <= CONNECTED_SECONDS),
-        "pair_code": code,
-        "pair_expires_unix": state.get("pair_expires_unix"),
-        "worker_name": state.get("worker_name"),
-        "last_seen_at": state.get("last_seen_at"),
-        "wallet": state.get("wallet"),
-        "wallet_type": state.get("wallet_type"),
-        "usdc_balance": state.get("usdc_balance"),
-        "portfolio_value": state.get("portfolio_value"),
-        "geo_country": state.get("geo_country"),
-        "geo_region": state.get("geo_region"),
-        "geo_blocked": state.get("geo_blocked"),
-        "worker_status": state.get("status"),
+        **state,
+        "pair_code": None,
+        "pair_expires_unix": None,
+        "last_seen_at": _now_iso(),
+        "wallet_type": "RAILWAY_SECURE_CLIENT" if state.get("configured") else None,
+        "usdc_balance": None,
+        "portfolio_value": None,
+        "worker_status": state.get("error") or ("ready" if state.get("ready") else "not ready"),
         "remote_max_usdc": str(core.MAX_AUTO_TRADE_USDC),
-        "railway_live_trading": core.LIVE_TRADING,
+        "railway_live_trading": core.live_trading_enabled(),
     }
 
 
 @app.post("/api/executor/heartbeat")
-def executor_heartbeat(req: Heartbeat, _: dict[str, Any] = Depends(_executor_auth)):
-    state = _state()
-    state.update({
-        "worker_name": req.name,
-        "last_seen_unix": time.time(),
-        "last_seen_at": _now_iso(),
-        "wallet": req.wallet,
-        "wallet_type": req.wallet_type,
-        "usdc_balance": req.usdc_balance,
-        "portfolio_value": req.portfolio_value,
-        "geo_country": req.geo_country,
-        "geo_region": req.geo_region,
-        "geo_blocked": req.geo_blocked,
-        "status": req.status,
-    })
-    _save_state(state)
-    return {"ok": True}
+def executor_heartbeat(req: Heartbeat):
+    raise HTTPException(
+        status_code=410,
+        detail="Remote executor heartbeat is retired; Railway executes orders directly",
+    )
 
 
 @app.get("/api/executor/wallet", dependencies=[Depends(dashboard._auth)])
 def executor_wallet():
-    state = _state()
-    last_seen = float(state.get("last_seen_unix") or 0)
-    connected = bool(state.get("token_hash") and last_seen and time.time() - last_seen <= CONNECTED_SECONDS)
+    state = _railway_execution_status()
+    wallet = os.getenv("POLYMARKET_DEPOSIT_WALLET", "").strip()
+    balance = None
+    portfolio = None
+    wallet_type = None
+    error = state.get("error")
+    if state.get("configured"):
+        try:
+            with live_trading._secure_client() as client:
+                allowance = client.get_balance_allowance(asset_type="COLLATERAL")
+                balance = str(
+                    (Decimal(str(allowance.balance)) / Decimal("1000000")).quantize(
+                        Decimal("0.01")
+                    )
+                )
+                wallet_type = str(client.wallet_type)
+                try:
+                    pv = client.get_portfolio_value()
+                    portfolio = str(
+                        Decimal(str(getattr(pv, "value", "0") or "0")).quantize(
+                            Decimal("0.01")
+                        )
+                    )
+                except Exception:
+                    portfolio = None
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+
     return {
-        "ok": connected,
-        "connected": connected,
-        "wallet": state.get("wallet") or "Termux executor not connected",
-        "wallet_type": state.get("wallet_type") or "REMOTE_EXECUTOR",
-        "usdc_balance": state.get("usdc_balance") or "0",
-        "portfolio_value": state.get("portfolio_value"),
-        "live_trading": bool(REMOTE_EXECUTION_ENABLED and connected and not state.get("geo_blocked")),
-        "auto_trading": False,
+        "ok": bool(state.get("ready") and not error),
+        "connected": bool(state.get("ready") and not error),
+        "backend": EXECUTION_BACKEND,
+        "wallet": live_trading._mask_wallet(wallet) if wallet else "Railway wallet not configured",
+        "wallet_type": wallet_type or "RAILWAY_SECURE_CLIENT",
+        "usdc_balance": balance or "0",
+        "portfolio_value": portfolio,
+        "live_trading": bool(state.get("ready")),
+        "auto_trading": core.auto_trading_enabled(),
         "slack_paper_only": ingest.SLACK_PAPER_ONLY,
+        "error": error,
     }
 
 
@@ -239,7 +236,7 @@ def _expire_stale_buys(
             continue
 
         status = str(rec.get("status") or "")
-        if status not in {"PENDING", "LEASED"}:
+        if status not in {"WAITING_APPROVAL", "PENDING", "LEASED"}:
             continue
 
         created = float(rec.get("created_unix") or 0)
@@ -258,9 +255,9 @@ def _expire_stale_buys(
         rec["updated_at"] = stamp
         rec.pop("lease_until_unix", None)
 
-        if status == "PENDING":
+        if status in {"WAITING_APPROVAL", "PENDING"}:
             rec["error"] = (
-                f"BUY expired after {EXECUTOR_BUY_TTL_SECONDS}s before executor pickup; "
+                f"BUY expired after {EXECUTOR_BUY_TTL_SECONDS}s before Railway execution; "
                 "no order was submitted"
             )
         else:
@@ -290,30 +287,386 @@ def _expire_stale_buys_persisted() -> list[str]:
     return expired
 
 
-def _enqueue(action: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if not REMOTE_EXECUTION_ENABLED:
-        raise HTTPException(status_code=409, detail="Remote execution is disabled")
-    if action == "BUY":
-        state = _state()
-        last_seen = float(state.get("last_seen_unix") or 0)
+def _railway_execution_status(*, refresh_geo: bool = False) -> dict[str, Any]:
+    private_key = bool(os.getenv("POLYMARKET_PRIVATE_KEY", "").strip())
+    wallet = os.getenv("POLYMARKET_DEPOSIT_WALLET", "").strip()
+    configured = bool(private_key and wallet)
 
-        connected = bool(
-            state.get("token_hash")
-            and last_seen
-            and time.time() - last_seen <= CONNECTED_SECONDS
+    cache = getattr(_railway_execution_status, "_cache", None)
+    now = time.time()
+    if not isinstance(cache, dict):
+        cache = {
+            "checked_unix": 0.0,
+            "geo_country": None,
+            "geo_region": None,
+            "geo_blocked": None,
+            "error": None,
+        }
+
+    if configured and (refresh_geo or now - float(cache.get("checked_unix") or 0) >= 30):
+        try:
+            geo = core._check_geoblock()
+            cache.update({
+                "checked_unix": now,
+                "geo_country": geo.get("country"),
+                "geo_region": geo.get("region"),
+                "geo_blocked": bool(geo.get("blocked")),
+                "error": None,
+            })
+        except HTTPException as exc:
+            cache.update({
+                "checked_unix": now,
+                "geo_blocked": exc.status_code == 451,
+                "error": str(exc.detail),
+            })
+        except Exception as exc:
+            cache.update({
+                "checked_unix": now,
+                "geo_blocked": None,
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+
+    _railway_execution_status._cache = cache
+    ready = bool(
+        RAILWAY_EXECUTION_ENABLED
+        and core.live_trading_enabled()
+        and configured
+        and cache.get("geo_blocked") is False
+        and not cache.get("error")
+    )
+    return {
+        "backend": EXECUTION_BACKEND,
+        "enabled": RAILWAY_EXECUTION_ENABLED,
+        "configured": configured,
+        "ready": ready,
+        "connected": ready,
+        "paired": True,
+        "worker_name": "railway-direct",
+        "wallet": live_trading._mask_wallet(wallet) if wallet else None,
+        "geo_country": cache.get("geo_country"),
+        "geo_region": cache.get("geo_region"),
+        "geo_blocked": cache.get("geo_blocked"),
+        "error": cache.get("error"),
+    }
+
+
+def _validate_direct_buy_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if core._norm(str(payload.get("market_type") or "")) != "moneyline":
+        raise RuntimeError("Railway executor is hard-locked to moneyline only")
+
+    budget = Decimal(str(payload.get("budget_usdc") or "0"))
+    max_price = Decimal(str(payload.get("max_price") or "0"))
+    max_spread = min(
+        Decimal(str(payload.get("max_spread") or core.MAX_SPREAD)),
+        core.MAX_SPREAD,
+    )
+    if budget <= 0 or budget > core.MAX_AUTO_TRADE_USDC:
+        raise RuntimeError(
+            f"BUY budget must be greater than 0 and no more than {core.MAX_AUTO_TRADE_USDC} USDC"
+        )
+    if max_price <= 0 or max_price >= 1 or max_price > core.MAX_PRICE:
+        raise RuntimeError(f"Invalid max price {max_price}")
+
+    market_url = str(payload.get("market_url") or "")
+    outcome = str(payload.get("outcome") or "").strip()
+    if core._sports_event_slug(market_url) is None:
+        raise RuntimeError("Railway executor accepts only Polymarket /sports/ event URLs")
+    if not outcome:
+        raise RuntimeError("Moneyline outcome/team is required")
+
+    # Fail closed on Polymarket's location check from Railway itself.
+    core._check_geoblock()
+
+    intent = core.TradeIntent(
+        market_url=market_url,
+        outcome=outcome,
+        market_type="moneyline",
+        max_price=max_price,
+        budget_usdc=budget,
+        note="Railway direct live execution",
+    )
+    if payload.get("auto"):
+        core._check_daily_budget(intent)
+
+    with PublicClient() as client:
+        market = core._select_market(client, intent)
+        actual_type = core._norm(core._market_type(market))
+        if actual_type != "moneyline":
+            raise RuntimeError(
+                f"Resolved sports market type is '{core._market_type(market)}', not moneyline"
+            )
+        asset_id, _, outcome_label = core._resolve_asset(market, outcome)
+        buy_price = Decimal(str(client.get_price(asset_id=asset_id, side="BUY")))
+        spread = Decimal(str(client.get_spread(asset_id=asset_id)))
+        book = client.get_order_book(asset_id=asset_id)
+        min_size = Decimal(
+            str(getattr(getattr(market, "trading", None), "minimum_order_size", "0") or "0")
         )
 
-        if state.get("geo_blocked"):
-            raise HTTPException(
-                status_code=409,
-                detail="Termux executor is geoblocked",
-            )
+    if buy_price <= 0 or buy_price >= 1:
+        raise RuntimeError(f"Invalid current BUY price {buy_price}")
+    if buy_price > max_price:
+        raise RuntimeError(
+            f"Current BUY price {buy_price} exceeds your maximum price {max_price}"
+        )
+    if spread > max_spread:
+        raise RuntimeError(f"Current spread {spread} exceeds maximum spread {max_spread}")
 
-        if not connected:
-            raise HTTPException(
-                status_code=409,
-                detail="Termux executor is offline; BUY was not queued",
+    asks = getattr(book, "asks", None) or []
+    best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
+    if best_ask is None or best_ask > max_price:
+        raise RuntimeError("Selected limit would not cross the current best ask")
+
+    shares = (budget / max_price).quantize(
+        Decimal("0.0001"), rounding=live_trading.ROUND_DOWN
+    )
+    if min_size > 0 and shares < min_size:
+        raise RuntimeError(
+            f"Order is below this market's minimum size of {min_size} shares"
+        )
+
+    return {
+        "intent": intent,
+        "market": str(
+            getattr(market, "question", None)
+            or getattr(market, "slug", "sports market")
+        ),
+        "market_type": core._market_type(market),
+        "outcome": outcome_label,
+        "asset_id": str(asset_id),
+        "current_buy_price": str(buy_price),
+        "spread": str(spread),
+        "best_ask": str(best_ask),
+        "requested_shares": str(shares),
+        "budget_usdc": str(budget),
+        "max_price": str(max_price),
+    }
+
+
+def _preview_direct(payload: dict[str, Any]) -> dict[str, Any]:
+    quote = _validate_direct_buy_payload(payload)
+    quote.pop("intent", None)
+    quote.update({
+        "ok": True,
+        "executor": EXECUTION_BACKEND,
+        "no_order_placed": True,
+    })
+    return quote
+
+
+def _buy_direct(payload: dict[str, Any]) -> dict[str, Any]:
+    quote = _validate_direct_buy_payload(payload)
+    quote.pop("intent", None)
+    asset_id = quote["asset_id"]
+    shares = Decimal(quote["requested_shares"])
+    max_price = Decimal(quote["max_price"])
+    _, wallet = live_trading._credentials()
+    before = live_trading._position_size(wallet, asset_id)
+
+    order_id = None
+    with live_trading._secure_client() as client:
+        response = client.place_limit_order(
+            token_id=asset_id,
+            price=str(max_price),
+            size=str(shares),
+            side="BUY",
+        )
+        order_id = str(getattr(response, "order_id", "") or "")
+        deadline = time.time() + live_trading.LIVE_TEST_FILL_WAIT_SECONDS
+        after = before
+        while time.time() < deadline:
+            time.sleep(0.75)
+            after = live_trading._position_size(wallet, asset_id)
+            if after > before:
+                break
+        live_trading._cancel_quietly(client, order_id)
+
+    filled = max(Decimal("0"), after - before)
+    result = dict(quote)
+    result.update({
+        "ok": filled > 0,
+        "status": "ORDER_SUBMITTED" if filled > 0 else "TEST_BUY_UNFILLED_CANCELED",
+        "order_id": order_id,
+        "filled_shares": str(filled),
+        "position_before": str(before),
+        "position_after": str(after),
+        "entry_price": str(max_price),
+        "canceled_remainder": True,
+        "trade_id": payload.get("trade_id"),
+        "executor": EXECUTION_BACKEND,
+    })
+    return result
+
+
+def _sell_direct(payload: dict[str, Any]) -> dict[str, Any]:
+    core._check_geoblock()
+    asset_id = str(payload.get("asset_id") or "")
+    target = Decimal(str(payload.get("shares") or "0"))
+    entry = Decimal(str(payload.get("entry_price") or "0"))
+    if not asset_id or target <= 0:
+        raise RuntimeError("SELL request has no tracked asset/shares")
+
+    _, wallet = live_trading._credentials()
+    before = live_trading._position_size(wallet, asset_id)
+    sell_size = min(before, target)
+    if sell_size <= 0:
+        raise RuntimeError("Wallet no longer holds the tracked test shares")
+
+    with PublicClient() as public:
+        sell_price = Decimal(str(public.get_price(asset_id=asset_id, side="SELL")))
+    if sell_price <= 0 or sell_price >= 1:
+        raise RuntimeError(f"Invalid current SELL price {sell_price}")
+
+    order_id = None
+    with live_trading._secure_client() as client:
+        response = client.place_limit_order(
+            token_id=asset_id,
+            price=str(sell_price),
+            size=str(sell_size),
+            side="SELL",
+        )
+        order_id = str(getattr(response, "order_id", "") or "")
+        deadline = time.time() + live_trading.LIVE_TEST_FILL_WAIT_SECONDS
+        after = before
+        while time.time() < deadline:
+            time.sleep(0.75)
+            after = live_trading._position_size(wallet, asset_id)
+            if after < before:
+                break
+        live_trading._cancel_quietly(client, order_id)
+
+    sold = max(Decimal("0"), before - after)
+    if sold <= 0:
+        raise RuntimeError("SELL did not fill; remainder was canceled")
+
+    remaining = max(Decimal("0"), target - sold)
+    realized = ((sell_price - entry) * sold).quantize(Decimal("0.01"))
+    return {
+        "ok": True,
+        "status": "CLOSED" if remaining <= Decimal("0.0001") else "PARTIALLY_CLOSED",
+        "trade_id": payload.get("trade_id"),
+        "order_id": order_id,
+        "sold_shares": str(sold),
+        "remaining_shares": str(remaining),
+        "sell_price": str(sell_price),
+        "realized_pnl": str(realized),
+        "executor": EXECUTION_BACKEND,
+    }
+
+
+def _execute_existing(request_id: str, *, approved: bool = False) -> dict[str, Any]:
+    with _QUEUE_LOCK:
+        data = _queue_load()
+        rec = data.get(request_id)
+        if not rec:
+            raise HTTPException(status_code=404, detail="Unknown executor request")
+        if rec.get("status") in {"DONE", "FAILED", "CANCELLED"}:
+            return rec
+
+        created = float(rec.get("created_unix") or 0)
+        if (
+            rec.get("action") == "BUY"
+            and created
+            and time.time() - created > EXECUTOR_BUY_TTL_SECONDS
+        ):
+            rec["status"] = "FAILED"
+            rec["expired_at"] = _now_iso()
+            rec["updated_at"] = _now_iso()
+            rec["error"] = (
+                f"BUY expired after {EXECUTOR_BUY_TTL_SECONDS}s before Railway execution; "
+                "no order was submitted"
             )
+            data[request_id] = rec
+            _queue_save(data)
+            return rec
+
+        rec["status"] = "RUNNING"
+        rec["updated_at"] = _now_iso()
+        data[request_id] = rec
+        _queue_save(data)
+
+    action = str(rec.get("action") or "")
+    payload = rec.get("payload") or {}
+    try:
+        if not RAILWAY_EXECUTION_ENABLED:
+            raise RuntimeError("Railway execution is disabled")
+        if action in {"BUY", "SELL"} and not core.live_trading_enabled():
+            raise RuntimeError("LIVE_TRADING is disabled")
+        if (
+            action == "BUY"
+            and payload.get("auto")
+            and not approved
+            and not core.auto_trading_enabled()
+        ):
+            raise RuntimeError("AUTO_TRADING is disabled")
+
+        if action == "PREVIEW":
+            result = _preview_direct(payload)
+        elif action == "BUY":
+            result = _buy_direct(payload)
+        elif action == "SELL":
+            result = _sell_direct(payload)
+        else:
+            raise RuntimeError(f"Unsupported executor action {action}")
+
+        rec["status"] = "DONE"
+        rec["result"] = result
+        rec["error"] = None
+    except Exception as exc:
+        error = str(getattr(exc, "detail", None) or exc)
+        already_closed = bool(
+            action == "SELL"
+            and "Wallet no longer holds the tracked test shares" in error
+        )
+        if already_closed:
+            result = {
+                "ok": True,
+                "status": "CLOSED_RECONCILED",
+                "already_closed": True,
+                "trade_id": payload.get("trade_id"),
+                "message": (
+                    "Railway found zero tracked wallet shares; dashboard position "
+                    "was reconciled closed."
+                ),
+                "executor": EXECUTION_BACKEND,
+            }
+            rec["status"] = "DONE"
+            rec["result"] = result
+            rec["error"] = None
+            _record_already_closed_sell(rec, error)
+        else:
+            rec["status"] = "FAILED"
+            rec["result"] = {}
+            rec["error"] = error
+
+    rec["updated_at"] = _now_iso()
+    with _QUEUE_LOCK:
+        data = _queue_load()
+        data[request_id] = rec
+        _queue_save(data)
+
+    result = rec.get("result") or {}
+    if rec.get("status") == "DONE" and action == "BUY" and result.get("ok"):
+        _record_buy_result(rec, result)
+    elif (
+        rec.get("status") == "DONE"
+        and action == "SELL"
+        and result.get("ok")
+        and not result.get("already_closed")
+    ):
+        _record_sell_result(rec, result)
+
+    event = _executor_event(rec)
+    print(
+        f"RAILWAY_EXECUTOR_EVENT request={request_id} action={event.get('action')} "
+        f"status={event.get('status')} trade={event.get('trade_id')} "
+        f"message={event.get('message')}",
+        flush=True,
+    )
+    return rec
+
+
+def _enqueue(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     req_id = f"exec-{uuid.uuid4().hex[:14]}"
     record = {
         "id": req_id,
@@ -328,7 +681,7 @@ def _enqueue(action: str, payload: dict[str, Any]) -> dict[str, Any]:
         data = _queue_load()
         data[req_id] = record
         _queue_save(data)
-    return record
+    return _execute_existing(req_id)
 
 
 def _active_sell_request(trade_id: str) -> dict[str, Any] | None:
@@ -339,7 +692,7 @@ def _active_sell_request(trade_id: str) -> dict[str, Any] | None:
             rec for rec in data.values()
             if rec.get("action") == "SELL"
             and str((rec.get("payload") or {}).get("trade_id") or "") == str(trade_id)
-            and rec.get("status") in {"PENDING", "LEASED"}
+            and rec.get("status") in {"PENDING", "RUNNING"}
         ]
     if not matches:
         return None
@@ -355,7 +708,7 @@ def _executor_event(rec: dict[str, Any]) -> dict[str, Any]:
     if status == "PENDING":
         message = f"{action} queued for executor"
     elif status == "LEASED":
-        message = f"{action} executing on Termux"
+        message = f"{action} executing on Railway"
     elif status == "FAILED":
         message = str(rec.get("error") or result.get("message") or f"{action} failed")
     elif status == "DONE":
@@ -446,7 +799,7 @@ def request_preview(req: live_trading.LiveTestBuy):
 @app.post("/api/executor/request-buy", dependencies=[Depends(dashboard._auth)])
 def request_buy(req: live_trading.LiveTestBuy):
     _validate_remote_buy(req)
-    trade_id = f"live-test-remote-{uuid.uuid4().hex[:10]}"
+    trade_id = f"live-test-railway-{uuid.uuid4().hex[:10]}"
     rec = _enqueue("BUY", _buy_payload(req, trade_id=trade_id))
     return {"ok": True, "queued": True, "request_id": rec["id"], "trade_id": trade_id}
 
@@ -457,8 +810,8 @@ def request_sell(trade_id: str):
     rec = executions.get(trade_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Unknown remote test trade")
-    if rec.get("source") not in {"termux_executor", "slack_live"} or rec.get("paper"):
-        raise HTTPException(status_code=400, detail="Only tracked Termux live positions can be sold here")
+    if rec.get("source") not in {"railway_executor", "termux_executor", "slack_live"} or rec.get("paper"):
+        raise HTTPException(status_code=400, detail="Only tracked live positions can be sold here")
     if rec.get("status") not in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}:
         raise HTTPException(status_code=400, detail=f"Trade status is {rec.get('status')}")
     q = rec.get("quote") or {}
@@ -523,30 +876,11 @@ def request_status(request_id: str):
 
 
 @app.get("/api/executor/next")
-def executor_next(_: dict[str, Any] = Depends(_executor_auth)):
-    now = time.time()
-    with _QUEUE_LOCK:
-        data = _queue_load()
-
-        expired = _expire_stale_buys(data, now=now)
-        if expired:
-            _queue_save(data)
-
-        candidates = []
-        for rec in data.values():
-            status = rec.get("status")
-            lease_until = float(rec.get("lease_until_unix") or 0)
-            if status == "PENDING" or (status == "LEASED" and lease_until <= now):
-                candidates.append(rec)
-        if not candidates:
-            return {"ok": True, "request": None}
-        rec = sorted(candidates, key=lambda x: x.get("created_unix", 0))[0]
-        rec["status"] = "LEASED"
-        rec["lease_until_unix"] = now + LEASE_SECONDS
-        rec["updated_at"] = _now_iso()
-        data[rec["id"]] = rec
-        _queue_save(data)
-    return {"ok": True, "request": {"id": rec["id"], "action": rec["action"], "payload": rec.get("payload") or {}}}
+def executor_next():
+    raise HTTPException(
+        status_code=410,
+        detail="Remote executor polling is retired; Railway executes orders directly",
+    )
 
 
 def _record_buy_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> None:
@@ -567,7 +901,7 @@ def _record_buy_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> Non
         "submitted_at": now,
         "side": "BUY",
         "paper": False,
-        "source": str(payload.get("source") or "termux_executor"),
+        "source": str(payload.get("source") or "railway_executor"),
         "budget_usdc": str(estimated_cost),
         "slack_event_id": payload.get("slack_event_id"),
         "auto": bool(payload.get("auto", False)),
@@ -590,7 +924,7 @@ def _record_buy_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> Non
             "placed": True,
             "order_id": result.get("order_id"),
             "canceled_remainder": bool(result.get("canceled_remainder", True)),
-            "executor": "termux",
+            "executor": "railway",
         },
     }
     executions = core._load(core.EXECUTIONS_FILE)
@@ -629,7 +963,7 @@ def _record_sell_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> No
         "submitted_at": now,
         "side": "SELL",
         "paper": False,
-        "source": str(rec.get("source") or "termux_executor"),
+        "source": str(rec.get("source") or "railway_executor"),
         "parent_trade_id": trade_id,
         "display_pnl": str(realized),
         "budget_usdc": str((sell_price * sold).quantize(Decimal("0.01"))),
@@ -649,7 +983,7 @@ def _record_sell_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> No
 
 
 def _record_already_closed_sell(queue_rec: dict[str, Any], error: str) -> bool:
-    """Reconcile a tracked trade when Termux confirms the wallet already has zero shares."""
+    """Reconcile a tracked trade when Railway confirms the wallet already has zero shares."""
     marker = "Wallet no longer holds the tracked test shares"
     if marker not in str(error or ""):
         return False
@@ -668,12 +1002,12 @@ def _record_already_closed_sell(queue_rec: dict[str, Any], error: str) -> bool:
     rec["wallet_reconciled_at"] = now
     rec["wallet_position_size"] = "0"
     rec["reconciliation_note"] = (
-        "Termux checked the Polymarket wallet before SELL and found zero tracked shares. "
+        "Railway checked the Polymarket wallet before SELL and found zero tracked shares. "
         "The position was already closed outside this SELL request; exit price and realized P/L remain unknown."
     )
     rec.setdefault("execution", {})["close_reconciliation"] = {
         "at": now,
-        "executor": "termux",
+        "executor": "railway",
         "reason": marker,
     }
     executions[trade_id] = rec
@@ -682,69 +1016,23 @@ def _record_already_closed_sell(queue_rec: dict[str, Any], error: str) -> bool:
 
 
 @app.post("/api/executor/result/{request_id}")
-def executor_result(request_id: str, body: ExecutorResult, _: dict[str, Any] = Depends(_executor_auth)):
-    with _QUEUE_LOCK:
-        data = _queue_load()
-        rec = data.get(request_id)
-        if not rec:
-            raise HTTPException(status_code=404, detail="Unknown executor request")
-        if rec.get("status") == "DONE" or (
-            rec.get("status") == "FAILED"
-            and not rec.get("expired_at")
-        ):
-            return {"ok": True, "duplicate": True}
-        result = body.result or {}
-        already_closed = bool(
-            not body.ok
-            and rec.get("action") == "SELL"
-            and "Wallet no longer holds the tracked test shares" in str(body.error or "")
-        )
-        if already_closed:
-            payload = rec.get("payload") or {}
-            result = {
-                "ok": True,
-                "status": "CLOSED_RECONCILED",
-                "already_closed": True,
-                "trade_id": payload.get("trade_id"),
-                "message": "Wallet already has zero tracked shares; dashboard position reconciled closed.",
-            }
-            rec["status"] = "DONE"
-            rec["result"] = result
-            rec["error"] = None
-        else:
-            rec["status"] = "DONE" if body.ok else "FAILED"
-            rec["result"] = result
-            rec["error"] = body.error
-        rec["updated_at"] = _now_iso()
-        data[request_id] = rec
-        _queue_save(data)
-    if body.ok and rec.get("action") == "BUY":
-        _record_buy_result(rec, result)
-    elif body.ok and rec.get("action") == "SELL":
-        _record_sell_result(rec, result)
-    elif already_closed:
-        _record_already_closed_sell(rec, str(body.error or ""))
-    event = _executor_event(rec)
-    print(
-        f"EXECUTOR_EVENT request={request_id} action={event.get('action')} "
-        f"status={event.get('status')} trade={event.get('trade_id')} "
-        f"message={event.get('message')}",
-        flush=True,
+def executor_result(request_id: str, body: ExecutorResult):
+    raise HTTPException(
+        status_code=410,
+        detail="Remote executor result callbacks are retired; Railway executes orders directly",
     )
-    return {"ok": True}
 
 
 def _install_remote_executor_ui() -> None:
     html = dashboard.DASHBOARD_HTML
-    if "TERMUX EXECUTOR" in html:
+    if "RAILWAY EXECUTION" in html:
         return
 
-    # Wallet reads are now reported by the connected Termux worker rather than by Railway.
     html = html.replace("fetch('/api/live/wallet'", "fetch('/api/executor/wallet'")
 
     status_box = '''
       <div class="executor-box">
-        <div><b>TERMUX EXECUTOR</b> · <span id="executorConnection">Checking…</span></div>
+        <div><b>RAILWAY EXECUTION</b> · <span id="executorConnection">Checking…</span></div>
         <div id="executorPairLine" class="executor-pair"></div>
         <div id="executorGeo" class="executor-small"></div>
       </div>
@@ -761,11 +1049,11 @@ let remoteExecutorConnected=false;
 async function remoteStatus(){
  try{
   const r=await fetch('/api/executor/status',{cache:'no-store'}),d=await r.json();
-  remoteExecutorConnected=!!d.connected;
+  remoteExecutorConnected=!!d.ready;
   const c=document.getElementById('executorConnection'),p=document.getElementById('executorPairLine'),g=document.getElementById('executorGeo');
-  if(c){c.textContent=d.connected?'CONNECTED':(d.paired?'PAIRED · OFFLINE':'NOT PAIRED');c.className=d.connected?'executor-online':'executor-offline'}
-  if(p){p.textContent=d.paired?'Pairing complete':('Pair code: '+(d.pair_code||'—')+' · enter this in Termux')}
-  if(g){g.textContent=[d.worker_name?('Worker '+d.worker_name):'',d.geo_country?('Network '+d.geo_country+(d.geo_region?'/'+d.geo_region:'')):'',d.geo_blocked===true?'POLYMARKET BLOCKED':d.geo_blocked===false?'Polymarket geoblock passed':''].filter(Boolean).join(' · ')}
+  if(c){c.textContent=d.ready?'READY':'NOT READY';c.className=d.ready?'executor-online':'executor-offline'}
+  if(p){p.textContent='Direct Railway SecureClient · no phone/Termux worker required'}
+  if(g){g.textContent=[d.geo_country?('Network '+d.geo_country+(d.geo_region?'/'+d.geo_region:'')):'',d.geo_blocked===true?'POLYMARKET BLOCKED':d.geo_blocked===false?'Polymarket geoblock passed':'',d.error||''].filter(Boolean).join(' · ')}
  }catch(e){const c=document.getElementById('executorConnection');if(c){c.textContent='STATUS ERROR';c.className='executor-offline'}}
 }
 async function remoteRequest(path,payload){
@@ -776,34 +1064,34 @@ async function waitRemote(requestId,timeoutMs=90000){
  while(Date.now()-started<timeoutMs){
   const r=await fetch('/api/executor/request-status/'+encodeURIComponent(requestId),{cache:'no-store'}),d=await ltJson(r);
   if(d.status==='DONE')return d.result||{};
-  if(d.status==='FAILED')throw new Error(d.error||'Termux executor failed');
-  await new Promise(res=>setTimeout(res,700));
+  if(d.status==='FAILED')throw new Error(d.error||'Railway execution failed');
+  await new Promise(res=>setTimeout(res,250));
  }
- throw new Error('Timed out waiting for Termux executor. Check that the worker is running before retrying.');
+ throw new Error('Timed out waiting for Railway execution.');
 }
 function replaceLiveButton(id,handler){const old=document.getElementById(id);if(!old)return;const neo=old.cloneNode(true);old.parentNode.replaceChild(neo,old);neo.addEventListener('click',handler)}
 async function remotePreview(){
- try{ltEl('ltMsg').textContent='Sending preview to Termux…';const q=await remoteRequest('/api/executor/request-preview',ltPayload());const d=await waitRemote(q.request_id);ltShow(d);ltEl('ltMsg').textContent='Termux market check passed. No order placed.'}
- catch(e){ltShow(String(e));ltEl('ltMsg').textContent='Termux market check failed.'}
+ try{ltEl('ltMsg').textContent='Checking market from Railway…';const q=await remoteRequest('/api/executor/request-preview',ltPayload());const d=await waitRemote(q.request_id);ltShow(d);ltEl('ltMsg').textContent='Railway market check passed. No order placed.'}
+ catch(e){ltShow(String(e));ltEl('ltMsg').textContent='Railway market check failed.'}
 }
 async function remoteBuy(){
  try{
-  const p=ltPayload();if(!remoteExecutorConnected)throw new Error('Termux executor is not connected');
-  if(!confirm(`Queue a REAL $${Number(p.budget_usdc).toFixed(2)} moneyline limit BUY for ${p.outcome} to your Termux executor?`))return;
-  ltEl('ltBuy').disabled=true;ltEl('ltMsg').textContent='Waiting for Termux BUY…';const q=await remoteRequest('/api/executor/request-buy',p);const d=await waitRemote(q.request_id);ltShow(d);
-  if(d.ok&&q.trade_id){liveTestTradeId=q.trade_id;ltEl('ltSell').disabled=false;ltEl('ltMsg').textContent='Termux BUY filled. SELL is ready.'}else{ltEl('ltMsg').textContent='BUY did not fill; any remainder was canceled.'}
- }catch(e){ltShow(String(e));ltEl('ltMsg').textContent='Termux BUY failed.'}
+  const p=ltPayload();if(!remoteExecutorConnected)throw new Error('Railway direct execution is not ready');
+  if(!confirm('Place a REAL $'+Number(p.budget_usdc).toFixed(2)+' moneyline limit BUY for '+p.outcome+' directly from Railway?'))return;
+  ltEl('ltBuy').disabled=true;ltEl('ltMsg').textContent='Executing Railway BUY…';const q=await remoteRequest('/api/executor/request-buy',p);const d=await waitRemote(q.request_id);ltShow(d);
+  if(d.ok&&q.trade_id){liveTestTradeId=q.trade_id;ltEl('ltSell').disabled=false;ltEl('ltMsg').textContent='Railway BUY filled. SELL is ready.'}else{ltEl('ltMsg').textContent='BUY did not fill; any remainder was canceled.'}
+ }catch(e){ltShow(String(e));ltEl('ltMsg').textContent='Railway BUY failed.'}
  finally{ltEl('ltBuy').disabled=false}
 }
 async function remoteSell(){
- if(!liveTestTradeId){ltShow('No filled Termux test trade is available to sell.');return}
- if(!remoteExecutorConnected){ltShow('Termux executor is not connected.');return}
- if(!confirm('Queue a REAL SELL of the tracked test shares to Termux?'))return;
- try{ltEl('ltSell').disabled=true;ltEl('ltMsg').textContent='Waiting for Termux SELL…';const q=await remoteRequest('/api/executor/request-sell/'+encodeURIComponent(liveTestTradeId));const d=await waitRemote(q.request_id);ltShow(d);ltEl('ltMsg').textContent='Termux SELL completed. Round-trip test finished.';liveTestTradeId=null}
- catch(e){ltShow(String(e));ltEl('ltMsg').textContent='Termux SELL failed; verify the position before retrying.';ltEl('ltSell').disabled=false}
+ if(!liveTestTradeId){ltShow('No filled Railway test trade is available to sell.');return}
+ if(!remoteExecutorConnected){ltShow('Railway direct execution is not ready.');return}
+ if(!confirm('SELL the tracked live shares directly from Railway?'))return;
+ try{ltEl('ltSell').disabled=true;ltEl('ltMsg').textContent='Executing Railway SELL…';const q=await remoteRequest('/api/executor/request-sell/'+encodeURIComponent(liveTestTradeId));const d=await waitRemote(q.request_id);ltShow(d);ltEl('ltMsg').textContent='Railway SELL completed. Round-trip test finished.';liveTestTradeId=null}
+ catch(e){ltShow(String(e));ltEl('ltMsg').textContent='Railway SELL failed; verify the position before retrying.';ltEl('ltSell').disabled=false}
 }
 replaceLiveButton('ltPreview',remotePreview);replaceLiveButton('ltBuy',remoteBuy);replaceLiveButton('ltSell',remoteSell);
-remoteStatus();setInterval(remoteStatus,3000);
+remoteStatus();setInterval(remoteStatus,10000);
 '''
     html = html.replace('</script>', js + '\n</script>', 1)
     dashboard.DASHBOARD_HTML = html
@@ -811,21 +1099,7 @@ remoteStatus();setInterval(remoteStatus,3000);
 
 _expire_stale_buys_persisted()
 _install_remote_executor_ui()
-try:
-    _recent_queue = sorted(
-        _queue_load().values(),
-        key=lambda r: r.get("created_unix", 0),
-        reverse=True,
-    )[:8]
-    for _rec in _recent_queue:
-        if _rec.get("action") == "SELL":
-            _event = _executor_event(_rec)
-            print(
-                f"EXECUTOR_SAVED_EVENT request={_event.get('request_id')} "
-                f"status={_event.get('status')} trade={_event.get('trade_id')} "
-                f"message={_event.get('message')}",
-                flush=True,
-            )
-except Exception as _exc:
-    print(f"EXECUTOR_SAVED_EVENT_ERROR {type(_exc).__name__}:{_exc}", flush=True)
-print("TERMUX_EXECUTOR_BRIDGE enabled dashboard_auto_cap_usdc=" + str(core.MAX_AUTO_TRADE_USDC), flush=True)
+print(
+    "RAILWAY_EXECUTOR backend=direct auto_cap_usdc=" + str(core.MAX_AUTO_TRADE_USDC),
+    flush=True,
+)
