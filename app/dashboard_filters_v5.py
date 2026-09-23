@@ -35,9 +35,9 @@ def _trade_bucket(rec: dict[str, Any]) -> str | None:
     placed = bool(execution.get("placed"))
 
     # LIVE means a real funded execution, regardless of whether it originated
-    # from Slack/PW automation or the Termux executor path. Failed/pending
-    # diagnostics never reach this bucket.
-    if source in {"slack_live", "termux_executor"} and (
+    # from Slack/PW automation, Railway direct execution, or a legacy Termux record.
+    # Failed/pending diagnostics never reach this bucket.
+    if source in {"slack_live", "railway_executor", "termux_executor"} and (
         placed
         or status in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED", "CLOSED", "CLOSED_RECONCILED"}
     ):
