@@ -101,7 +101,7 @@ def _install_per_trade_sell_ui() -> None:
         return
 
     old_lr = "const lr=d.live_trades.map(x=>`<tr><td><span class=\"status\">${x.paper?'PAPER':'LIVE'}</span></td><td class=\"${String(x.side||'BUY').toUpperCase()==='SELL'?'side-sell':'side-buy'}\">${esc(x.side||'BUY')}</td><td class=\"market\">${link(x.market_url,x.market)}</td><td>${esc(x.outcome||'—')}</td><td>${price(x.entry_price)}</td><td>${price(x.current_price||x.current_sell_price||x.current_midpoint)}</td><td>${money(x.budget_usdc)}</td><td class=\"${Number(x.estimated_pnl)>0?'green':Number(x.estimated_pnl)<0?'red':''}\">${money(x.estimated_pnl)}<span class=\"pnl-sub\">live</span></td><td>${when(x.submitted_at)}</td></tr>`);"
-    new_lr = "const lr=d.live_trades.map(x=>`<tr><td><span class=\"status\">${x.paper?'PAPER':(x.status==='PARTIALLY_CLOSED'?'PARTIAL':'LIVE')}</span></td><td class=\"${String(x.side||'BUY').toUpperCase()==='SELL'?'side-sell':'side-buy'}\">${esc(x.side||'BUY')}</td><td class=\"market\">${link(x.market_url,x.market)}</td><td>${esc(x.outcome||'—')}</td><td>${price(x.entry_price)}</td><td>${price(x.current_price||x.current_sell_price||x.current_midpoint)}</td><td>${money(x.budget_usdc)}</td><td class=\"${Number(x.estimated_pnl)>0?'green':Number(x.estimated_pnl)<0?'red':''}\">${money(x.estimated_pnl)}<span class=\"pnl-sub\">live</span></td><td>${when(x.submitted_at)}</td><td>${x.paper?`<button class=\"paper-close-btn\" data-paper-close=\"${esc(x.id||'')}\">CLOSE</button>`:((x.source==='termux_executor'||x.source==='slack_live')?`<button class=\"live-sell-btn\" data-live-sell=\"${esc(x.id||'')}\">SELL</button>`:'—')}</td></tr>`);"
+    new_lr = "const lr=d.live_trades.map(x=>`<tr><td><span class=\"status\">${x.paper?'PAPER':(x.status==='PARTIALLY_CLOSED'?'PARTIAL':'LIVE')}</span></td><td class=\"${String(x.side||'BUY').toUpperCase()==='SELL'?'side-sell':'side-buy'}\">${esc(x.side||'BUY')}</td><td class=\"market\">${link(x.market_url,x.market)}</td><td>${esc(x.outcome||'—')}</td><td>${price(x.entry_price)}</td><td>${price(x.current_price||x.current_sell_price||x.current_midpoint)}</td><td>${money(x.budget_usdc)}</td><td class=\"${Number(x.estimated_pnl)>0?'green':Number(x.estimated_pnl)<0?'red':''}\">${money(x.estimated_pnl)}<span class=\"pnl-sub\">live</span></td><td>${when(x.submitted_at)}</td><td>${x.paper?`<button class=\"paper-close-btn\" data-paper-close=\"${esc(x.id||'')}\">CLOSE</button>`:((['railway_executor','termux_executor','slack_live'].includes(x.source))?`<button class=\"live-sell-btn\" data-live-sell=\"${esc(x.id||'')}\">SELL</button>`:'—')}</td></tr>`);"
     html = html.replace(old_lr, new_lr)
 
     old_current = "table(['Status','Side','Market','Outcome','Entry','Live price','Budget','Live P/L','Submitted'],lr);renderPnlChart(d.pnl_history||[]);"
@@ -119,8 +119,8 @@ document.addEventListener('click',async function(ev){
  if(!btn)return;
  const tradeId=btn.getAttribute('data-live-sell');
  if(!tradeId)return;
- if(!remoteExecutorConnected){alert('Termux executor is not connected. Keep the worker running before selling.');return}
- if(!confirm('SELL this live position now through Termux? The executor will use an immediate FAK exit with a bounded worst-price floor.'))return;
+ if(!remoteExecutorConnected){alert('Railway direct execution is not ready.');return}
+ if(!confirm('SELL this live position now directly from Railway?'))return;
  const original=btn.textContent;
  try{
   btn.disabled=true;btn.textContent='SELLING…';
