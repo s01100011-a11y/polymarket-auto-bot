@@ -25,6 +25,25 @@ class ExecutorQueueSafetyTests(unittest.TestCase):
         self.assertEqual(data["exec-test"]["status"], "FAILED")
         self.assertIn("no order was submitted", data["exec-test"]["error"])
 
+    def test_expired_lease_buy_expires(self):
+        data = {
+            "exec-test": {
+                "id": "exec-test",
+                "action": "BUY",
+                "status": "LEASED",
+                "created_unix": 100.0,
+                "lease_until_unix": 200.0,  # lease already expired
+            }
+        }
+
+        with patch.object(remote, "EXECUTOR_BUY_TTL_SECONDS", 180):
+            expired = remote._expire_stale_buys(data, now=281.0)
+
+        self.assertEqual(expired, ["exec-test"])
+        self.assertEqual(data["exec-test"]["status"], "FAILED")
+        self.assertIn("Reconcile the wallet", data["exec-test"]["error"])
+        self.assertNotIn("lease_until_unix", data["exec-test"])
+
     def test_active_lease_is_not_expired(self):
         data = {
             "exec-test": {
