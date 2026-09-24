@@ -1,3 +1,19 @@
+## 2026-09-24 — Auto-trade Slam/Syndicate NFL picks with unit sizing (#33)
+
+- **Objective:** Automatically buy new NFL game-market plays posted by SLAM - All Access and The Syndicate on Polymarket and maintain separate bot performance records as Slam - NFL and Syndicate - NFL.
+- **Sizing:** Default/missing/<=1 posted unit = 1 unit = $10 USDC. Explicit posted units above 1 scale linearly (for example 1.25u = $12.50, 2u = $20, 3u = $30), subject to the existing dashboard auto-trade cap, daily budget, price/spread limits, executor availability, and Termux local cap.
+- **Ingestion:** app/nfl_capper_ingest.py polls the sanitized Telegram bridge NFL feed every 15 seconds by default. Only picks from Slam/Syndicate are considered. Persistent SHA-256 fingerprints prevent duplicate buys across polling cycles and restarts.
+- **Freshness:** Only picks posted within NFL_CAPPER_MAX_PICK_AGE_SECONDS (default 180 seconds) can enter execution. Older bridge/backfill picks are permanently marked stale and never bought. Transient preparation failures can retry only while the pick remains fresh.
+- **Market scope:** Automatic execution supports NFL full-game moneyline, spread, and total plays. Player props, period/half/quarter markets, mixed/ambiguous markets, and verbose commentary-like parser output are fail-closed and recorded as unsupported rather than guessed.
+- **Market matching:** Railway identifies the exact NFL event, line, side, and Polymarket outcome token. For binary total markets, Under correctly maps to NO when the market question is phrased as Over (and vice versa). Termux independently validates that exact outcome token, market type, price, spread, minimum order size, sports URL, and geoblock immediately before placing the order.
+- **Execution path:** Real orders continue through the existing Railway → Termux executor path. The manual live-test endpoint remains moneyline-only. scripts/termux_executor.py now permits exact-token automated spread/total payloads in addition to moneyline and defaults its independent local cap to $25 unless EXECUTOR_MAX_USDC is set.
+- **Tracking:** Executor fill records preserve strategy_source, NFL sport, posted units, unit value, source message timestamp/selection, and signal fingerprint. The dashboard exposes a dedicated NFL capper panel and /api/nfl-cappers/stats with bets, open positions, W/L/pushes, stake, realized P/L, ROI, and win rate for each capper.
+- **Settlement:** Closed sports markets resolving 1/0 continue to grade WIN/LOSS. A resolved 0.50/0.50 market now grades SETTLED_PUSH, which is required for pushed NFL spread/total markets.
+- **Files changed:** app/nfl_capper_ingest.py, app/wnba_pw_research_v13.py, app/termux_executor_dashboard.py, scripts/termux_executor.py, app/slack_ingest.py, .env.example, tests/test_nfl_capper_ingest.py, DEVELOPMENT_NOTES.md.
+- **Verification:** Unit coverage added for $10 unit sizing, explicit multi-unit sizing, prop/period/ambiguous rejection, dedupe fingerprints, binary total side mapping, separated capper performance stats, and push settlement semantics. Existing executor queue/live safety behavior remains in place.
+- **Deployment:** No production or infrastructure change made in this branch. Merge/deploy remains a separate user-controlled step.
+- **Operational note:** A posted multi-unit play larger than the current MAX_AUTO_TRADE_USDC, daily budget, or local EXECUTOR_MAX_USDC is blocked rather than silently reduced. Those caps must be set high enough if the user wants the full posted unit size executed.
+
 ## 2026-09-24 — Preserve Termux executor pairing across Railway deploys (#38)
 
 - **Incident:** The production Railway service used a custom start command that ran `rm -f /app/data/termux_executor_state.json` before every app start.
