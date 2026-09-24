@@ -1,3 +1,11 @@
+## 2026-09-25 — Log NFL feed and terminal ingest decisions (#48)
+
+- Logs a sanitized NFL feed summary only when the feed content changes, avoiding 15-second log spam.
+- Logs parsed pick metadata and metadata-only unparsed-post diagnostics; raw Telegram message text is not logged.
+- Emits one-time `NFL_CAPPER_SIGNAL` records for stale and unsupported picks, in addition to the existing queued/retrying/untracked-source logs.
+- Feed signatures deliberately exclude generated timestamps, so identical feed content does not produce repeated logs.
+- No execution, sizing, freshness, market-resolution, or risk-limit behavior changed.
+
 ## 2026-09-25 — Persist last NFL bridge diagnostics (#46)
 
 - Saves the latest sanitized /public/nfl response to /app/data/nfl_capper_last_feed.json on every successful poll.

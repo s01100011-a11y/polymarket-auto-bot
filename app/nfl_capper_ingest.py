@@ -78,6 +78,21 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _feed_content_signature(feed: dict[str, Any]) -> str:
+    """Hash only feed content, excluding timestamps that change every poll."""
+    payload = {
+        "scanned_posts": feed.get("scanned_posts"),
+        "detected_posts": feed.get("detected_posts"),
+        "detected_picks": feed.get("detected_picks"),
+        "listener_connected": feed.get("listener_connected"),
+        "listener_ready": feed.get("listener_ready"),
+        "unparsed_recent": feed.get("unparsed_recent") or [],
+        "picks": feed.get("picks") or [],
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def _parse_iso(value: Any) -> datetime | None:
     if not value:
         return None
@@ -559,6 +574,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             data = dict(ordered[-2000:])
         core._save(signal_file, data)
 
+    last_feed_signature: str | None = None
+
     def _sync_queue_status(signals: dict[str, Any]) -> bool:
         changed = False
         queue = remote._queue_load()
@@ -581,6 +598,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         return changed
 
     async def _poll_once() -> None:
+        nonlocal last_feed_signature
         _STATUS["last_poll_at"] = _now_iso()
         signals = _load_signals()
         changed = _sync_queue_status(signals)
@@ -615,6 +633,50 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "unparsed_recent": feed.get("unparsed_recent") or [],
                 "picks": feed.get("picks") or [],
             })
+
+            feed_signature = _feed_content_signature(feed)
+            if feed_signature != last_feed_signature:
+                picks_for_log = [p for p in (feed.get("picks") or []) if isinstance(p, dict)]
+                unparsed_for_log = [p for p in (feed.get("unparsed_recent") or []) if isinstance(p, dict)]
+                print(
+                    "NFL_CAPPER_FEED "
+                    f"scanned_posts={feed.get('scanned_posts')} "
+                    f"detected_posts={feed.get('detected_posts')} "
+                    f"detected_picks={feed.get('detected_picks')} "
+                    f"unparsed_recent={len(unparsed_for_log)} "
+                    f"listener_connected={feed.get('listener_connected')} "
+                    f"listener_ready={feed.get('listener_ready')}",
+                    flush=True,
+                )
+                for row in picks_for_log[:20]:
+                    safe = {
+                        key: row.get(key)
+                        for key in (
+                            "source", "source_id", "source_key", "posted_at", "selection",
+                            "teams", "bet_types", "period", "spread_lines",
+                            "total_side", "total_line", "units", "status",
+                        )
+                    }
+                    print(
+                        "NFL_CAPPER_FEED_PICK "
+                        + json.dumps(safe, sort_keys=True, separators=(",", ":"), default=str),
+                        flush=True,
+                    )
+                for row in unparsed_for_log[:20]:
+                    safe = {
+                        key: row.get(key)
+                        for key in (
+                            "source", "source_id", "source_key", "posted_at", "has_media",
+                            "text_present", "text_length", "detected_teams",
+                            "candidate_line_count",
+                        )
+                    }
+                    print(
+                        "NFL_CAPPER_UNPARSED "
+                        + json.dumps(safe, sort_keys=True, separators=(",", ":"), default=str),
+                        flush=True,
+                    )
+                last_feed_signature = feed_signature
         except Exception as exc:
             _STATUS["last_error"] = f"{type(exc).__name__}: {exc}"
             if changed:
@@ -670,6 +732,14 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 base_record["updated_at"] = _now_iso()
                 signals[fp] = base_record
                 changed = True
+                print(
+                    "NFL_CAPPER_SIGNAL "
+                    f"status=IGNORED_STALE source={source_label!r} "
+                    f"telegram_source={pick.get('source')!r} selection={pick.get('selection')!r} "
+                    f"age_seconds={int(age) if age != float('inf') else 'unknown'} "
+                    f"reason={base_record['reason']!r}",
+                    flush=True,
+                )
                 continue
 
             kind, unsupported = _classify_pick(pick)
@@ -679,6 +749,13 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 base_record["updated_at"] = _now_iso()
                 signals[fp] = base_record
                 changed = True
+                print(
+                    "NFL_CAPPER_SIGNAL "
+                    f"status=IGNORED_UNSUPPORTED source={source_label!r} "
+                    f"telegram_source={pick.get('source')!r} selection={pick.get('selection')!r} "
+                    f"reason={unsupported!r}",
+                    flush=True,
+                )
                 continue
 
             try:
