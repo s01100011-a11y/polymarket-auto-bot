@@ -1,3 +1,13 @@
+## 2026-09-24 — Preserve Termux executor pairing across Railway deploys (#38)
+
+- **Incident:** The production Railway service used a custom start command that ran `rm -f /app/data/termux_executor_state.json` before every app start.
+- **Impact:** `termux_executor_state.json` is stored on the persistent Railway volume and contains the paired executor token hash/state. Deleting it forced the Android Termux executor back to `NOT PAIRED` after every deployment.
+- **Production config fix:** Railway start command changed to `sh -lc 'exec /app/start.sh'`; the pairing-state file is no longer intentionally removed at startup.
+- **Deployment nuance:** A Railway `redeploy` can reuse the previous deployment snapshot, so a fresh source deployment is required to ensure the corrected start command is actually used.
+- **Verification target:** New source-deployment logs must not contain `EXEC_STATE_BEFORE`, `EXEC_STATE_AFTER`, or an `rm -f` deletion of the pairing file.
+- **User action:** Because the pairing file had already been deleted before this fix, Android/Termux must pair one final time. Subsequent deploys should retain pairing.
+- **Unchanged:** No trading authorization, order routing, sizing, risk, wallet, or strategy logic changed.
+
 ## 2026-09-24 — Migrate existing Stats preference to LIVE (#36)
 
 - **Issue:** Browsers that had previously saved `dashboardStatsFilter=both` kept showing BOTH after the new LIVE fallback shipped.
