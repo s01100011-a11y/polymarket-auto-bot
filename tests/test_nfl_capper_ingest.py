@@ -50,6 +50,37 @@ class NflCapperSourceTests(unittest.TestCase):
         self.assertIsNone(capper._source_label(_pick(source="Blacksmith Bets Standard VIP")))
 
 
+class NflCapperFeedLoggingTests(unittest.TestCase):
+    def test_feed_signature_ignores_generated_timestamp(self):
+        left = {
+            "generated_at": "2026-09-25T00:00:00+00:00",
+            "scanned_posts": 1,
+            "detected_posts": 1,
+            "detected_picks": 1,
+            "listener_connected": True,
+            "listener_ready": True,
+            "picks": [{"source": "SLAM - All Access", "selection": "ATL +3"}],
+            "unparsed_recent": [],
+        }
+        right = dict(left)
+        right["generated_at"] = "2026-09-25T00:00:15+00:00"
+        self.assertEqual(capper._feed_content_signature(left), capper._feed_content_signature(right))
+
+    def test_feed_signature_changes_when_pick_content_changes(self):
+        left = {
+            "scanned_posts": 1,
+            "detected_posts": 1,
+            "detected_picks": 1,
+            "listener_connected": True,
+            "listener_ready": True,
+            "picks": [{"source": "SLAM - All Access", "selection": "ATL +3"}],
+            "unparsed_recent": [],
+        }
+        right = dict(left)
+        right["picks"] = [{"source": "SLAM - All Access", "selection": "ATL +3.5"}]
+        self.assertNotEqual(capper._feed_content_signature(left), capper._feed_content_signature(right))
+
+
 class NflCapperSizingTests(unittest.TestCase):
     def test_default_and_sub_one_unit_both_buy_one_unit(self):
         self.assertEqual(str(capper._stake_for_pick(_pick(units=None))), "10.00")
