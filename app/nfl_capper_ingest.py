@@ -539,6 +539,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
 
     remote = live_control.remote
     signal_file = core.DATA_DIR / "nfl_capper_signals.json"
+    last_feed_file = core.DATA_DIR / "nfl_capper_last_feed.json"
     bridge_url = os.getenv(
         "NFL_CAPPER_BRIDGE_URL",
         "https://telegram-chatgpt-bridge-production-286a.up.railway.app",
@@ -597,6 +598,23 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 )
                 response.raise_for_status()
                 feed = response.json()
+
+            # Persist only the sanitized public-feed fields needed for diagnosis.
+            # The bridge endpoint does not expose raw Telegram message text.
+            core._save(last_feed_file, {
+                "saved_at": _now_iso(),
+                "sport": feed.get("sport"),
+                "generated_at": feed.get("generated_at"),
+                "window_minutes": feed.get("window_minutes"),
+                "freshness": feed.get("freshness"),
+                "scanned_posts": feed.get("scanned_posts"),
+                "detected_posts": feed.get("detected_posts"),
+                "detected_picks": feed.get("detected_picks"),
+                "listener_connected": feed.get("listener_connected"),
+                "listener_ready": feed.get("listener_ready"),
+                "unparsed_recent": feed.get("unparsed_recent") or [],
+                "picks": feed.get("picks") or [],
+            })
         except Exception as exc:
             _STATUS["last_error"] = f"{type(exc).__name__}: {exc}"
             if changed:
