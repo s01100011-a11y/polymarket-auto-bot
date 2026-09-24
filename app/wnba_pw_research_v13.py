@@ -4,6 +4,7 @@ from app import pw_scalping_research
 from app import pw_market_research
 from app import pw_game_reconstruction
 from app import pw_spread_backtest
+from app import nfl_capper_ingest
 
 app = base.app
 history = base.history
@@ -42,4 +43,10 @@ pw_game_reconstruction.install(
 pw_spread_backtest.install(
     history=history,
     ingest=ingest,
+)
+
+nfl_capper_ingest.install(
+    app=app,
+    dashboard=dashboard,
+    core=core,
 )
