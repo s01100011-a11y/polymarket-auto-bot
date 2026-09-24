@@ -23,7 +23,7 @@ from app import main as core  # noqa: E402
 
 BRIDGE_URL = os.getenv("EXECUTOR_BRIDGE_URL", "https://polymarket-auto-bot-production.up.railway.app").rstrip("/")
 WORKER_NAME = os.getenv("EXECUTOR_NAME", "termux-phone")
-MAX_USDC = Decimal(os.getenv("EXECUTOR_MAX_USDC", "5"))
+MAX_USDC = Decimal(os.getenv("EXECUTOR_MAX_USDC", "25"))
 FILL_WAIT_SECONDS = max(3, min(15, int(os.getenv("EXECUTOR_FILL_WAIT_SECONDS", "8"))))
 TOKEN_FILE = Path(os.getenv("EXECUTOR_TOKEN_FILE", str(Path.home() / ".config/polymarket-termux/executor_token"))).expanduser()
 JOURNAL_FILE = Path(os.getenv("EXECUTOR_JOURNAL_FILE", str(Path.home() / ".config/polymarket-termux/executor_journal.json"))).expanduser()
@@ -129,44 +129,106 @@ def _secure(private_key: str, wallet: str) -> SecureClient:
     return SecureClient.create(private_key=private_key, wallet=wallet)
 
 
-def _validate_moneyline(payload: dict[str, Any]) -> dict[str, Any]:
-    if core._norm(str(payload.get("market_type") or "")) != "moneyline":
-        raise RuntimeError("Executor is hard-locked to moneyline only")
+def _asset_market(client: PublicClient, asset_id: str) -> tuple[Any, str]:
+    markets = list(
+        client.list_markets(
+            clob_token_ids=[asset_id],
+            closed=False,
+            page_size=5,
+        ).iter_items()
+    )
+    for market in markets:
+        outcomes = getattr(market, "outcomes", None)
+        for outcome in (
+            getattr(outcomes, "yes", None),
+            getattr(outcomes, "no", None),
+        ):
+            if outcome is None:
+                continue
+            token_id = str(
+                getattr(outcome, "token_id", None)
+                or getattr(outcome, "position_id", None)
+                or ""
+            )
+            if token_id == asset_id:
+                return market, str(getattr(outcome, "label", "") or "")
+    raise RuntimeError("Exact Polymarket outcome token is no longer an open tradable market")
+
+
+def _canonical_market_type(value: Any) -> str:
+    raw = core._norm(str(value or ""))
+    if raw in {"moneyline", "spread", "total"}:
+        return raw
+    if "moneyline" in raw or "money line" in raw or "winner" in raw:
+        return "moneyline"
+    if "spread" in raw or "handicap" in raw:
+        return "spread"
+    if "total" in raw or "over/under" in raw or "over under" in raw:
+        return "total"
+    return raw
+
+
+def _validate_buy(payload: dict[str, Any]) -> dict[str, Any]:
+    market_type = _canonical_market_type(payload.get("market_type"))
+    if market_type not in {"moneyline", "spread", "total"}:
+        raise RuntimeError("Executor supports only moneyline, spread, and total game markets")
+
     budget = Decimal(str(payload.get("budget_usdc") or "0"))
     max_price = Decimal(str(payload.get("max_price") or "0"))
     max_spread = Decimal(str(payload.get("max_spread") or "0.08"))
     max_price_global = Decimal(str(payload.get("max_price_global") or "0.95"))
     if budget <= 0 or budget > MAX_USDC:
-        raise RuntimeError(f"Test budget must be greater than $0 and no more than ${MAX_USDC}")
+        raise RuntimeError(
+            "Budget must be greater than $0 and no more than the local executor cap of $"
+            + str(MAX_USDC)
+        )
     if max_price <= 0 or max_price >= 1 or max_price > max_price_global:
         raise RuntimeError(f"Invalid max price {max_price}")
 
     market_url = str(payload.get("market_url") or "")
     outcome = str(payload.get("outcome") or "").strip()
+    expected_asset_id = str(payload.get("asset_id") or "").strip()
     if core._sports_event_slug(market_url) is None:
         raise RuntimeError("Executor accepts only Polymarket /sports/ event URLs")
     if not outcome:
-        raise RuntimeError("Moneyline outcome/team is required")
+        raise RuntimeError("Outcome/team is required")
+    if market_type != "moneyline" and not expected_asset_id:
+        raise RuntimeError("Automated spread/total BUY requires an exact Railway-resolved outcome token")
 
     _geo()
-    intent = core.TradeIntent(
-        market_url=market_url,
-        outcome=outcome,
-        market_type="moneyline",
-        max_price=max_price,
-        budget_usdc=budget,
-        note="Termux remote live test",
-    )
     with PublicClient() as client:
-        market = core._select_market(client, intent)
-        actual_type = core._norm(core._market_type(market))
-        if actual_type != "moneyline":
-            raise RuntimeError(f"Resolved sports market type is '{core._market_type(market)}', not moneyline")
-        asset_id, _, outcome_label = core._resolve_asset(market, outcome)
+        if expected_asset_id:
+            market, outcome_label = _asset_market(client, expected_asset_id)
+            asset_id = expected_asset_id
+            actual_type = _canonical_market_type(core._market_type(market))
+            if actual_type != market_type:
+                raise RuntimeError(
+                    f"Exact outcome token resolved to market type '{core._market_type(market)}', "
+                    f"not requested '{market_type}'"
+                )
+        else:
+            intent = core.TradeIntent(
+                market_url=market_url,
+                outcome=outcome,
+                market_type=market_type,
+                max_price=max_price,
+                budget_usdc=budget,
+                note="Termux remote live test",
+            )
+            market = core._select_market(client, intent)
+            actual_type = _canonical_market_type(core._market_type(market))
+            if actual_type != market_type:
+                raise RuntimeError(
+                    f"Resolved sports market type is '{core._market_type(market)}', not {market_type}"
+                )
+            asset_id, _, outcome_label = core._resolve_asset(market, outcome)
+
         buy_price = Decimal(str(client.get_price(asset_id=asset_id, side="BUY")))
         spread = Decimal(str(client.get_spread(asset_id=asset_id)))
         book = client.get_order_book(asset_id=asset_id)
-        min_size = Decimal(str(getattr(getattr(market, "trading", None), "minimum_order_size", "0") or "0"))
+        min_size = Decimal(
+            str(getattr(getattr(market, "trading", None), "minimum_order_size", "0") or "0")
+        )
 
     if buy_price <= 0 or buy_price >= 1:
         raise RuntimeError(f"Invalid current BUY price {buy_price}")
@@ -174,10 +236,12 @@ def _validate_moneyline(payload: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError(f"Current BUY price {buy_price} exceeds your maximum price {max_price}")
     if spread > max_spread:
         raise RuntimeError(f"Current spread {spread} exceeds maximum spread {max_spread}")
+
     asks = getattr(book, "asks", None) or []
     best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
     if best_ask is None or best_ask > max_price:
         raise RuntimeError("Selected limit would not cross the current best ask")
+
     shares = (budget / max_price).quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
     if min_size > 0 and shares < min_size:
         raise RuntimeError(f"Order is below this market's minimum size of {min_size} shares")
@@ -196,13 +260,13 @@ def _validate_moneyline(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _preview(payload: dict[str, Any]) -> dict[str, Any]:
-    out = _validate_moneyline(payload)
+    out = _validate_buy(payload)
     out.update({"ok": True, "executor": WORKER_NAME, "no_order_placed": True})
     return out
 
 
 def _buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, Any]:
-    quote = _validate_moneyline(payload)
+    quote = _validate_buy(payload)
     asset_id = quote["asset_id"]
     shares = Decimal(quote["requested_shares"])
     max_price = Decimal(quote["max_price"])
