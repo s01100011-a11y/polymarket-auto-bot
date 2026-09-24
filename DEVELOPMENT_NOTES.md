@@ -1,3 +1,14 @@
+## 2026-09-24 — Make dashboard auto-trade cap authoritative for Termux (#41)
+
+- **Objective:** Remove the need to keep a normal per-order cap synchronized separately on the Android/Termux executor.
+- **Authoritative cap:** Railway/dashboard `MAX_AUTO_TRADE_USDC` is now re-checked when an eligible BUY/PREVIEW is handed to Termux. A queued BUY that was valid when created but is above a subsequently reduced dashboard cap is failed before executor pickup.
+- **Trusted handoff:** Railway stamps `authorized_max_auto_trade_usdc` into the executor payload at handoff. The original caller cannot make an oversized queued BUY executable by supplying its own stale/higher authorization value because the server overwrites the value before lease.
+- **Phone validation:** Termux requires the server-stamped dashboard cap and independently verifies `budget_usdc <= authorized_max_auto_trade_usdc` before any market/order work.
+- **Emergency backstop:** The old everyday `EXECUTOR_MAX_USDC` gate is replaced by `EXECUTOR_EMERGENCY_MAX_USDC`, default $500. This is intentionally a high local catastrophe ceiling, not a second operational cap that must track the dashboard.
+- **Preserved safeguards:** Existing executor pairing/heartbeat, geoblock, BUY TTL, daily budget, exact market/token, price, spread, order-book and minimum-size checks remain unchanged.
+- **Tests:** Added queue handoff coverage for server cap stamping and for blocking a queued BUY after the dashboard cap is reduced. Termux budget-cap logic is isolated so the server authorization and emergency ceiling are explicit/fail-closed.
+- **Deployment:** No merge or production deployment in this branch.
+
 ## 2026-09-24 — Auto-trade Slam/Syndicate NFL picks with unit sizing (#33)
 
 - **Objective:** Automatically buy new NFL game-market plays posted by SLAM - All Access and The Syndicate on Polymarket and maintain separate bot performance records as Slam - NFL and Syndicate - NFL.
