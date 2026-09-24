@@ -161,7 +161,7 @@ def _install_filters() -> None:
     html = html.replace("</style>", css + "</style>", 1)
 
     js = r"""
-let dashboardStatsFilter=localStorage.getItem('dashboardStatsFilter')||'both';
+let dashboardStatsFilter=localStorage.getItem('dashboardStatsFilter')||'live';
 let dashboardTradesFilter=localStorage.getItem('dashboardTradesFilter')||'both';
 
 function filterButtons(){
