@@ -1,3 +1,10 @@
+## 2026-09-25 — Persist last NFL bridge diagnostics (#46)
+
+- Saves the latest sanitized /public/nfl response to /app/data/nfl_capper_last_feed.json on every successful poll.
+- Captures counts, listener/freshness metadata, safe unparsed-post diagnostics, and parsed picks so zero-pick failures can be diagnosed after the fact.
+- The public bridge contract does not include raw Telegram message text, so this file does not persist raw channel content.
+- No execution, sizing, risk-limit, or freshness behavior changed.
+
 ## 2026-09-25 — Fix NFL Telegram source identity matching (#44)
 
 - **Root cause:** The Telegram bridge stores/serves a channel username when Telegram exposes one, but the NFL auto-trader previously required exact display titles (`SLAM - All Access` / `The Syndicate`). Valid capper picks could therefore be dropped before any signal record or executor request was created.
