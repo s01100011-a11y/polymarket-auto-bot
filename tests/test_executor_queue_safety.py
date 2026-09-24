@@ -1,4 +1,5 @@
 import unittest
+from decimal import Decimal
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -60,6 +61,38 @@ class ExecutorQueueSafetyTests(unittest.TestCase):
 
         self.assertEqual(expired, [])
         self.assertEqual(data["exec-test"]["status"], "LEASED")
+
+    def test_handoff_stamps_current_dashboard_cap(self):
+        rec = {
+            "id": "exec-test",
+            "action": "BUY",
+            "status": "PENDING",
+            "payload": {"budget_usdc": "30"},
+        }
+        with patch.object(remote.core, "MAX_AUTO_TRADE_USDC", Decimal("50")):
+            allowed = remote._authorize_order_for_handoff(rec)
+
+        self.assertTrue(allowed)
+        self.assertEqual(rec["payload"]["authorized_max_auto_trade_usdc"], "50")
+        self.assertEqual(rec["status"], "PENDING")
+
+    def test_handoff_blocks_buy_above_reduced_dashboard_cap(self):
+        rec = {
+            "id": "exec-test",
+            "action": "BUY",
+            "status": "PENDING",
+            "payload": {
+                "budget_usdc": "30",
+                "authorized_max_auto_trade_usdc": "100",
+            },
+        }
+        with patch.object(remote.core, "MAX_AUTO_TRADE_USDC", Decimal("20")):
+            allowed = remote._authorize_order_for_handoff(rec)
+
+        self.assertFalse(allowed)
+        self.assertEqual(rec["status"], "FAILED")
+        self.assertIn("current dashboard Auto trade cap $20", rec["error"])
+        self.assertEqual(rec["payload"]["authorized_max_auto_trade_usdc"], "100")
 
     def test_remote_buy_rejected_when_executor_offline(self):
         with (

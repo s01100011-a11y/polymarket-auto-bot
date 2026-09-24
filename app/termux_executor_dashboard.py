@@ -290,6 +290,38 @@ def _expire_stale_buys_persisted() -> list[str]:
     return expired
 
 
+def _authorize_order_for_handoff(rec: dict[str, Any]) -> bool:
+    """Apply the current dashboard auto-trade cap immediately before Termux pickup."""
+    if rec.get("action") not in {"BUY", "PREVIEW"}:
+        return True
+
+    payload = rec.get("payload") or {}
+    try:
+        budget = Decimal(str(payload.get("budget_usdc") or "0"))
+    except Exception:
+        budget = Decimal("0")
+    cap = Decimal(str(core.MAX_AUTO_TRADE_USDC))
+
+    if budget <= 0 or budget > cap:
+        stamp = _now_iso()
+        rec["status"] = "FAILED"
+        rec["updated_at"] = stamp
+        rec["error"] = (
+            f"{rec.get('action')} blocked before executor pickup: budget ${budget} "
+            f"exceeds current dashboard Auto trade cap ${cap}"
+            if budget > 0
+            else f"{rec.get('action')} blocked before executor pickup: invalid budget ${budget}"
+        )
+        rec.pop("lease_until_unix", None)
+        return False
+
+    # This value is server-stamped at handoff, not trusted from the original caller.
+    # Termux requires it and independently verifies budget <= this current dashboard cap.
+    payload["authorized_max_auto_trade_usdc"] = str(cap)
+    rec["payload"] = payload
+    return True
+
+
 def _enqueue(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not REMOTE_EXECUTION_ENABLED:
         raise HTTPException(status_code=409, detail="Remote execution is disabled")
@@ -533,11 +565,19 @@ def executor_next(_: dict[str, Any] = Depends(_executor_auth)):
             _queue_save(data)
 
         candidates = []
+        handoff_changed = False
         for rec in data.values():
             status = rec.get("status")
             lease_until = float(rec.get("lease_until_unix") or 0)
             if status == "PENDING" or (status == "LEASED" and lease_until <= now):
+                if not _authorize_order_for_handoff(rec):
+                    handoff_changed = True
+                    continue
+                if rec.get("action") in {"BUY", "PREVIEW"}:
+                    handoff_changed = True
                 candidates.append(rec)
+        if handoff_changed:
+            _queue_save(data)
         if not candidates:
             return {"ok": True, "request": None}
         rec = sorted(candidates, key=lambda x: x.get("created_unix", 0))[0]
