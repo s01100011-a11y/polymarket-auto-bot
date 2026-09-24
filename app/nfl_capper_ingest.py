@@ -20,6 +20,11 @@ TARGET_SOURCES = {
     "SLAM - All Access": "Slam - NFL",
     "The Syndicate": "Syndicate - NFL",
 }
+SOURCE_LABELS = ("Slam - NFL", "Syndicate - NFL")
+SOURCE_ID_ENV = {
+    "Slam - NFL": "NFL_CAPPER_SLAM_SOURCE_IDS",
+    "Syndicate - NFL": "NFL_CAPPER_SYNDICATE_SOURCE_IDS",
+}
 
 NFL_TEAMS: dict[str, tuple[str, tuple[str, ...]]] = {
     "ARI": ("Arizona Cardinals", ("arizona cardinals", "cardinals")),
@@ -85,8 +90,46 @@ def _parse_iso(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _compact_source(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+
+
+def _configured_source_ids(label: str) -> set[str]:
+    env_name = SOURCE_ID_ENV[label]
+    return {
+        item.strip()
+        for item in os.getenv(env_name, "").split(",")
+        if item.strip()
+    }
+
+
 def _source_label(pick: dict[str, Any]) -> str | None:
-    return TARGET_SOURCES.get(str(pick.get("source") or "").strip())
+    """Resolve mutable Telegram labels/usernames to a stable capper identity."""
+    source = str(pick.get("source") or "").strip()
+    exact = TARGET_SOURCES.get(source)
+    if exact is not None:
+        return exact
+
+    source_key = _compact_source(pick.get("source_key"))
+    if source_key in {"slam", "slamnfl"}:
+        return "Slam - NFL"
+    if source_key in {"syndicate", "thesyndicate", "syndicatenfl"}:
+        return "Syndicate - NFL"
+
+    compact = _compact_source(source)
+    # The bridge historically stored Telegram username-or-title. Match the
+    # analyst identity rather than requiring one mutable display string.
+    if compact.startswith("slam") or "slamthebookie" in compact:
+        return "Slam - NFL"
+    if "syndicate" in compact:
+        return "Syndicate - NFL"
+
+    source_id = str(pick.get("source_id") or "").strip()
+    if source_id:
+        for label in SOURCE_LABELS:
+            if source_id in _configured_source_ids(label):
+                return label
+    return None
 
 
 def _units_for_pick(pick: dict[str, Any]) -> Decimal:
@@ -428,7 +471,7 @@ def _prepare_pick(
 
 def _stats_from_executions(executions: dict[str, Any]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
-    for label in TARGET_SOURCES.values():
+    for label in SOURCE_LABELS:
         wins = losses = pushes = open_trades = total = 0
         stake = Decimal("0")
         realized = Decimal("0")
@@ -560,7 +603,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 _save_signals(signals)
             return
 
-        picks = [p for p in (feed.get("picks") or []) if isinstance(p, dict) and _source_label(p) is not None]
+        picks = [p for p in (feed.get("picks") or []) if isinstance(p, dict)]
         picks.sort(key=lambda p: str(p.get("posted_at") or ""))
         now = datetime.now(timezone.utc)
 
@@ -568,20 +611,38 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             fp = _fingerprint(pick)
             current = signals.get(fp)
             if current and current.get("status") in {
-                "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED", "IGNORED_STALE", "IGNORED_UNSUPPORTED",
+                "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED", "IGNORED_STALE",
+                "IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE",
             }:
                 continue
 
+            source_label = _source_label(pick)
             base_record = current or {
                 "id": fp,
                 "first_seen_at": _now_iso(),
-                "source": _source_label(pick),
+                "source": source_label,
                 "telegram_source": pick.get("source"),
+                "telegram_source_id": pick.get("source_id"),
+                "telegram_source_key": pick.get("source_key"),
                 "posted_at": pick.get("posted_at"),
                 "selection": pick.get("selection"),
                 "units": str(_units_for_pick(pick)),
                 "stake_usdc": str(_stake_for_pick(pick, unit_usdc)),
             }
+
+            if source_label is None:
+                base_record["status"] = "IGNORED_UNTRACKED_SOURCE"
+                base_record["reason"] = "NFL feed source is not Slam or Syndicate"
+                base_record["updated_at"] = _now_iso()
+                signals[fp] = base_record
+                changed = True
+                print(
+                    "NFL_CAPPER_SOURCE_IGNORED "
+                    f"source={pick.get('source')!r} source_id={pick.get('source_id')!r} "
+                    f"source_key={pick.get('source_key')!r} selection={pick.get('selection')!r}",
+                    flush=True,
+                )
+                continue
 
             posted = _parse_iso(pick.get("posted_at"))
             age = (now - posted).total_seconds() if posted else float("inf")
@@ -609,12 +670,25 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 base_record.pop("last_error", None)
                 signals[fp] = base_record
                 changed = True
+                print(
+                    "NFL_CAPPER_SIGNAL "
+                    f"status={base_record.get('status')} source={source_label!r} "
+                    f"telegram_source={pick.get('source')!r} selection={pick.get('selection')!r} "
+                    f"request_id={base_record.get('request_id')!r}",
+                    flush=True,
+                )
             except Exception as exc:
                 base_record["status"] = "RETRYING"
                 base_record["last_error"] = f"{type(exc).__name__}: {exc}"
                 base_record["updated_at"] = _now_iso()
                 signals[fp] = base_record
                 changed = True
+                print(
+                    "NFL_CAPPER_SIGNAL "
+                    f"status=RETRYING source={source_label!r} telegram_source={pick.get('source')!r} "
+                    f"selection={pick.get('selection')!r} error={base_record['last_error']}",
+                    flush=True,
+                )
 
         if changed:
             _save_signals(signals)
@@ -657,6 +731,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             "retrying": sum(1 for x in signals.values() if (x or {}).get("status") == "RETRYING"),
             "stale_ignored": sum(1 for x in signals.values() if (x or {}).get("status") == "IGNORED_STALE"),
             "unsupported_ignored": sum(1 for x in signals.values() if (x or {}).get("status") == "IGNORED_UNSUPPORTED"),
+            "untracked_source_ignored": sum(1 for x in signals.values() if (x or {}).get("status") == "IGNORED_UNTRACKED_SOURCE"),
         }
         return {
             "enabled": enabled,
