@@ -23,7 +23,7 @@ from app import main as core  # noqa: E402
 
 BRIDGE_URL = os.getenv("EXECUTOR_BRIDGE_URL", "https://polymarket-auto-bot-production.up.railway.app").rstrip("/")
 WORKER_NAME = os.getenv("EXECUTOR_NAME", "termux-phone")
-MAX_USDC = Decimal(os.getenv("EXECUTOR_MAX_USDC", "25"))
+EMERGENCY_MAX_USDC = Decimal(os.getenv("EXECUTOR_EMERGENCY_MAX_USDC", "500"))
 FILL_WAIT_SECONDS = max(3, min(15, int(os.getenv("EXECUTOR_FILL_WAIT_SECONDS", "8"))))
 TOKEN_FILE = Path(os.getenv("EXECUTOR_TOKEN_FILE", str(Path.home() / ".config/polymarket-termux/executor_token"))).expanduser()
 JOURNAL_FILE = Path(os.getenv("EXECUTOR_JOURNAL_FILE", str(Path.home() / ".config/polymarket-termux/executor_journal.json"))).expanduser()
@@ -168,20 +168,38 @@ def _canonical_market_type(value: Any) -> str:
     return raw
 
 
+def _validate_budget_caps(payload: dict[str, Any]) -> Decimal:
+    """Enforce Railway's current dashboard cap plus a high local emergency ceiling."""
+    try:
+        budget = Decimal(str(payload.get("budget_usdc") or "0"))
+        authorized_cap = Decimal(str(payload.get("authorized_max_auto_trade_usdc") or "0"))
+    except Exception as exc:
+        raise RuntimeError("Invalid executor budget/cap payload") from exc
+
+    if budget <= 0:
+        raise RuntimeError("Budget must be greater than $0")
+    if authorized_cap <= 0:
+        raise RuntimeError("Railway did not provide a valid dashboard Auto trade cap")
+    if budget > authorized_cap:
+        raise RuntimeError(
+            f"Budget ${budget} exceeds the current dashboard Auto trade cap of ${authorized_cap}"
+        )
+    if budget > EMERGENCY_MAX_USDC:
+        raise RuntimeError(
+            f"Budget ${budget} exceeds the phone emergency hard ceiling of ${EMERGENCY_MAX_USDC}"
+        )
+    return budget
+
+
 def _validate_buy(payload: dict[str, Any]) -> dict[str, Any]:
     market_type = _canonical_market_type(payload.get("market_type"))
     if market_type not in {"moneyline", "spread", "total"}:
         raise RuntimeError("Executor supports only moneyline, spread, and total game markets")
 
-    budget = Decimal(str(payload.get("budget_usdc") or "0"))
+    budget = _validate_budget_caps(payload)
     max_price = Decimal(str(payload.get("max_price") or "0"))
     max_spread = Decimal(str(payload.get("max_spread") or "0.08"))
     max_price_global = Decimal(str(payload.get("max_price_global") or "0.95"))
-    if budget <= 0 or budget > MAX_USDC:
-        raise RuntimeError(
-            "Budget must be greater than $0 and no more than the local executor cap of $"
-            + str(MAX_USDC)
-        )
     if max_price <= 0 or max_price >= 1 or max_price > max_price_global:
         raise RuntimeError(f"Invalid max price {max_price}")
 
