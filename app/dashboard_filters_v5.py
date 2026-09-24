@@ -161,6 +161,11 @@ def _install_filters() -> None:
     html = html.replace("</style>", css + "</style>", 1)
 
     js = r"""
+const dashboardStatsDefaultVersion='live-v1';
+if(localStorage.getItem('dashboardStatsDefaultVersion')!==dashboardStatsDefaultVersion){
+ localStorage.setItem('dashboardStatsFilter','live');
+ localStorage.setItem('dashboardStatsDefaultVersion',dashboardStatsDefaultVersion);
+}
 let dashboardStatsFilter=localStorage.getItem('dashboardStatsFilter')||'live';
 let dashboardTradesFilter=localStorage.getItem('dashboardTradesFilter')||'both';
 
