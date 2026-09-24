@@ -422,6 +422,9 @@ def _resolved_market_outcome(client: PublicClient, asset_id: str) -> dict[str, A
             elif price <= Decimal("0.0001"):
                 terminal = Decimal("0")
                 result = "LOSS"
+            elif abs(price - Decimal("0.5")) <= Decimal("0.0001"):
+                terminal = Decimal("0.5")
+                result = "PUSH"
             else:
                 return None
             return {
@@ -571,7 +574,11 @@ def _estimate_pnl_with_paper(records: list[dict]) -> tuple[list[dict], Decimal]:
                         cost_basis = entry * shares
                     final_value = terminal_price * shares
                     realized = final_value - (cost_basis or Decimal("0"))
-                    rec["status"] = "SETTLED_WIN" if settlement["result"] == "WIN" else "SETTLED_LOSS"
+                    rec["status"] = {
+                        "WIN": "SETTLED_WIN",
+                        "LOSS": "SETTLED_LOSS",
+                        "PUSH": "SETTLED_PUSH",
+                    }[settlement["result"]]
                     rec["exit_price"] = str(terminal_price)
                     rec["realized_pnl"] = str(realized.quantize(Decimal("0.00001")))
                     rec["remaining_shares"] = "0"
