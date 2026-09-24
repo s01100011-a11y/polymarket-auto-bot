@@ -1,3 +1,12 @@
+## 2026-09-25 — Fix NFL Telegram source identity matching (#44)
+
+- **Root cause:** The Telegram bridge stores/serves a channel username when Telegram exposes one, but the NFL auto-trader previously required exact display titles (`SLAM - All Access` / `The Syndicate`). Valid capper picks could therefore be dropped before any signal record or executor request was created.
+- **Fix:** Source matching now resolves exact legacy titles, canonical bridge `source_key` values, normalized Slam/Syndicate username variants, and optional stable Telegram `source_id` allowlists.
+- **Auditability:** The capper now persists every parsed NFL feed pick. Non-target analysts are recorded as `IGNORED_UNTRACKED_SOURCE` instead of disappearing silently, and queue/retry/source-ignore decisions emit explicit `NFL_CAPPER_SIGNAL` / `NFL_CAPPER_SOURCE_IGNORED` logs.
+- **Bridge compatibility:** New bridge payloads expose `source_id` and `source_key`; older payloads remain supported through normalized aliases.
+- **Safety:** Only Slam and Syndicate map to live-trade source labels. Blacksmith and unknown channels remain ignored.
+- **Tests:** Added exact-title, username-variant, canonical-key, and unknown-source regression coverage.
+
 ## 2026-09-24 — Make dashboard auto-trade cap authoritative for Termux (#41)
 
 - **Objective:** Remove the need to keep a normal per-order cap synchronized separately on the Android/Termux executor.
