@@ -1,3 +1,11 @@
+## 2026-09-24 — Default dashboard Stats view to LIVE (#34)
+
+- **Objective:** Make the Trading Bot Dashboard open the Stats performance view on LIVE data by default.
+- **Behavior:** When no `dashboardStatsFilter` preference exists in browser localStorage, Stats now defaults to `live`. An explicit saved BOTH or PAPER selection is still respected.
+- **P/L alignment:** The Portfolio P/L card/chart uses the same LIVE fallback so its initial label and values match the Stats selection.
+- **Unchanged:** Open trades still defaults to BOTH. No execution, trading, risk, sizing, routing, or wallet behavior changed.
+- **Tests:** Added `tests/test_dashboard_default_stats_mode.py`.
+
 ## 2026-09-23 — Executor offline/stale BUY protection (#29)
 
 - Incident: automatic LIVE BUYs were left PENDING while the Termux executor was offline.
