@@ -86,6 +86,12 @@ def _feed_content_signature(feed: dict[str, Any]) -> str:
         "detected_picks": feed.get("detected_picks"),
         "listener_connected": feed.get("listener_connected"),
         "listener_ready": feed.get("listener_ready"),
+        "freshness": {
+            "connected": (feed.get("freshness") or {}).get("connected"),
+            "ready": (feed.get("freshness") or {}).get("ready"),
+            "resolved_channels": (feed.get("freshness") or {}).get("resolved_channels") or [],
+            "error": (feed.get("freshness") or {}).get("error"),
+        },
         "unparsed_recent": feed.get("unparsed_recent") or [],
         "picks": feed.get("picks") or [],
     }
@@ -645,7 +651,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     f"detected_picks={feed.get('detected_picks')} "
                     f"unparsed_recent={len(unparsed_for_log)} "
                     f"listener_connected={feed.get('listener_connected')} "
-                    f"listener_ready={feed.get('listener_ready')}",
+                    f"listener_ready={feed.get('listener_ready')} "
+                    f"freshness_error={(feed.get('freshness') or {}).get('error')!r} "
+                    f"resolved_channels={(feed.get('freshness') or {}).get('resolved_channels') or []!r}",
                     flush=True,
                 )
                 for row in picks_for_log[:20]:

@@ -1,3 +1,9 @@
+## 2026-09-25 — Log Telegram bridge freshness error (#50)
+
+- NFL feed diagnostics now include the bridge's sanitized freshness error and resolved channel labels.
+- Feed change detection includes the freshness state so a changing reconnect/auth failure is surfaced even when pick counts remain zero.
+- No Telegram credentials, raw messages, or execution behavior are logged or changed.
+
 ## 2026-09-25 — Log NFL feed and terminal ingest decisions (#48)
 
 - Logs a sanitized NFL feed summary only when the feed content changes, avoiding 15-second log spam.
