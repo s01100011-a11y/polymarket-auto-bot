@@ -24,6 +24,32 @@ def _pick(**overrides):
     return row
 
 
+class NflCapperSourceTests(unittest.TestCase):
+    def test_exact_display_names_still_work(self):
+        self.assertEqual(capper._source_label(_pick(source="SLAM - All Access")), "Slam - NFL")
+        self.assertEqual(capper._source_label(_pick(source="The Syndicate")), "Syndicate - NFL")
+
+    def test_slam_username_is_recognized(self):
+        self.assertEqual(capper._source_label(_pick(source="slamthebookie")), "Slam - NFL")
+        self.assertEqual(capper._source_label(_pick(source="@slam_the_bookie")), "Slam - NFL")
+
+    def test_syndicate_username_variant_is_recognized(self):
+        self.assertEqual(capper._source_label(_pick(source="the_syndicate_vip")), "Syndicate - NFL")
+
+    def test_bridge_source_key_is_preferred_identity(self):
+        self.assertEqual(
+            capper._source_label(_pick(source="some_mutable_title", source_key="slam")),
+            "Slam - NFL",
+        )
+        self.assertEqual(
+            capper._source_label(_pick(source="another_title", source_key="syndicate")),
+            "Syndicate - NFL",
+        )
+
+    def test_unknown_source_remains_untracked(self):
+        self.assertIsNone(capper._source_label(_pick(source="Blacksmith Bets Standard VIP")))
+
+
 class NflCapperSizingTests(unittest.TestCase):
     def test_default_and_sub_one_unit_both_buy_one_unit(self):
         self.assertEqual(str(capper._stake_for_pick(_pick(units=None))), "10.00")
