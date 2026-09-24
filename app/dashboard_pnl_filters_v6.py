@@ -141,7 +141,7 @@ def _install_filtered_pnl_ui() -> None:
 
     html = html.replace(
         '<div class="label">Live portfolio P/L</div>',
-        '<div class="label" id="pnlChartLabel">Portfolio P/L · BOTH</div>',
+        '<div class="label" id="pnlChartLabel">Portfolio P/L · LIVE</div>',
         1,
     )
 
@@ -157,7 +157,7 @@ def _install_filtered_pnl_ui() -> None:
 window.dashboardFilteredPnl=window.dashboardFilteredPnl||{};
 
 function renderFilteredPnl(){
- const mode=(localStorage.getItem('dashboardStatsFilter')||'both').toLowerCase();
+ const mode=(localStorage.getItem('dashboardStatsFilter')||'live').toLowerCase();
  const p=(window.dashboardFilteredPnl||{})[mode];
  if(!p)return;
  const card=document.getElementById('pnl');
