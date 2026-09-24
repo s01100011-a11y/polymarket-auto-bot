@@ -1,3 +1,10 @@
+## 2026-09-24 — Migrate existing Stats preference to LIVE (#36)
+
+- **Issue:** Browsers that had previously saved `dashboardStatsFilter=both` kept showing BOTH after the new LIVE fallback shipped.
+- **Fix:** Added a versioned one-time localStorage migration. On first load after this release, the saved Stats mode is set to LIVE and the migration version is recorded.
+- **After migration:** Any later manual Stats selection is preserved normally because the migration does not repeat for the same version.
+- **Unchanged:** Open trades still defaults to BOTH. No trading, execution, routing, sizing, risk, wallet, or order behavior changed.
+
 ## 2026-09-24 — Default dashboard Stats view to LIVE (#34)
 
 - **Objective:** Make the Trading Bot Dashboard open the Stats performance view on LIVE data by default.
