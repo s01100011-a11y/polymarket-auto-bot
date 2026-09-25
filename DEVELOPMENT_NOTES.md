@@ -1,3 +1,13 @@
+## 2026-09-25 — SLAM/Syndicate CFB Telegram preview pipeline (#72)
+
+- Added a College Football worker that polls the sanitized `/public/ncaaf` bridge every 15 seconds with a 180-second freshness cutoff.
+- Tracks SLAM and The Syndicate separately as `Slam - CFB` and `Syndicate - CFB`.
+- Uses the same unit convention as NFL: 1u = $10 USDC; explicit units above 1 scale the preview stake.
+- Supports full-game moneyline, spread, and total previews only. Period/half/quarter, team totals, props, missing matchup context, and ambiguous event matches fail closed.
+- Resolves only Polymarket College Football events with `cfb-` slugs, exact market type/line/outcome, live best ask and spread checks, existing per-order cap, and daily-budget guard visibility.
+- Sends only `PREVIEW` to the Termux executor. This worker contains no path that enqueues `BUY`.
+- Saves preview state/dedupe records under `/app/data` and exposes authenticated status at `/api/cfb-cappers/status`.
+
 ## 2026-09-25 — Fix NFL event discovery by team aliases (#70)
 
 - **Incident:** Safe PREVIEW diagnostics for SLAM `UNDER 43.5` returned zero candidate events for `title_search=Atlanta Falcons`, while the live Polymarket event is titled `Falcons vs. Packers`.
