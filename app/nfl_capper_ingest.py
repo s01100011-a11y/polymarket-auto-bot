@@ -509,6 +509,115 @@ def _prepare_pick(
     }
 
 
+
+def _prepare_test_preview(
+    pick: dict[str, Any],
+    *,
+    core: Any,
+    remote: Any,
+    unit_usdc: Decimal,
+) -> dict[str, Any]:
+    """Exercise the production Telegram-capper checks through Termux PREVIEW only."""
+    kind, reason = _classify_pick(pick)
+    if kind is None:
+        raise RuntimeError(reason or "unsupported test pick")
+
+    if not core.auto_trading_enabled():
+        raise RuntimeError("AUTO_TRADING is disabled")
+
+    ready, executor_state = live_control._executor_ready()
+    if not ready:
+        if executor_state.get("geo_blocked"):
+            raise RuntimeError("Termux executor is geoblocked")
+        raise RuntimeError("Termux executor is offline")
+
+    units = _units_for_pick(pick)
+    stake = _stake_for_pick(pick, unit_usdc)
+    if stake > core.MAX_AUTO_TRADE_USDC:
+        raise RuntimeError(
+            "Requested " + str(units) + "u = $" + str(stake)
+            + " exceeds MAX_AUTO_TRADE_USDC=$" + str(core.MAX_AUTO_TRADE_USDC)
+        )
+
+    event, market, outcome_label, outcome_obj = _find_market(pick, kind)
+    asset_id = str(
+        getattr(outcome_obj, "token_id", None)
+        or getattr(outcome_obj, "position_id", None)
+        or ""
+    )
+    if not asset_id:
+        raise RuntimeError("Matched Polymarket market has no tradable outcome token")
+
+    with PublicClient() as client:
+        buy_price = Decimal(str(client.get_price(asset_id=asset_id, side="BUY")))
+        spread = Decimal(str(client.get_spread(asset_id=asset_id)))
+        book = client.get_order_book(asset_id=asset_id)
+
+    asks = getattr(book, "asks", None) or []
+    best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
+    if buy_price <= 0 or buy_price >= 1:
+        raise RuntimeError(f"Invalid current BUY price {buy_price}")
+    if best_ask is None:
+        raise RuntimeError("No current ask is available")
+    if best_ask > core.MAX_PRICE:
+        raise RuntimeError(f"Current best ask {best_ask} exceeds MAX_PRICE={core.MAX_PRICE}")
+    if spread > core.MAX_SPREAD:
+        raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
+
+    used = core._daily_budget_used()
+    pending = _pending_auto_budget(remote)
+    if used + pending + stake > core.MAX_DAILY_BUDGET_USDC:
+        raise RuntimeError(
+            "Daily auto budget would exceed MAX_DAILY_BUDGET_USDC=$"
+            + str(core.MAX_DAILY_BUDGET_USDC)
+            + "; used=$" + str(used)
+            + ", pending=$" + str(pending)
+            + ", requested=$" + str(stake)
+        )
+
+    event_slug = str(getattr(event, "slug", "") or "")
+    if not event_slug:
+        raise RuntimeError("Matched Polymarket event has no slug")
+
+    payload = {
+        "market_url": f"https://polymarket.com/sports/nfl/{event_slug}",
+        "outcome": outcome_label,
+        "market_type": kind,
+        "asset_id": asset_id,
+        "max_price": str(best_ask),
+        "budget_usdc": str(stake),
+        "max_spread": str(core.MAX_SPREAD),
+        "max_price_global": str(core.MAX_PRICE),
+        "source": "nfl_capper_test_preview",
+        "auto": False,
+        "strategy_source": _source_label(pick),
+        "strategy_sport": "NFL",
+        "strategy_units": str(units),
+        "strategy_unit_usdc": str(unit_usdc),
+        "strategy_selection": pick.get("selection"),
+        "strategy_telegram_source": pick.get("source"),
+    }
+    queued = remote._enqueue("PREVIEW", payload)
+    return {
+        "status": "PREVIEW_QUEUED",
+        "request_id": queued["id"],
+        "market": str(
+            getattr(market, "question", "")
+            or getattr(event, "title", "NFL market")
+        ),
+        "market_url": payload["market_url"],
+        "market_type": kind,
+        "outcome": outcome_label,
+        "asset_id": asset_id,
+        "units": str(units),
+        "stake_usdc": str(stake),
+        "current_buy_price": str(buy_price),
+        "best_ask": str(best_ask),
+        "max_price": str(best_ask),
+        "spread": str(spread),
+    }
+
+
 def _stats_from_executions(executions: dict[str, Any]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for label in SOURCE_LABELS:
@@ -588,6 +697,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     poll_seconds = max(5, int(os.getenv("NFL_CAPPER_POLL_SECONDS", "15")))
     max_age_seconds = max(30, int(os.getenv("NFL_CAPPER_MAX_PICK_AGE_SECONDS", "180")))
     unit_usdc = Decimal(os.getenv("NFL_CAPPER_UNIT_USDC", "10"))
+    test_preview_raw = os.getenv("NFL_CAPPER_TEST_PREVIEW_JSON", "").strip()
+    test_preview_marker = core.DATA_DIR / "nfl_capper_test_preview.json"
 
     def _load_signals() -> dict[str, Any]:
         data = core._load(signal_file)
@@ -818,8 +929,70 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         _STATUS["last_error"] = None
         _STATUS["cycles"] = int(_STATUS.get("cycles") or 0) + 1
 
+    async def _run_test_preview_once() -> None:
+        if not test_preview_raw or test_preview_marker.exists():
+            return
+        try:
+            pick = json.loads(test_preview_raw)
+            if not isinstance(pick, dict):
+                raise RuntimeError("NFL_CAPPER_TEST_PREVIEW_JSON must decode to an object")
+            pick["posted_at"] = _now_iso()
+            result = await asyncio.to_thread(
+                _prepare_test_preview,
+                pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+            )
+            marker = {
+                "created_at": _now_iso(),
+                "pick": pick,
+                "preview": result,
+                "status": "QUEUED",
+            }
+            core._save(test_preview_marker, marker)
+            print(
+                "NFL_CAPPER_TEST_PREVIEW "
+                + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                flush=True,
+            )
+
+            request_id = str(result.get("request_id") or "")
+            for _ in range(90):
+                await asyncio.sleep(1)
+                queued = remote._queue_load().get(request_id) if request_id else None
+                if not queued:
+                    continue
+                status = str(queued.get("status") or "")
+                if status not in {"DONE", "FAILED"}:
+                    continue
+                marker["status"] = status
+                marker["completed_at"] = queued.get("updated_at") or _now_iso()
+                marker["result"] = queued.get("result")
+                marker["error"] = queued.get("error")
+                core._save(test_preview_marker, marker)
+                print(
+                    "NFL_CAPPER_TEST_PREVIEW_RESULT "
+                    + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                    flush=True,
+                )
+                return
+        except Exception as exc:
+            marker = {
+                "created_at": _now_iso(),
+                "status": "FAILED",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            core._save(test_preview_marker, marker)
+            print(
+                "NFL_CAPPER_TEST_PREVIEW_RESULT "
+                + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                flush=True,
+            )
+
     async def _loop() -> None:
         await asyncio.sleep(2)
+        await _run_test_preview_once()
         while True:
             try:
                 await _poll_once()

@@ -1,3 +1,11 @@
+## 2026-09-25 — One-shot NFL capper dry-run preview (#58)
+
+- Added an environment-triggered one-shot production dry-run for the NFL Telegram capper path.
+- The synthetic pick runs the same source allowlist, market classification, unit sizing, exact Polymarket market resolution, dashboard cap, daily budget, current price, spread, and Termux executor readiness checks as a live capper signal.
+- The dry-run can enqueue only `PREVIEW`; it never enqueues `BUY`. Termux `PREVIEW` independently revalidates the exact token, market type, geoblock, price/spread, and minimum order size and returns `no_order_placed: true`.
+- A persistent marker in `/app/data` makes the trigger one-shot across restarts. The request and terminal executor result are logged for verification.
+- Regression coverage asserts a 2u total produces a $20 PREVIEW payload and never a BUY action.
+
 ## 2026-09-25 — Manual sports limit orders through Termux (#54)
 
 - **Incident:** The authenticated manual executor endpoint still rejected every non-moneyline BUY and `_buy_payload()` overwrote the requested market type with `moneyline`, even though the Termux executor already supports exact-token spread and total validation.
