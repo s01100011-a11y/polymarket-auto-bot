@@ -145,6 +145,59 @@ class CfbMarketResolutionTests(unittest.TestCase):
         self.assertEqual(label, "Under")
         self.assertEqual(outcome.token_id, "under-token")
 
+    def test_moneyline_uses_two_team_matchup_to_select_one_event(self):
+        yes = SimpleNamespace(label="Texas", token_id="texas-token")
+        no = SimpleNamespace(label="Tennessee", token_id="tenn-token")
+        market = SimpleNamespace(
+            id="tx-tenn-ml",
+            question="Texas vs Tennessee",
+            slug="cfb-tx-tenn-moneyline",
+            sports=SimpleNamespace(sports_market_type="moneyline", line=None),
+            outcomes=SimpleNamespace(yes=yes, no=no),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        target = SimpleNamespace(
+            id="tx-tenn",
+            slug="cfb-tx-tenn-2026-09-26",
+            title="Texas vs Tennessee",
+            markets=[market],
+        )
+        other = SimpleNamespace(
+            id="tx-other",
+            slug="cfb-tx-other-2026-10-03",
+            title="Texas vs Other",
+            markets=[market],
+        )
+
+        class _Client:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def list_events(self, **kwargs):
+                query = str(kwargs.get("title_search") or "").casefold()
+                if query == "texas":
+                    return CfbMarketResolutionTests._result([target, other])
+                if query == "tennessee":
+                    return CfbMarketResolutionTests._result([target])
+                return CfbMarketResolutionTests._result([])
+
+        pick = _pick(
+            selection="TEXAS ML",
+            team_hint="Texas",
+            event_hints=["Texas", "Tennessee"],
+            bet_types=["moneyline"],
+            spread_lines=[],
+        )
+        with patch.object(capper, "PublicClient", return_value=_Client()):
+            event, _, label, outcome = capper._find_market(pick, "moneyline")
+
+        self.assertEqual(event.slug, "cfb-tx-tenn-2026-09-26")
+        self.assertEqual(label, "Texas")
+        self.assertEqual(outcome.token_id, "texas-token")
+
     def test_multiple_matching_events_fail_closed(self):
         def event(slug):
             yes = SimpleNamespace(label="Baylor", token_id=slug + "-yes")
