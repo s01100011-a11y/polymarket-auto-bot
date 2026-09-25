@@ -1,3 +1,11 @@
+## 2026-09-25 — Match NFL totals using structured Polymarket line (#64)
+
+- **Incident:** A production dry-run of SLAM `UNDER 43.5` failed exact-market resolution even though Falcons-Packers U43.5 remained active on Polymarket.
+- **Root cause:** The matcher tried to recover the total line from market question/slug text and ignored the SDK's structured `market.sports.line` field. Sports questions/slugs can encode the threshold differently from the displayed decimal line.
+- **Fix:** Total-market matching now compares the requested line against `market.sports.line` first when present, falling back to the existing text matcher only when structured line metadata is absent.
+- **Safety:** A structured line mismatch fails closed; the change does not weaken source, freshness, market-type, price/spread, cap, token, or Termux validation.
+- **Tests:** Added exact-match and wrong-line regression coverage where the market text omits `43.5` but structured line metadata is present.
+
 ## 2026-09-25 — Harden Termux executor connectivity and supervision (#62)
 
 - **Incident:** The NFL dry-run showed no Termux heartbeat/`next` traffic reaching Railway. There were no 401 responses, so the server was not rejecting the saved pair token; the phone worker simply was not reaching the bridge.

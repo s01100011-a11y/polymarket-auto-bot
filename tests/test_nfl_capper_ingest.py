@@ -210,6 +210,71 @@ class NflCapperMarketResolutionTests(unittest.TestCase):
                 capper._find_market(pick, "total")
 
 
+    def test_total_uses_structured_sports_line_when_text_omits_decimal(self):
+        over = SimpleNamespace(label="Over", token_id="atl-gb-over")
+        under = SimpleNamespace(label="Under", token_id="atl-gb-under")
+        market = SimpleNamespace(
+            id="atl-gb-total",
+            question="Will Falcons and Packers combine for at least the listed total?",
+            slug="nfl-atl-gb-total",
+            sports=SimpleNamespace(sports_market_type="total", line=43.5),
+            outcomes=SimpleNamespace(yes=over, no=under),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        event = SimpleNamespace(
+            id="atl-gb",
+            slug="nfl-atl-gb-2026-09-25",
+            title="Atlanta Falcons vs Green Bay Packers",
+            markets=[market],
+        )
+        pick = _pick(
+            selection="UNDER 43.5",
+            teams=["ATL", "GB"],
+            bet_types=["total"],
+            spread_lines=[],
+            total_side="UNDER",
+            total_line=43.5,
+        )
+
+        with patch.object(capper, "PublicClient", return_value=self._client([event])):
+            matched_event, matched_market, label, outcome = capper._find_market(pick, "total")
+
+        self.assertEqual(matched_event.slug, "nfl-atl-gb-2026-09-25")
+        self.assertEqual(matched_market.id, "atl-gb-total")
+        self.assertEqual(label, "Under")
+        self.assertEqual(outcome.token_id, "atl-gb-under")
+
+    def test_structured_total_line_rejects_different_line(self):
+        over = SimpleNamespace(label="Over", token_id="atl-gb-over")
+        under = SimpleNamespace(label="Under", token_id="atl-gb-under")
+        market = SimpleNamespace(
+            id="atl-gb-total",
+            question="Will Falcons and Packers combine for at least the listed total?",
+            slug="nfl-atl-gb-total",
+            sports=SimpleNamespace(sports_market_type="total", line=44.5),
+            outcomes=SimpleNamespace(yes=over, no=under),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        event = SimpleNamespace(
+            id="atl-gb",
+            slug="nfl-atl-gb-2026-09-25",
+            title="Atlanta Falcons vs Green Bay Packers",
+            markets=[market],
+        )
+        pick = _pick(
+            selection="UNDER 43.5",
+            teams=["ATL", "GB"],
+            bet_types=["total"],
+            spread_lines=[],
+            total_side="UNDER",
+            total_line=43.5,
+        )
+
+        with patch.object(capper, "PublicClient", return_value=self._client([event])):
+            with self.assertRaisesRegex(ValueError, "No exact open Polymarket NFL total market"):
+                capper._find_market(pick, "total")
+
+
 class NflCapperOutcomeTests(unittest.TestCase):
     @staticmethod
     def _binary_market(question: str):
