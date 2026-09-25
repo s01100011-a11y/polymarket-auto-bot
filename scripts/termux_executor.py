@@ -23,7 +23,11 @@ from app import main as core  # noqa: E402
 
 BRIDGE_URL = os.getenv("EXECUTOR_BRIDGE_URL", "https://polymarket-auto-bot-production.up.railway.app").rstrip("/")
 WORKER_NAME = os.getenv("EXECUTOR_NAME", "termux-phone")
-EMERGENCY_MAX_USDC = Decimal(os.getenv("EXECUTOR_EMERGENCY_MAX_USDC", "500"))
+EMERGENCY_MAX_USDC = Decimal(
+    os.getenv("EXECUTOR_EMERGENCY_MAX_USDC")
+    or os.getenv("EXECUTOR_MAX_USDC")
+    or "500"
+)
 FILL_WAIT_SECONDS = max(3, min(15, int(os.getenv("EXECUTOR_FILL_WAIT_SECONDS", "8"))))
 TOKEN_FILE = Path(os.getenv("EXECUTOR_TOKEN_FILE", str(Path.home() / ".config/polymarket-termux/executor_token"))).expanduser()
 JOURNAL_FILE = Path(os.getenv("EXECUTOR_JOURNAL_FILE", str(Path.home() / ".config/polymarket-termux/executor_journal.json"))).expanduser()
