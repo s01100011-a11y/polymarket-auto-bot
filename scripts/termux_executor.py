@@ -23,7 +23,11 @@ from app import main as core  # noqa: E402
 
 BRIDGE_URL = os.getenv("EXECUTOR_BRIDGE_URL", "https://polymarket-auto-bot-production.up.railway.app").rstrip("/")
 WORKER_NAME = os.getenv("EXECUTOR_NAME", "termux-phone")
-EMERGENCY_MAX_USDC = Decimal(os.getenv("EXECUTOR_EMERGENCY_MAX_USDC", "500"))
+EMERGENCY_MAX_USDC = Decimal(
+    os.getenv("EXECUTOR_EMERGENCY_MAX_USDC")
+    or os.getenv("EXECUTOR_MAX_USDC")
+    or "500"
+)
 FILL_WAIT_SECONDS = max(3, min(15, int(os.getenv("EXECUTOR_FILL_WAIT_SECONDS", "8"))))
 TOKEN_FILE = Path(os.getenv("EXECUTOR_TOKEN_FILE", str(Path.home() / ".config/polymarket-termux/executor_token"))).expanduser()
 JOURNAL_FILE = Path(os.getenv("EXECUTOR_JOURNAL_FILE", str(Path.home() / ".config/polymarket-termux/executor_journal.json"))).expanduser()
@@ -77,7 +81,7 @@ def _save_token(token: str) -> None:
 
 def _pair() -> str:
     code = os.getenv("EXECUTOR_PAIR_CODE", "").strip() or input("Pair code from Railway dashboard: ").strip()
-    with httpx.Client(timeout=15) as h:
+    with _bridge_client(timeout=15) as h:
         r = h.post(f"{BRIDGE_URL}/api/executor/pair", json={"code": code, "name": WORKER_NAME})
         r.raise_for_status()
         token = str(r.json()["token"])
@@ -88,6 +92,12 @@ def _pair() -> str:
 
 def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _bridge_client(timeout: float = 20) -> httpx.Client:
+    """Use the phone's working IPv4 path for Railway executor traffic too."""
+    transport = httpx.HTTPTransport(local_address="0.0.0.0", retries=2)
+    return httpx.Client(transport=transport, timeout=timeout)
 
 
 def _geo() -> dict[str, Any]:
@@ -397,14 +407,24 @@ def _wallet_heartbeat(private_key: str, wallet: str, geo: dict[str, Any] | None,
 def _post_heartbeat(token: str, private_key: str, wallet: str, geo: dict[str, Any] | None, status: str) -> None:
     body = _wallet_heartbeat(private_key, wallet, geo, status)
     try:
-        httpx.post(f"{BRIDGE_URL}/api/executor/heartbeat", headers=_headers(token), json=body, timeout=15).raise_for_status()
+        with _bridge_client(timeout=15) as h:
+            h.post(
+                f"{BRIDGE_URL}/api/executor/heartbeat",
+                headers=_headers(token),
+                json=body,
+            ).raise_for_status()
     except Exception as exc:
         print(f"Heartbeat failed: {exc}")
 
 
 def _send_result(token: str, request_id: str, body: dict[str, Any]) -> None:
-    r = httpx.post(f"{BRIDGE_URL}/api/executor/result/{request_id}", headers=_headers(token), json=body, timeout=20)
-    r.raise_for_status()
+    with _bridge_client(timeout=20) as h:
+        r = h.post(
+            f"{BRIDGE_URL}/api/executor/result/{request_id}",
+            headers=_headers(token),
+            json=body,
+        )
+        r.raise_for_status()
 
 
 def _journal_started(request_id: str, action: str) -> None:
@@ -464,7 +484,8 @@ def main() -> None:
                 _post_heartbeat(token, private_key, wallet, geo, heartbeat_status)
                 last_heartbeat = time.time()
 
-            r = httpx.get(f"{BRIDGE_URL}/api/executor/next", headers=_headers(token), timeout=20)
+            with _bridge_client(timeout=20) as h:
+                r = h.get(f"{BRIDGE_URL}/api/executor/next", headers=_headers(token))
             if r.status_code == 401:
                 print("Executor token was rejected. Delete the local token file and pair again:")
                 print(TOKEN_FILE)

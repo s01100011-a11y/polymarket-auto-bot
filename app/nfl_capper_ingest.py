@@ -938,7 +938,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         if (
             isinstance(existing_marker, dict)
             and existing_marker.get("trigger_hash") == trigger_hash
-            and existing_marker.get("status") in {"QUEUED", "DONE", "FAILED"}
+            and existing_marker.get("status") in {"QUEUED", "DONE"}
         ):
             return
 
@@ -951,15 +951,13 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             # the existing paired Termux worker to reconnect instead of failing
             # the one-shot immediately during that normal handoff window.
             executor_state: dict[str, Any] = {}
-            for _ in range(90):
+            while True:
                 ready, executor_state = live_control._executor_ready()
                 if ready:
                     break
                 if executor_state.get("geo_blocked"):
                     raise RuntimeError("Termux executor is geoblocked")
-                await asyncio.sleep(1)
-            else:
-                raise RuntimeError("Termux executor did not reconnect within 90s")
+                await asyncio.sleep(2)
 
             pick["posted_at"] = _now_iso()
             result = await asyncio.to_thread(
@@ -1019,7 +1017,6 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
 
     async def _loop() -> None:
         await asyncio.sleep(2)
-        await _run_test_preview_once()
         while True:
             try:
                 await _poll_once()
@@ -1033,14 +1030,20 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     async def _lifespan(application: Any):
         async with original_lifespan(application):
             task = asyncio.create_task(_loop(), name="nfl-capper-poller")
+            preview_task = asyncio.create_task(
+                _run_test_preview_once(),
+                name="nfl-capper-test-preview",
+            )
             try:
                 yield
             finally:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                for pending in (task, preview_task):
+                    pending.cancel()
+                for pending in (task, preview_task):
+                    try:
+                        await pending
+                    except asyncio.CancelledError:
+                        pass
 
     app.router.lifespan_context = _lifespan
 
