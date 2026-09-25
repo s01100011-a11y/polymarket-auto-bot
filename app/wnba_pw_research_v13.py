@@ -5,6 +5,7 @@ from app import pw_market_research
 from app import pw_game_reconstruction
 from app import pw_spread_backtest
 from app import nfl_capper_ingest
+from app import cfb_capper_preview
 
 app = base.app
 history = base.history
@@ -46,6 +47,12 @@ pw_spread_backtest.install(
 )
 
 nfl_capper_ingest.install(
+    app=app,
+    dashboard=dashboard,
+    core=core,
+)
+
+cfb_capper_preview.install(
     app=app,
     dashboard=dashboard,
     core=core,
