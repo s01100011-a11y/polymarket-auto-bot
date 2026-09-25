@@ -270,6 +270,7 @@ class CfbPreviewSafetyTests(unittest.TestCase):
             MAX_PRICE=Decimal("0.95"),
             MAX_SPREAD=Decimal("0.08"),
             _daily_budget_used=lambda: Decimal("0"),
+            auto_trading_enabled=lambda: True,
         )
         calls = []
 
@@ -310,7 +311,27 @@ class CfbPreviewSafetyTests(unittest.TestCase):
         self.assertEqual(calls[0][0], "PREVIEW")
         self.assertEqual(calls[0][1]["market_type"], "total")
         self.assertEqual(calls[0][1]["budget_usdc"], "20.00")
+        self.assertTrue(calls[0][1]["trade_id"].startswith("cfb-capper-"))
         self.assertFalse(calls[0][1]["auto"])
+
+    def test_prepare_preview_respects_global_auto_trading_gate(self):
+        core = SimpleNamespace(
+            auto_trading_enabled=lambda: False,
+        )
+        pick = _pick(
+            selection="TEXAS ML",
+            bet_types=["moneyline"],
+            team_hint="Texas",
+            event_hints=["Texas", "Tennessee"],
+            spread_lines=[],
+        )
+        with self.assertRaisesRegex(RuntimeError, "AUTO_TRADING is disabled"):
+            capper._prepare_preview(
+                pick,
+                core=core,
+                remote=SimpleNamespace(),
+                unit_usdc=Decimal("10"),
+            )
 
 
 if __name__ == "__main__":

@@ -313,6 +313,9 @@ def _prepare_preview(
     if kind is None:
         raise RuntimeError(reason or "unsupported CFB pick")
 
+    if not core.auto_trading_enabled():
+        raise RuntimeError("AUTO_TRADING is disabled")
+
     ready, executor_state = live_control._executor_ready()
     if not ready:
         if executor_state.get("geo_blocked"):
@@ -366,6 +369,7 @@ def _prepare_preview(
 
     source_label = _source_label(pick)
     fp = _fingerprint(pick)
+    trade_id = f"cfb-capper-{fp[:18]}"
     payload = {
         "market_url": f"https://polymarket.com/sports/cfb/{event_slug}",
         "outcome": outcome_label,
@@ -373,6 +377,7 @@ def _prepare_preview(
         "asset_id": asset_id,
         "max_price": str(best_ask),
         "budget_usdc": str(stake),
+        "trade_id": trade_id,
         "max_spread": str(core.MAX_SPREAD),
         "max_price_global": str(core.MAX_PRICE),
         "source": "cfb_capper_preview",
@@ -390,6 +395,7 @@ def _prepare_preview(
     return {
         "status": "PREVIEW_QUEUED",
         "request_id": queued["id"],
+        "trade_id": trade_id,
         "strategy_source": source_label,
         "market_type": kind,
         "market": str(
