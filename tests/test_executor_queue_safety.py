@@ -94,6 +94,67 @@ class ExecutorQueueSafetyTests(unittest.TestCase):
         self.assertIn("current dashboard Auto trade cap $20", rec["error"])
         self.assertEqual(rec["payload"]["authorized_max_auto_trade_usdc"], "100")
 
+    def test_remote_total_buy_is_allowed_and_preserved_in_payload(self):
+        req = remote.live_trading.LiveTestBuy(
+            market_url="https://polymarket.com/sports/nfl/test-event",
+            outcome="No",
+            market_type="total",
+            max_price=Decimal("0.52"),
+            budget_usdc=Decimal("20"),
+        )
+        with (
+            patch.object(remote.core, "MAX_AUTO_TRADE_USDC", Decimal("50")),
+            patch.object(remote.core, "MAX_PRICE", Decimal("0.95")),
+            patch.object(remote.core, "_sports_event_slug", return_value="test-event"),
+        ):
+            remote._validate_remote_buy(req)
+            payload = remote._buy_payload(req, trade_id="test-total")
+
+        self.assertEqual(payload["market_type"], "total")
+        self.assertEqual(payload["max_price"], "0.52")
+        self.assertEqual(payload["budget_usdc"], "20")
+
+    def test_remote_spread_buy_is_allowed_and_preserved_in_payload(self):
+        req = remote.live_trading.LiveTestBuy(
+            market_url="https://polymarket.com/sports/nfl/test-event",
+            outcome="Atlanta Falcons +3.5",
+            market_type="spread",
+            max_price=Decimal("0.55"),
+            budget_usdc=Decimal("10"),
+        )
+        with (
+            patch.object(remote.core, "MAX_AUTO_TRADE_USDC", Decimal("50")),
+            patch.object(remote.core, "MAX_PRICE", Decimal("0.95")),
+            patch.object(remote.core, "_sports_event_slug", return_value="test-event"),
+        ):
+            remote._validate_remote_buy(req)
+            payload = remote._buy_payload(req)
+
+        self.assertEqual(payload["market_type"], "spread")
+
+    def test_remote_buy_rejects_unsupported_sports_market_type(self):
+        req = remote.live_trading.LiveTestBuy(
+            market_url="https://polymarket.com/sports/nfl/test-event",
+            outcome="Yes",
+            market_type="player-prop",
+            max_price=Decimal("0.52"),
+            budget_usdc=Decimal("10"),
+        )
+        with self.assertRaisesRegex(HTTPException, "moneyline, spread, or total"):
+            remote._validate_remote_buy(req)
+
+    def test_manual_order_ui_supports_three_market_types(self):
+        html = remote.dashboard.DASHBOARD_HTML
+        self.assertIn('id="ltMarketType"', html)
+        self.assertIn('<option value="moneyline">Moneyline</option>', html)
+        self.assertIn('<option value="spread">Spread</option>', html)
+        self.assertIn('<option value="total">Total</option>', html)
+
+    def test_remote_ui_uses_dashboard_cap_for_manual_amount(self):
+        html = remote.dashboard.DASHBOARD_HTML
+        self.assertIn("liveManualMaxUsdc=Number(d.remote_max_usdc)", html)
+        self.assertIn("budget.max=String(liveManualMaxUsdc)", html)
+
     def test_remote_buy_rejected_when_executor_offline(self):
         with (
             patch.object(
