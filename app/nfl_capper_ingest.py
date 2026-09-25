@@ -385,12 +385,35 @@ def _diagnose_market_candidates(pick: dict[str, Any], kind: str) -> list[dict[st
 
 def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
     teams = [str(x).upper() for x in (pick.get("teams") or [])]
-    query = _team_name(teams[0])
     ranked: list[tuple[int, Any, Any, str, Any]] = []
 
+    search_queries: list[str] = []
+    for candidate in (_team_name(teams[0]), *_team_aliases(teams[0])):
+        text = str(candidate or "").strip()
+        if text and text.casefold() not in {q.casefold() for q in search_queries}:
+            search_queries.append(text)
+
     with PublicClient() as client:
-        events = list(client.list_events(title_search=query, closed=False, page_size=30).first_page().items)
-        for event in events:
+        events_by_key: dict[str, Any] = {}
+        for query in search_queries:
+            result = client.list_events(
+                title_search=query,
+                closed=False,
+                page_size=30,
+            ).first_page()
+            for event in result.items:
+                key = str(
+                    getattr(event, "id", "")
+                    or getattr(event, "slug", "")
+                    or getattr(event, "title", "")
+                )
+                if key:
+                    events_by_key[key] = event
+
+        for event in events_by_key.values():
+            event_slug = _norm(getattr(event, "slug", ""))
+            if event_slug and not event_slug.startswith("nfl-"):
+                continue
             etext = _norm(" ".join([str(getattr(event, "title", "") or ""), str(getattr(event, "slug", "") or "")]))
             if not all(_contains_alias(etext, team) for team in teams[:2]):
                 continue
