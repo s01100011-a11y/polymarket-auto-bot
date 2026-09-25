@@ -143,6 +143,18 @@ class ExecutorQueueSafetyTests(unittest.TestCase):
         with self.assertRaisesRegex(HTTPException, "moneyline, spread, or total"):
             remote._validate_remote_buy(req)
 
+    def test_manual_order_ui_supports_three_market_types(self):
+        html = remote.dashboard.DASHBOARD_HTML
+        self.assertIn('id="ltMarketType"', html)
+        self.assertIn('<option value="moneyline">Moneyline</option>', html)
+        self.assertIn('<option value="spread">Spread</option>', html)
+        self.assertIn('<option value="total">Total</option>', html)
+
+    def test_remote_ui_uses_dashboard_cap_for_manual_amount(self):
+        html = remote.dashboard.DASHBOARD_HTML
+        self.assertIn("liveManualMaxUsdc=Number(d.remote_max_usdc)", html)
+        self.assertIn("budget.max=String(liveManualMaxUsdc)", html)
+
     def test_remote_buy_rejected_when_executor_offline(self):
         with (
             patch.object(
