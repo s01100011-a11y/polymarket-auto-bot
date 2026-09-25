@@ -7,6 +7,19 @@ from unittest.mock import patch
 from scripts import termux_executor as executor
 
 
+class TermuxExecutorTransportTests(unittest.TestCase):
+    def test_bridge_client_forces_ipv4_with_retries(self):
+        with (
+            patch.object(executor.httpx, "HTTPTransport") as transport,
+            patch.object(executor.httpx, "Client") as client,
+        ):
+            result = executor._bridge_client(timeout=17)
+
+        transport.assert_called_once_with(local_address="0.0.0.0", retries=2)
+        client.assert_called_once_with(transport=transport.return_value, timeout=17)
+        self.assertIs(result, client.return_value)
+
+
 class TermuxExecutorCapTests(unittest.TestCase):
     def test_budget_within_server_stamped_dashboard_cap_is_allowed(self):
         payload = {
