@@ -445,8 +445,12 @@ def recent_executor_actions(limit: int = 12):
 
 
 def _validate_remote_buy(req: live_trading.LiveTestBuy) -> None:
-    if core._norm(req.market_type) != "moneyline":
-        raise HTTPException(status_code=400, detail="Remote BUY is locked to moneyline only")
+    market_type = core._norm(req.market_type)
+    if market_type not in {"moneyline", "spread", "total"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Remote BUY supports only sports moneyline, spread, or total markets",
+        )
     if req.budget_usdc > core.MAX_AUTO_TRADE_USDC:
         raise HTTPException(status_code=400, detail=f"Remote amount exceeds dashboard Auto trade cap ${core.MAX_AUTO_TRADE_USDC}")
     if req.max_price > core.MAX_PRICE:
@@ -459,7 +463,7 @@ def _buy_payload(req: live_trading.LiveTestBuy, trade_id: str | None = None) -> 
     return {
         "market_url": str(req.market_url),
         "outcome": req.outcome,
-        "market_type": "moneyline",
+        "market_type": core._norm(req.market_type),
         "max_price": str(req.max_price),
         "budget_usdc": str(req.budget_usdc),
         "trade_id": trade_id,
