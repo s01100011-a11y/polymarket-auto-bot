@@ -10,7 +10,7 @@ dashboard = base.dashboard
 core = base.core
 
 
-# Restrict the protected live-test/manual BUY path to supported sports markets.
+# Restrict the protected live-test BUY path to supported sports markets.
 _ORIGINAL_VALIDATE_TEST_MARKET = live_trading._validate_test_market
 
 
@@ -37,7 +37,6 @@ def _validate_supported_sports_market(req: live_trading.LiveTestBuy):
 
 
 live_trading._validate_test_market = _validate_supported_sports_market
-
 
 @app.post("/api/live/test-preview", dependencies=[Depends(dashboard._auth)])
 def live_test_preview(req: live_trading.LiveTestBuy):
@@ -84,8 +83,8 @@ def _install_live_test_ui() -> None:
       <div class="live-test-lock">Supported market types: <b>MONEYLINE · SPREAD · TOTAL</b> · Other market types are rejected server-side.</div>
       <div class="actions live-test-actions">
         <button class="btn secondary" id="ltPreview" type="button">Check market</button>
-        <button class="btn danger" id="ltBuy" type="button">BUY test position</button>
-        <button class="btn" id="ltSell" type="button" disabled>SELL test position</button>
+        <button class="btn danger" id="ltBuy" type="button">BUY position</button>
+        <button class="btn" id="ltSell" type="button" disabled>SELL position</button>
         <span class="save-msg" id="ltMsg">No live order submitted.</span>
       </div>
       <div class="live-test-result" id="ltResult">Use “Check market” first to verify the resolved sports market, current BUY price and spread.</div>
@@ -108,7 +107,10 @@ function ltPayload(){
  const marketType=(ltEl('ltMarketType')&&ltEl('ltMarketType').value)||'moneyline';
  if(!ltEl('ltMarket').value.trim())throw new Error('Enter a Polymarket sports URL');
  if(!ltEl('ltOutcome').value.trim())throw new Error('Enter the outcome / side');
- if(!(budget>0&&budget<=liveManualMaxUsdc))throw new Error('Amount must be between $0.01 and 
+ if(!(budget>0&&budget<=liveManualMaxUsdc))throw new Error('Amount must be between $0.01 and $'+Number(liveManualMaxUsdc).toFixed(2));
+ if(!(maxPrice>0&&maxPrice<1))throw new Error('Maximum price must be between 0 and 1');
+ return {market_url:ltEl('ltMarket').value.trim(),outcome:ltEl('ltOutcome').value.trim(),market_type:marketType,max_price:maxPrice,budget_usdc:budget};
+}
 function ltShow(value){ltEl('ltResult').textContent=typeof value==='string'?value:JSON.stringify(value,null,2)}
 async function ltJson(r){let d=null;try{d=await r.json()}catch(_e){}if(!r.ok)throw new Error((d&&d.detail)||('HTTP '+r.status));return d}
 async function previewLiveTest(){
@@ -118,7 +120,7 @@ async function previewLiveTest(){
 async function buyLiveTest(){
  try{
   const p=ltPayload();
-  if(!confirm(`Submit a REAL $${Number(p.budget_usdc).toFixed(2)} moneyline limit BUY for ${p.outcome}?`))return;
+  if(!confirm('Submit a REAL $'+Number(p.budget_usdc).toFixed(2)+' '+p.market_type+' limit BUY for '+p.outcome+'?'))return;
   ltEl('ltBuy').disabled=true;ltEl('ltMsg').textContent='Submitting live BUY…';
   const r=await fetch('/api/live/test-buy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});const d=await ltJson(r);ltShow(d);
   if(d.ok&&d.trade_id){liveTestTradeId=d.trade_id;ltEl('ltSell').disabled=false;ltEl('ltMsg').textContent='BUY filled. SELL is ready.'}else{ltEl('ltMsg').textContent='BUY did not fill; remainder canceled.'}
@@ -140,40 +142,4 @@ if(ltEl('ltSell'))ltEl('ltSell').addEventListener('click',sellLiveTest);
 
 
 _install_live_test_ui()
-print("LIVE_TEST_MONEYLINE_LOCK enabled max_usdc=" + str(live_trading.LIVE_TEST_MAX_USDC), flush=True)
-+Number(liveManualMaxUsdc).toFixed(2));
- if(!(maxPrice>0&&maxPrice<1))throw new Error('Maximum price must be between 0 and 1');
- return {market_url:ltEl('ltMarket').value.trim(),outcome:ltEl('ltOutcome').value.trim(),market_type:marketType,max_price:maxPrice,budget_usdc:budget};
-}
-function ltShow(value){ltEl('ltResult').textContent=typeof value==='string'?value:JSON.stringify(value,null,2)}
-async function ltJson(r){let d=null;try{d=await r.json()}catch(_e){}if(!r.ok)throw new Error((d&&d.detail)||('HTTP '+r.status));return d}
-async function previewLiveTest(){
- try{ltEl('ltMsg').textContent='Checking moneyline…';const r=await fetch('/api/live/test-preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ltPayload())});const d=await ltJson(r);ltShow(d);ltEl('ltMsg').textContent='Market check passed. No order placed.'}
- catch(e){ltShow(String(e));ltEl('ltMsg').textContent='Market check failed.'}
-}
-async function buyLiveTest(){
- try{
-  const p=ltPayload();
-  if(!confirm(`Submit a REAL $${Number(p.budget_usdc).toFixed(2)} moneyline limit BUY for ${p.outcome}?`))return;
-  ltEl('ltBuy').disabled=true;ltEl('ltMsg').textContent='Submitting live BUY…';
-  const r=await fetch('/api/live/test-buy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});const d=await ltJson(r);ltShow(d);
-  if(d.ok&&d.trade_id){liveTestTradeId=d.trade_id;ltEl('ltSell').disabled=false;ltEl('ltMsg').textContent='BUY filled. SELL is ready.'}else{ltEl('ltMsg').textContent='BUY did not fill; remainder canceled.'}
- }catch(e){ltShow(String(e));ltEl('ltMsg').textContent='BUY failed.'}
- finally{ltEl('ltBuy').disabled=false}
-}
-async function sellLiveTest(){
- if(!liveTestTradeId){ltShow('No filled test trade is available to sell.');return}
- if(!confirm('Submit a REAL SELL for the tracked test shares at the current executable SELL price?'))return;
- try{ltEl('ltSell').disabled=true;ltEl('ltMsg').textContent='Submitting live SELL…';const r=await fetch('/api/live/test-sell/'+encodeURIComponent(liveTestTradeId),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const d=await ltJson(r);ltShow(d);ltEl('ltMsg').textContent='SELL completed. Round-trip test finished.';liveTestTradeId=null}
- catch(e){ltShow(String(e));ltEl('ltMsg').textContent='SELL failed; check the position before retrying.';ltEl('ltSell').disabled=false}
-}
-if(ltEl('ltPreview'))ltEl('ltPreview').addEventListener('click',previewLiveTest);
-if(ltEl('ltBuy'))ltEl('ltBuy').addEventListener('click',buyLiveTest);
-if(ltEl('ltSell'))ltEl('ltSell').addEventListener('click',sellLiveTest);
-'''
-    html = html.replace('</script>', js + '\n</script>', 1)
-    dashboard.DASHBOARD_HTML = html
-
-
-_install_live_test_ui()
-print("LIVE_TEST_MONEYLINE_LOCK enabled max_usdc=" + str(live_trading.LIVE_TEST_MAX_USDC), flush=True)
+print("LIVE_TEST_SPORTS_ORDER_UI enabled legacy_direct_max_usdc=" + str(live_trading.LIVE_TEST_MAX_USDC), flush=True)
