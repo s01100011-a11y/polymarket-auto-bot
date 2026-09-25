@@ -1,3 +1,10 @@
+## 2026-09-25 — Fix NFL event discovery by team aliases (#70)
+
+- **Incident:** Safe PREVIEW diagnostics for SLAM `UNDER 43.5` returned zero candidate events for `title_search=Atlanta Falcons`, while the live Polymarket event is titled `Falcons vs. Packers`.
+- **Fix:** Event discovery now tries the team's full name and configured aliases/nicknames, deduplicates results, and only considers NFL-slug events before the existing expected-team and exact-market checks.
+- **Safety:** Alias search only broadens discovery; it does not bypass NFL event validation, expected-team matching, exact market type/line/outcome checks, price/spread caps, or Termux validation.
+- **Tests:** Added regression coverage where the full-name search returns no event but the nickname search (`Falcons`) resolves the correct NFL event.
+
 ## 2026-09-25 — Match NFL totals using structured Polymarket line (#64)
 
 - **Incident:** A production dry-run of SLAM `UNDER 43.5` failed exact-market resolution even though Falcons-Packers U43.5 remained active on Polymarket.
