@@ -343,6 +343,46 @@ def _select_outcome(market: Any, pick: dict[str, Any], kind: str) -> tuple[str, 
     return None
 
 
+def _diagnose_market_candidates(pick: dict[str, Any], kind: str) -> list[dict[str, Any]]:
+    teams = [str(x).upper() for x in (pick.get("teams") or [])]
+    query = _team_name(teams[0]) if teams else ""
+    rows: list[dict[str, Any]] = []
+    if not query:
+        return rows
+
+    with PublicClient() as client:
+        events = list(
+            client.list_events(
+                title_search=query,
+                closed=False,
+                page_size=30,
+            ).first_page().items
+        )
+        for event in events:
+            for market in getattr(event, "markets", ()) or ():
+                sports = getattr(market, "sports", None)
+                outcomes = getattr(market, "outcomes", None)
+                rows.append({
+                    "event_title": str(getattr(event, "title", "") or ""),
+                    "event_slug": str(getattr(event, "slug", "") or ""),
+                    "market_id": str(getattr(market, "id", "") or ""),
+                    "market_question": str(getattr(market, "question", "") or ""),
+                    "market_slug": str(getattr(market, "slug", "") or ""),
+                    "sports_market_type": str(getattr(sports, "sports_market_type", "") or ""),
+                    "sports_line": getattr(sports, "line", None),
+                    "yes_label": str(
+                        getattr(getattr(outcomes, "yes", None), "label", "") or ""
+                    ),
+                    "no_label": str(
+                        getattr(getattr(outcomes, "no", None), "label", "") or ""
+                    ),
+                    "accepting_orders": bool(
+                        getattr(getattr(market, "state", None), "accepting_orders", False)
+                    ),
+                })
+    return rows
+
+
 def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
     teams = [str(x).upper() for x in (pick.get("teams") or [])]
     query = _team_name(teams[0])
@@ -446,7 +486,21 @@ def _prepare_pick(
             + " exceeds MAX_AUTO_TRADE_USDC=$" + str(core.MAX_AUTO_TRADE_USDC)
         )
 
-    event, market, outcome_label, outcome_obj = _find_market(pick, kind)
+    try:
+        event, market, outcome_label, outcome_obj = _find_market(pick, kind)
+    except Exception:
+        diagnostics = _diagnose_market_candidates(pick, kind)
+        print(
+            "NFL_CAPPER_TEST_MARKET_DIAGNOSTICS "
+            + json.dumps(
+                diagnostics[:200],
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
+            flush=True,
+        )
+        raise
     asset_id = str(getattr(outcome_obj, "token_id", None) or getattr(outcome_obj, "position_id", None) or "")
     if not asset_id:
         raise RuntimeError("Matched Polymarket market has no tradable outcome token")
