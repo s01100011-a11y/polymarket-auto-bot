@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -249,6 +250,82 @@ class NflCapperOutcomeTests(unittest.TestCase):
         label, outcome = capper._select_outcome(market, pick, "total")
         self.assertEqual(label, "Yes")
         self.assertEqual(outcome.token_id, "yes-token")
+
+
+class NflCapperPreviewTests(unittest.TestCase):
+    def test_test_preview_queues_preview_never_buy(self):
+        pick = _pick(
+            selection="UNDER 48.5",
+            teams=["ATL", "GB"],
+            bet_types=["total"],
+            spread_lines=[],
+            total_side="UNDER",
+            total_line=48.5,
+            units=2,
+        )
+        event = SimpleNamespace(slug="atl-gb-2026-09-25", title="Falcons vs Packers")
+        market = SimpleNamespace(question="Will Falcons vs Packers be Over 48.5?")
+        outcome = SimpleNamespace(token_id="under-48-5-token")
+
+        class _Book:
+            asks = [SimpleNamespace(price="0.64")]
+
+        class _Client:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def get_price(self, **kwargs):
+                return "0.63"
+
+            def get_spread(self, **kwargs):
+                return "0.02"
+
+            def get_order_book(self, **kwargs):
+                return _Book()
+
+        core = SimpleNamespace(
+            MAX_AUTO_TRADE_USDC=Decimal("50"),
+            MAX_PRICE=Decimal("0.95"),
+            MAX_SPREAD=Decimal("0.08"),
+            MAX_DAILY_BUDGET_USDC=Decimal("100"),
+            auto_trading_enabled=lambda: True,
+            _daily_budget_used=lambda: Decimal("0"),
+        )
+
+        calls = []
+
+        class _Remote:
+            def _queue_load(self):
+                return {}
+
+            def _enqueue(self, action, payload):
+                calls.append((action, payload))
+                return {"id": "exec-preview-test"}
+
+        with (
+            patch.object(capper.live_control, "_executor_ready", return_value=(True, {})),
+            patch.object(capper, "_find_market", return_value=(event, market, "No", outcome)),
+            patch.object(capper, "PublicClient", return_value=_Client()),
+        ):
+            result = capper._prepare_test_preview(
+                pick,
+                core=core,
+                remote=_Remote(),
+                unit_usdc=Decimal("10"),
+            )
+
+        self.assertEqual(result["status"], "PREVIEW_QUEUED")
+        self.assertEqual(result["stake_usdc"], "20.00")
+        self.assertEqual(result["max_price"], "0.64")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], "PREVIEW")
+        self.assertEqual(calls[0][1]["market_type"], "total")
+        self.assertEqual(calls[0][1]["budget_usdc"], "20.00")
+        self.assertEqual(calls[0][1]["asset_id"], "under-48-5-token")
+        self.assertFalse(calls[0][1]["auto"])
 
 
 class NflCapperStatsTests(unittest.TestCase):
