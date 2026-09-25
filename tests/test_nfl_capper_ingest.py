@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from app import nfl_capper_ingest as capper
 
@@ -106,8 +107,106 @@ class NflCapperSizingTests(unittest.TestCase):
         self.assertIsNone(kind)
         self.assertIn("ambiguous", reason)
 
+    def test_one_team_total_is_supported_for_exact_resolution(self):
+        kind, reason = capper._classify_pick(
+            _pick(
+                selection="UNDER 43.5",
+                teams=["ATL"],
+                bet_types=["total"],
+                spread_lines=[],
+                total_side="UNDER",
+                total_line=43.5,
+            )
+        )
+        self.assertEqual(kind, "total")
+        self.assertIsNone(reason)
+
+    def test_zero_team_total_is_rejected(self):
+        kind, reason = capper._classify_pick(
+            _pick(
+                selection="UNDER 43.5",
+                teams=[],
+                bet_types=["total"],
+                spread_lines=[],
+                total_side="UNDER",
+                total_line=43.5,
+            )
+        )
+        self.assertIsNone(kind)
+        self.assertIn("at least one", reason)
+
     def test_fingerprint_changes_when_units_change(self):
         self.assertNotEqual(capper._fingerprint(_pick(units=1)), capper._fingerprint(_pick(units=2)))
+
+
+class NflCapperMarketResolutionTests(unittest.TestCase):
+    @staticmethod
+    def _event(slug: str, title: str, line: float = 43.5):
+        yes = SimpleNamespace(label="Yes", token_id=f"{slug}-yes")
+        no = SimpleNamespace(label="No", token_id=f"{slug}-no")
+        market = SimpleNamespace(
+            id=f"{slug}-market",
+            question=f"Will {title} be Over {line}?",
+            slug=f"{slug}-total-{line}",
+            sports=SimpleNamespace(sports_market_type="total"),
+            outcomes=SimpleNamespace(yes=yes, no=no),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        return SimpleNamespace(id=slug, slug=slug, title=title, markets=[market])
+
+    @staticmethod
+    def _client(events):
+        class _Result:
+            def __init__(self, items):
+                self.items = items
+
+            def first_page(self):
+                return self
+
+        class _Client:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def list_events(self, **kwargs):
+                return _Result(events)
+
+        return _Client()
+
+    def test_one_team_total_resolves_when_exactly_one_event_matches(self):
+        event = self._event("atl-was", "Atlanta Falcons vs Washington Commanders")
+        pick = _pick(
+            selection="UNDER 43.5",
+            teams=["ATL"],
+            bet_types=["total"],
+            spread_lines=[],
+            total_side="UNDER",
+            total_line=43.5,
+        )
+        with patch.object(capper, "PublicClient", return_value=self._client([event])):
+            matched_event, _, label, outcome = capper._find_market(pick, "total")
+        self.assertEqual(matched_event.slug, "atl-was")
+        self.assertEqual(label, "No")
+        self.assertEqual(outcome.token_id, "atl-was-no")
+
+    def test_one_team_total_blocks_when_two_events_match_exact_line(self):
+        events = [
+            self._event("atl-was", "Atlanta Falcons vs Washington Commanders"),
+            self._event("atl-car", "Atlanta Falcons vs Carolina Panthers"),
+        ]
+        pick = _pick(
+            selection="UNDER 43.5",
+            teams=["ATL"],
+            bet_types=["total"],
+            spread_lines=[],
+            total_side="UNDER",
+            total_line=43.5,
+        )
+        with patch.object(capper, "PublicClient", return_value=self._client(events)):
+            with self.assertRaisesRegex(ValueError, "exactly one event"):
+                capper._find_market(pick, "total")
 
 
 class NflCapperOutcomeTests(unittest.TestCase):
