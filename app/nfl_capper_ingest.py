@@ -359,6 +359,25 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
 
     if not ranked:
         raise ValueError(f"No exact open Polymarket NFL {kind} market matched '{pick.get('selection')}'")
+
+    # When Telegram gives us only one team for a game total, the exact line
+    # must still identify exactly one NFL event. Never use ranking heuristics
+    # to choose between two different games involving the same team.
+    if kind == "total" and len(teams) == 1:
+        event_keys = {
+            str(
+                getattr(row[1], "id", "")
+                or getattr(row[1], "slug", "")
+                or getattr(row[1], "title", "")
+            )
+            for row in ranked
+        }
+        event_keys.discard("")
+        if len(event_keys) != 1:
+            raise ValueError(
+                "One-team NFL total did not resolve to exactly one event; unattended trade blocked"
+            )
+
     ranked.sort(key=lambda row: row[0], reverse=True)
     best = ranked[0]
     if len(ranked) > 1 and ranked[1][0] == best[0]:
