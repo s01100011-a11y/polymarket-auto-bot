@@ -1,3 +1,12 @@
+## 2026-09-25 — Harden Termux executor connectivity and supervision (#62)
+
+- **Incident:** The NFL dry-run showed no Termux heartbeat/`next` traffic reaching Railway. There were no 401 responses, so the server was not rejecting the saved pair token; the phone worker simply was not reaching the bridge.
+- **IPv4 bridge transport:** Railway executor bridge calls (pair, heartbeat, request polling, and result delivery) now use an IPv4-bound `httpx` transport with retries. This mirrors the existing IPv4-only Polymarket geoblock path used for mobile networks with unreliable IPv6 routing.
+- **Supervisor launcher:** Added `scripts/start_termux_executor.sh` with `termux-wake-lock`, crash restart supervision, persistent supervisor logging, and a fail-stop on executor-token rejection instead of an auth retry loop. It continues to run `scripts/termux_executor_v2.py` and preserves the existing token/env locations.
+- **Local cap compatibility:** `EXECUTOR_MAX_USDC` remains accepted as the fallback emergency ceiling when the newer `EXECUTOR_EMERGENCY_MAX_USDC` is not set, so the existing phone `$50` local cap remains effective.
+- **NFL preview handoff:** The one-shot synthetic NFL preview now runs as a separate background task and waits for the paired executor to reconnect without blocking the normal NFL feed poller. A failed previous test marker may retry; a queued/done marker remains idempotent.
+- **Tests:** Added coverage that the Railway bridge client binds to IPv4 with retries.
+
 ## 2026-09-25 — One-shot NFL capper dry-run preview (#58)
 
 - Added an environment-triggered one-shot production dry-run for the NFL Telegram capper path.
