@@ -168,8 +168,11 @@ def _contains_hint(text: Any, hint: Any) -> bool:
 
 
 def _event_hints_for_pick(pick: dict[str, Any], kind: str) -> list[str]:
+    explicit = [str(x).strip() for x in (pick.get("event_hints") or []) if str(x).strip()]
+    if len(explicit) == 2:
+        return explicit
     if kind == "total":
-        return [str(x).strip() for x in (pick.get("event_hints") or []) if str(x).strip()]
+        return explicit
     hint = str(pick.get("team_hint") or "").strip()
     return [hint] if hint else []
 
