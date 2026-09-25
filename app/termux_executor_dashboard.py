@@ -814,6 +814,11 @@ async function remoteStatus(){
  try{
   const r=await fetch('/api/executor/status',{cache:'no-store'}),d=await r.json();
   remoteExecutorConnected=!!d.connected;
+  if(Number(d.remote_max_usdc)>0){
+    liveManualMaxUsdc=Number(d.remote_max_usdc);
+    const budget=ltEl('ltBudget');
+    if(budget)budget.max=String(liveManualMaxUsdc);
+  }
   const c=document.getElementById('executorConnection'),p=document.getElementById('executorPairLine'),g=document.getElementById('executorGeo');
   if(c){c.textContent=d.connected?'CONNECTED':(d.paired?'PAIRED · OFFLINE':'NOT PAIRED');c.className=d.connected?'executor-online':'executor-offline'}
   if(p){p.textContent=d.paired?'Pairing complete':('Pair code: '+(d.pair_code||'—')+' · enter this in Termux')}
