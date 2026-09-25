@@ -211,8 +211,8 @@ def _classify_pick(pick: dict[str, Any]) -> tuple[str | None, str | None]:
         if len(teams) < 1 or len(lines) != 1:
             return None, "spread pick needs one recognized team and one spread line"
     if kind == "total":
-        if len(teams) < 2 or pick.get("total_line") is None or str(pick.get("total_side") or "").upper() not in {"OVER", "UNDER"}:
-            return None, "total pick needs both teams, a side, and a total line"
+        if len(teams) < 1 or pick.get("total_line") is None or str(pick.get("total_side") or "").upper() not in {"OVER", "UNDER"}:
+            return None, "total pick needs at least one recognized NFL team, a side, and a total line"
     return kind, None
 
 
