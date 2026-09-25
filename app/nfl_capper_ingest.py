@@ -281,6 +281,17 @@ def _line_matches(text: str, value: Any, *, signed: bool) -> bool:
     return bool(re.search(rf"(?<!\d){re.escape(target)}(?!\d)", body))
 
 
+def _structured_line_matches(market: Any, value: Any) -> bool | None:
+    """Compare against Polymarket's structured sports line when available."""
+    raw = getattr(getattr(market, "sports", None), "line", None)
+    if raw is None:
+        return None
+    try:
+        return Decimal(str(raw)) == Decimal(str(value))
+    except Exception:
+        return False
+
+
 def _select_outcome(market: Any, pick: dict[str, Any], kind: str) -> tuple[str, Any] | None:
     mtext = _market_text(market)
     teams = [str(x).upper() for x in (pick.get("teams") or [])]
@@ -312,7 +323,10 @@ def _select_outcome(market: Any, pick: dict[str, Any], kind: str) -> tuple[str, 
     if kind == "total":
         side = str(pick.get("total_side") or "").upper()
         line = pick.get("total_line")
-        if not _line_matches(mtext, line, signed=False):
+        structured_match = _structured_line_matches(market, line)
+        if structured_match is False:
+            return None
+        if structured_match is None and not _line_matches(mtext, line, signed=False):
             return None
         for label, obj in outcomes:
             if side.lower() in _norm(label):
