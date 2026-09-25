@@ -414,6 +414,361 @@ def _prepare_preview(
     }
 
 
+def _inject_dashboard_panel(html: str) -> str:
+    if 'id="cfbCapperStats"' in html:
+        return html
+
+    panel = r"""
+  <div class="nfl-capper-panel" id="cfbCapperStats">
+    <div class="nfl-capper-head"><div><div class="label">CFB capper status</div><div class="nfl-capper-state" id="cfbCapperState">Loading…</div></div><div class="nfl-capper-meta" id="cfbCapperMeta"></div></div>
+    <div class="nfl-capper-grid">
+      <div class="nfl-capper-card"><b>Slam - CFB</b><div class="nfl-capper-kpis" id="cfbCapperSlam">—</div></div>
+      <div class="nfl-capper-card"><b>Syndicate - CFB</b><div class="nfl-capper-kpis" id="cfbCapperSyndicate">—</div></div>
+    </div>
+  </div>
+"""
+    html = html.replace('  <div class="tabs">', panel + '  <div class="tabs">', 1)
+
+    js = r"""
+function cfbCapperLine(x){
+ if(!x)return 'No tracked signals yet';
+ return 'Signals '+(x.signals||0)+' · Queued '+(x.preview_queued||0)+' · Done '+(x.preview_done||0)+' · Failed '+(x.preview_failed||0)+'<br>Retrying '+(x.retrying||0)+' · Stale '+(x.stale||0)+' · Unsupported '+(x.unsupported||0);
+}
+async function loadCfbCapperStats(){
+ try{
+  const r=await fetch('/api/cfb-cappers/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'CFB capper status failed');
+  const state=document.getElementById('cfbCapperState'),meta=document.getElementById('cfbCapperMeta');
+  let mode=' · '+String(d.mode||'').replaceAll('_',' ');
+  if(state)state.textContent=(d.enabled?'ENABLED':'DISABLED')+(d.enabled?mode:'');
+  if(meta)meta.textContent='1u =     global _INSTALLED
+    if _INSTALLED:
+        return
+    _INSTALLED = True
+
+    remote = live_control.remote
+    signal_file = core.DATA_DIR / "cfb_capper_preview_signals.json"
+    last_feed_file = core.DATA_DIR / "cfb_capper_last_feed.json"
+    bridge_url = os.getenv(
+        "CFB_CAPPER_BRIDGE_URL",
+        "https://telegram-chatgpt-bridge-production-286a.up.railway.app",
+    ).rstrip("/")
+    enabled = os.getenv("CFB_CAPPER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    poll_seconds = max(5, int(os.getenv("CFB_CAPPER_POLL_SECONDS", "15")))
+    max_age_seconds = max(30, int(os.getenv("CFB_CAPPER_MAX_PICK_AGE_SECONDS", "180")))
+    unit_usdc = Decimal(os.getenv("CFB_CAPPER_UNIT_USDC", "10"))
+    test_preview_raw = os.getenv("CFB_CAPPER_TEST_PREVIEW_JSON", "").strip()
+    test_preview_marker = core.DATA_DIR / "cfb_capper_test_preview.json"
+
+    def _load_signals() -> dict[str, Any]:
+        data = core._load(signal_file)
+        return data if isinstance(data, dict) else {}
+
+    def _save_signals(data: dict[str, Any]) -> None:
+        if len(data) > 2500:
+            ordered = sorted(
+                data.items(),
+                key=lambda item: str((item[1] or {}).get("first_seen_at") or ""),
+            )
+            data = dict(ordered[-2000:])
+        core._save(signal_file, data)
+
+    def _sync_queue_status(signals: dict[str, Any]) -> bool:
+        changed = False
+        queue = remote._queue_load()
+        for rec in signals.values():
+            if rec.get("status") != "PREVIEW_QUEUED" or not rec.get("request_id"):
+                continue
+            queued = queue.get(str(rec.get("request_id")))
+            if not queued:
+                continue
+            qstatus = str(queued.get("status") or "")
+            if qstatus == "DONE":
+                rec["status"] = "PREVIEW_DONE"
+                rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                rec["result"] = queued.get("result")
+                changed = True
+            elif qstatus == "FAILED":
+                rec["status"] = "PREVIEW_FAILED"
+                rec["last_error"] = queued.get("error")
+                rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                changed = True
+        return changed
+
+    async def _poll_once() -> None:
+        _STATUS["last_poll_at"] = _now_iso()
+        signals = _load_signals()
+        changed = _sync_queue_status(signals)
+
+        if not enabled:
+            _STATUS["last_error"] = "CFB capper preview is disabled"
+            if changed:
+                _save_signals(signals)
+            return
+
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.get(
+                    f"{bridge_url}/public/ncaaf",
+                    params={"minutes": 180, "limit": 120, "include_graded": "false"},
+                )
+                response.raise_for_status()
+                feed = response.json()
+        except Exception as exc:
+            _STATUS["last_error"] = f"{type(exc).__name__}: {exc}"
+            if changed:
+                _save_signals(signals)
+            return
+
+        core._save(last_feed_file, {
+            "saved_at": _now_iso(),
+            "sport": feed.get("sport"),
+            "generated_at": feed.get("generated_at"),
+            "freshness": feed.get("freshness"),
+            "scanned_posts": feed.get("scanned_posts"),
+            "detected_posts": feed.get("detected_posts"),
+            "detected_picks": feed.get("detected_picks"),
+            "listener_connected": feed.get("listener_connected"),
+            "listener_ready": feed.get("listener_ready"),
+            "picks": feed.get("picks") or [],
+        })
+
+        picks = [p for p in (feed.get("picks") or []) if isinstance(p, dict)]
+        picks.sort(key=lambda p: str(p.get("posted_at") or ""))
+        now = datetime.now(timezone.utc)
+
+        for pick in picks:
+            fp = _fingerprint(pick)
+            current = signals.get(fp)
+            if current and current.get("status") in {
+                "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
+                "IGNORED_STALE", "IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE",
+            }:
+                continue
+
+            source_label = _source_label(pick)
+            record = current or {
+                "id": fp,
+                "first_seen_at": _now_iso(),
+                "source": source_label,
+                "telegram_source": pick.get("source"),
+                "posted_at": pick.get("posted_at"),
+                "selection": pick.get("selection"),
+                "units": str(_units_for_pick(pick)),
+                "stake_usdc": str(_stake_for_pick(pick, unit_usdc)),
+            }
+
+            if source_label is None:
+                record["status"] = "IGNORED_UNTRACKED_SOURCE"
+                record["reason"] = "CFB feed source is not Slam or Syndicate"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            posted = _parse_iso(pick.get("posted_at"))
+            age = (now - posted).total_seconds() if posted else float("inf")
+            if age > max_age_seconds:
+                record["status"] = "IGNORED_STALE"
+                record["reason"] = f"pick age exceeds {max_age_seconds}s freshness limit"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            kind, reason = _classify_pick(pick)
+            if kind is None:
+                record["status"] = "IGNORED_UNSUPPORTED"
+                record["reason"] = reason
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            try:
+                prepared = await asyncio.to_thread(
+                    _prepare_preview,
+                    pick,
+                    core=core,
+                    remote=remote,
+                    unit_usdc=unit_usdc,
+                )
+                record.update(prepared)
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                print(
+                    "CFB_CAPPER_PREVIEW "
+                    + json.dumps(record, sort_keys=True, separators=(",", ":"), default=str),
+                    flush=True,
+                )
+            except Exception as exc:
+                record["status"] = "RETRYING"
+                record["last_error"] = f"{type(exc).__name__}: {exc}"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+
+        if changed:
+            _save_signals(signals)
+
+        _STATUS["last_success_at"] = _now_iso()
+        _STATUS["last_error"] = None
+        _STATUS["cycles"] = int(_STATUS.get("cycles") or 0) + 1
+
+    async def _run_test_preview_once() -> None:
+        if not test_preview_raw:
+            return
+
+        trigger_hash = hashlib.sha256(test_preview_raw.encode("utf-8")).hexdigest()
+        existing = core._load(test_preview_marker) if test_preview_marker.exists() else {}
+        if (
+            isinstance(existing, dict)
+            and existing.get("trigger_hash") == trigger_hash
+            and existing.get("status") in {"QUEUED", "DONE"}
+        ):
+            return
+
+        try:
+            pick = json.loads(test_preview_raw)
+            if not isinstance(pick, dict):
+                raise RuntimeError("CFB_CAPPER_TEST_PREVIEW_JSON must decode to an object")
+            pick["posted_at"] = _now_iso()
+
+            while True:
+                ready, state = live_control._executor_ready()
+                if ready:
+                    break
+                if state.get("geo_blocked"):
+                    raise RuntimeError("Termux executor is geoblocked")
+                await asyncio.sleep(2)
+
+            result = await asyncio.to_thread(
+                _prepare_preview,
+                pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+            )
+            marker = {
+                "trigger_hash": trigger_hash,
+                "created_at": _now_iso(),
+                "pick": pick,
+                "preview": result,
+                "status": "QUEUED",
+            }
+            core._save(test_preview_marker, marker)
+            print(
+                "CFB_CAPPER_TEST_PREVIEW "
+                + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                flush=True,
+            )
+
+            request_id = str(result.get("request_id") or "")
+            for _ in range(90):
+                await asyncio.sleep(1)
+                queued = remote._queue_load().get(request_id) if request_id else None
+                if not queued:
+                    continue
+                status = str(queued.get("status") or "")
+                if status not in {"DONE", "FAILED"}:
+                    continue
+                marker["status"] = status
+                marker["completed_at"] = queued.get("updated_at") or _now_iso()
+                marker["result"] = queued.get("result")
+                marker["error"] = queued.get("error")
+                core._save(test_preview_marker, marker)
+                print(
+                    "CFB_CAPPER_TEST_PREVIEW_RESULT "
+                    + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                    flush=True,
+                )
+                return
+        except Exception as exc:
+            marker = {
+                "trigger_hash": trigger_hash,
+                "created_at": _now_iso(),
+                "status": "FAILED",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            core._save(test_preview_marker, marker)
+            print(
+                "CFB_CAPPER_TEST_PREVIEW_RESULT "
+                + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                flush=True,
+            )
+
+    async def _loop() -> None:
+        await asyncio.sleep(4)
+        while True:
+            try:
+                await _poll_once()
+            except Exception as exc:
+                _STATUS["last_error"] = f"{type(exc).__name__}: {exc}"
+            await asyncio.sleep(poll_seconds)
+
+    original_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def _lifespan(application: Any):
+        async with original_lifespan(application):
+            task = asyncio.create_task(_loop(), name="cfb-capper-preview-poller")
+            preview_task = asyncio.create_task(
+                _run_test_preview_once(),
+                name="cfb-capper-test-preview",
+            )
+            try:
+                yield
+            finally:
+                for pending in (task, preview_task):
+                    pending.cancel()
+                for pending in (task, preview_task):
+                    try:
+                        await pending
+                    except asyncio.CancelledError:
+                        pass
+
+    app.router.lifespan_context = _lifespan
+
+    @app.get("/api/cfb-cappers/status", dependencies=[Depends(dashboard._auth)])
+    def cfb_capper_status() -> dict[str, Any]:
+        signals = _load_signals()
+        counts: dict[str, dict[str, int]] = {}
+        for label in SOURCE_LABELS:
+            rows = [r for r in signals.values() if r.get("source") == label]
+            counts[label] = {
+                "signals": len(rows),
+                "preview_done": sum(1 for r in rows if r.get("status") == "PREVIEW_DONE"),
+                "preview_failed": sum(1 for r in rows if r.get("status") == "PREVIEW_FAILED"),
+                "preview_queued": sum(1 for r in rows if r.get("status") == "PREVIEW_QUEUED"),
+                "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
+                "stale": sum(1 for r in rows if r.get("status") == "IGNORED_STALE"),
+                "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
+            }
+        return {
+            "enabled": enabled,
+            "mode": "PREVIEW_ONLY",
+            "poll_seconds": poll_seconds,
+            "max_pick_age_seconds": max_age_seconds,
+            "unit_usdc": str(unit_usdc),
+            "sources": counts,
+            "status": dict(_STATUS),
+        }
+
+    dashboard.DASHBOARD_HTML = _inject_dashboard_panel(dashboard.DASHBOARD_HTML)
++Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · poll '+(d.poll_seconds||0)+'s';
+  const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
+  if(s)s.innerHTML=cfbCapperLine((d.sources||{})['Slam - CFB']);
+  if(y)y.innerHTML=cfbCapperLine((d.sources||{})['Syndicate - CFB']);
+ }catch(e){
+  const state=document.getElementById('cfbCapperState');if(state)state.textContent='Status unavailable: '+String(e);
+ }
+}
+loadCfbCapperStats();setInterval(loadCfbCapperStats,10000);
+"""
+    return html.replace("</script>", js + "\n</script>", 1)
+
+
 def install(*, app: Any, dashboard: Any, core: Any) -> None:
     global _INSTALLED
     if _INSTALLED:
