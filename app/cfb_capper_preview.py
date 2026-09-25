@@ -414,6 +414,46 @@ def _prepare_preview(
     }
 
 
+def _inject_dashboard_panel(html: str) -> str:
+    if 'id="cfbCapperStats"' in html:
+        return html
+
+    panel = r"""
+  <div class="nfl-capper-panel" id="cfbCapperStats">
+    <div class="nfl-capper-head"><div><div class="label">CFB capper status</div><div class="nfl-capper-state" id="cfbCapperState">Loading…</div></div><div class="nfl-capper-meta" id="cfbCapperMeta"></div></div>
+    <div class="nfl-capper-grid">
+      <div class="nfl-capper-card"><b>Slam - CFB</b><div class="nfl-capper-kpis" id="cfbCapperSlam">—</div></div>
+      <div class="nfl-capper-card"><b>Syndicate - CFB</b><div class="nfl-capper-kpis" id="cfbCapperSyndicate">—</div></div>
+    </div>
+  </div>
+"""
+    html = html.replace('  <div class="tabs">', panel + '  <div class="tabs">', 1)
+
+    js = r"""
+function cfbCapperLine(x){
+ if(!x)return 'No tracked signals yet';
+ return 'Signals '+(x.signals||0)+' · Queued '+(x.preview_queued||0)+' · Done '+(x.preview_done||0)+' · Failed '+(x.preview_failed||0)+'<br>Retrying '+(x.retrying||0)+' · Stale '+(x.stale||0)+' · Unsupported '+(x.unsupported||0);
+}
+async function loadCfbCapperStats(){
+ try{
+  const r=await fetch('/api/cfb-cappers/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'CFB capper status failed');
+  const state=document.getElementById('cfbCapperState'),meta=document.getElementById('cfbCapperMeta');
+  let mode=' · '+String(d.mode||'').replaceAll('_',' ');
+  if(state)state.textContent=(d.enabled?'ENABLED':'DISABLED')+(d.enabled?mode:'');
+  if(meta)meta.textContent='1u = \u0024'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · poll '+(d.poll_seconds||0)+'s';
+  const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
+  if(s)s.innerHTML=cfbCapperLine((d.sources||{})['Slam - CFB']);
+  if(y)y.innerHTML=cfbCapperLine((d.sources||{})['Syndicate - CFB']);
+ }catch(e){
+  const state=document.getElementById('cfbCapperState');if(state)state.textContent='Status unavailable: '+String(e);
+ }
+}
+loadCfbCapperStats();setInterval(loadCfbCapperStats,10000);
+"""
+    return html.replace("</script>", js + "\n</script>", 1)
+
+
 def install(*, app: Any, dashboard: Any, core: Any) -> None:
     global _INSTALLED
     if _INSTALLED:
@@ -728,3 +768,5 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             "sources": counts,
             "status": dict(_STATUS),
         }
+
+    dashboard.DASHBOARD_HTML = _inject_dashboard_panel(dashboard.DASHBOARD_HTML)

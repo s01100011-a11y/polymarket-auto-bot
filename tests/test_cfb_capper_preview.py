@@ -239,6 +239,24 @@ class CfbMarketResolutionTests(unittest.TestCase):
                 capper._find_market(pick, "moneyline")
 
 
+class CfbDashboardPanelTests(unittest.TestCase):
+    def test_injects_cfb_panel_with_matching_nfl_classes(self):
+        html = '<style></style>\n  <div class="tabs"></div>\n<script></script>'
+        rendered = capper._inject_dashboard_panel(html)
+        self.assertIn('id="cfbCapperStats"', rendered)
+        self.assertIn('class="nfl-capper-panel"', rendered)
+        self.assertIn('Slam - CFB', rendered)
+        self.assertIn('Syndicate - CFB', rendered)
+        self.assertIn('/api/cfb-cappers/status', rendered)
+        self.assertIn('preview_queued', rendered)
+
+    def test_injection_is_idempotent(self):
+        html = '<style></style>\n  <div class="tabs"></div>\n<script></script>'
+        once = capper._inject_dashboard_panel(html)
+        twice = capper._inject_dashboard_panel(once)
+        self.assertEqual(once, twice)
+
+
 class CfbPreviewSafetyTests(unittest.TestCase):
     def test_prepare_preview_enqueues_preview_never_buy(self):
         outcome = SimpleNamespace(label="Under", token_id="under-token")
