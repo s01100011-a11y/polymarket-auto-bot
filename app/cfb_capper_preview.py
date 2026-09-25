@@ -320,7 +320,7 @@ def _prepare_preview(
     stake = _stake_for_pick(pick, unit_usdc)
     if stake > core.MAX_AUTO_TRADE_USDC:
         raise RuntimeError(
-            f"Requested {units}u = \${stake} exceeds MAX_AUTO_TRADE_USDC=\${core.MAX_AUTO_TRADE_USDC}"
+            f"Requested {units}u = ${stake} exceeds MAX_AUTO_TRADE_USDC=${core.MAX_AUTO_TRADE_USDC}"
         )
 
     used = core._daily_budget_used()
@@ -328,8 +328,8 @@ def _prepare_preview(
     if used + pending + stake > core.MAX_DAILY_BUDGET_USDC:
         raise RuntimeError(
             "Daily auto budget guard would be exceeded: "
-            f"used=\${used}, pending=\${pending}, requested=\${stake}, "
-            f"limit=\${core.MAX_DAILY_BUDGET_USDC}"
+            f"used=${used}, pending=${pending}, requested=${stake}, "
+            f"limit=${core.MAX_DAILY_BUDGET_USDC}"
         )
 
     event, market, outcome_label, outcome_obj = _find_market(pick, kind)
