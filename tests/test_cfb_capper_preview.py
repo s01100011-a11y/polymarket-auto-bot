@@ -248,7 +248,7 @@ class CfbDashboardPanelTests(unittest.TestCase):
         self.assertIn('Slam - CFB', rendered)
         self.assertIn('Syndicate - CFB', rendered)
         self.assertIn('/api/cfb-cappers/status', rendered)
-        self.assertIn('PREVIEW', rendered)
+        self.assertIn('preview_queued', rendered)
 
     def test_injection_is_idempotent(self):
         html = '<style></style>\n  <div class="tabs"></div>\n<script></script>'
