@@ -1,3 +1,11 @@
+## 2026-09-25 — Manual sports limit orders through Termux (#54)
+
+- **Incident:** The authenticated manual executor endpoint still rejected every non-moneyline BUY and `_buy_payload()` overwrote the requested market type with `moneyline`, even though the Termux executor already supports exact-token spread and total validation.
+- **Fix:** `/api/executor/request-preview` and `/api/executor/request-buy` now support only the existing sports market types `moneyline`, `spread`, and `total`, and preserve the requested type in the queued payload.
+- **Dashboard:** The manual panel now includes a market-type selector and uses the live Railway/dashboard Auto trade cap reported by `/api/executor/status` instead of hard-coding a $5 UI ceiling for remote Termux orders.
+- **Preserved safeguards:** Dashboard authentication, sports-only URL validation, dashboard amount cap, global max price, max spread, executor heartbeat, BUY TTL, Termux geoblock check, exact market type/outcome validation, minimum size, and local emergency ceiling remain in force.
+- **Tests:** Added regression coverage for total/spread payload preservation, unsupported market-type rejection, the three-option UI selector, and dynamic dashboard-cap propagation.
+
 ## 2026-09-25 — Resolve NFL totals from one known team safely (#52)
 
 - **Incident:** A SLAM 2u `UNDER 43.5` was parsed as a valid full-game total, but the source post exposed only Atlanta/Falcons context rather than both matchup teams, so the bot rejected it before Polymarket resolution.
