@@ -1,3 +1,12 @@
+## 2026-09-25 — Resolve NFL totals from one known team safely (#52)
+
+- **Incident:** A SLAM 2u `UNDER 43.5` was parsed as a valid full-game total, but the source post exposed only Atlanta/Falcons context rather than both matchup teams, so the bot rejected it before Polymarket resolution.
+- **Bridge contract:** The Telegram bridge may now provide one recognized NFL team on a bare game total when that is the only team mentioned in the same NFL post.
+- **Eligibility:** Full-game totals require at least one recognized NFL team plus an explicit OVER/UNDER side and exact total line. Zero-team totals remain unsupported.
+- **Fail-closed resolution:** For a one-team total, Polymarket must produce matching exact-line candidates from exactly one NFL event. If two different events involving that team match the exact line, unattended execution is blocked instead of choosing by rank.
+- **Preserved safeguards:** The 180-second freshness window, source allowlist, unit sizing, dashboard cap, daily budget, price/spread checks, exact token handoff, Termux validation, and geoblock checks are unchanged.
+- **Tests:** Added one-team eligibility, zero-team rejection, unique-event resolution, and multi-event ambiguity regression coverage.
+
 ## 2026-09-25 — Log Telegram bridge freshness error (#50)
 
 - NFL feed diagnostics now include the bridge's sanitized freshness error and resolved channel labels.
