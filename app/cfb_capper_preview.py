@@ -422,6 +422,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     poll_seconds = max(5, int(os.getenv("CFB_CAPPER_POLL_SECONDS", "15")))
     max_age_seconds = max(30, int(os.getenv("CFB_CAPPER_MAX_PICK_AGE_SECONDS", "180")))
     unit_usdc = Decimal(os.getenv("CFB_CAPPER_UNIT_USDC", "10"))
+    test_preview_raw = os.getenv("CFB_CAPPER_TEST_PREVIEW_JSON", "").strip()
+    test_preview_marker = core.DATA_DIR / "cfb_capper_test_preview.json"
 
     def _load_signals() -> dict[str, Any]:
         data = core._load(signal_file)
@@ -579,6 +581,88 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         _STATUS["last_error"] = None
         _STATUS["cycles"] = int(_STATUS.get("cycles") or 0) + 1
 
+    async def _run_test_preview_once() -> None:
+        if not test_preview_raw:
+            return
+
+        trigger_hash = hashlib.sha256(test_preview_raw.encode("utf-8")).hexdigest()
+        existing = core._load(test_preview_marker) if test_preview_marker.exists() else {}
+        if (
+            isinstance(existing, dict)
+            and existing.get("trigger_hash") == trigger_hash
+            and existing.get("status") in {"QUEUED", "DONE"}
+        ):
+            return
+
+        try:
+            pick = json.loads(test_preview_raw)
+            if not isinstance(pick, dict):
+                raise RuntimeError("CFB_CAPPER_TEST_PREVIEW_JSON must decode to an object")
+            pick["posted_at"] = _now_iso()
+
+            while True:
+                ready, state = live_control._executor_ready()
+                if ready:
+                    break
+                if state.get("geo_blocked"):
+                    raise RuntimeError("Termux executor is geoblocked")
+                await asyncio.sleep(2)
+
+            result = await asyncio.to_thread(
+                _prepare_preview,
+                pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+            )
+            marker = {
+                "trigger_hash": trigger_hash,
+                "created_at": _now_iso(),
+                "pick": pick,
+                "preview": result,
+                "status": "QUEUED",
+            }
+            core._save(test_preview_marker, marker)
+            print(
+                "CFB_CAPPER_TEST_PREVIEW "
+                + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                flush=True,
+            )
+
+            request_id = str(result.get("request_id") or "")
+            for _ in range(90):
+                await asyncio.sleep(1)
+                queued = remote._queue_load().get(request_id) if request_id else None
+                if not queued:
+                    continue
+                status = str(queued.get("status") or "")
+                if status not in {"DONE", "FAILED"}:
+                    continue
+                marker["status"] = status
+                marker["completed_at"] = queued.get("updated_at") or _now_iso()
+                marker["result"] = queued.get("result")
+                marker["error"] = queued.get("error")
+                core._save(test_preview_marker, marker)
+                print(
+                    "CFB_CAPPER_TEST_PREVIEW_RESULT "
+                    + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                    flush=True,
+                )
+                return
+        except Exception as exc:
+            marker = {
+                "trigger_hash": trigger_hash,
+                "created_at": _now_iso(),
+                "status": "FAILED",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            core._save(test_preview_marker, marker)
+            print(
+                "CFB_CAPPER_TEST_PREVIEW_RESULT "
+                + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                flush=True,
+            )
+
     async def _loop() -> None:
         await asyncio.sleep(4)
         while True:
@@ -594,14 +678,20 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     async def _lifespan(application: Any):
         async with original_lifespan(application):
             task = asyncio.create_task(_loop(), name="cfb-capper-preview-poller")
+            preview_task = asyncio.create_task(
+                _run_test_preview_once(),
+                name="cfb-capper-test-preview",
+            )
             try:
                 yield
             finally:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                for pending in (task, preview_task):
+                    pending.cancel()
+                for pending in (task, preview_task):
+                    try:
+                        await pending
+                    except asyncio.CancelledError:
+                        pass
 
     app.router.lifespan_context = _lifespan
 

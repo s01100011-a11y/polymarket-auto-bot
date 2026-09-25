@@ -1,3 +1,10 @@
+## 2026-09-25 — One-shot CFB capper PREVIEW validation (#74)
+
+- Added `CFB_CAPPER_TEST_PREVIEW_JSON` for deterministic end-to-end CFB validation without waiting for a Telegram post.
+- The test payload receives a fresh runtime timestamp, runs the same CFB classification, unit sizing, event/market resolution, price/spread and cap checks, then queues only Termux `PREVIEW`.
+- The trigger is idempotent by payload hash, persists its marker under `/app/data`, waits for the paired executor to reconnect, and logs the terminal executor result.
+- No CFB test path can enqueue `BUY`.
+
 ## 2026-09-25 — SLAM/Syndicate CFB Telegram preview pipeline (#72)
 
 - Added a College Football worker that polls the sanitized `/public/ncaaf` bridge every 15 seconds with a 180-second freshness cutoff.
