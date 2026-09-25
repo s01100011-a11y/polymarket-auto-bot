@@ -930,12 +930,37 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         _STATUS["cycles"] = int(_STATUS.get("cycles") or 0) + 1
 
     async def _run_test_preview_once() -> None:
-        if not test_preview_raw or test_preview_marker.exists():
+        if not test_preview_raw:
             return
+
+        trigger_hash = hashlib.sha256(test_preview_raw.encode("utf-8")).hexdigest()
+        existing_marker = core._load(test_preview_marker) if test_preview_marker.exists() else {}
+        if (
+            isinstance(existing_marker, dict)
+            and existing_marker.get("trigger_hash") == trigger_hash
+            and existing_marker.get("status") in {"QUEUED", "DONE", "FAILED"}
+        ):
+            return
+
         try:
             pick = json.loads(test_preview_raw)
             if not isinstance(pick, dict):
                 raise RuntimeError("NFL_CAPPER_TEST_PREVIEW_JSON must decode to an object")
+
+            # Railway deploy cutovers briefly interrupt the phone poller. Wait for
+            # the existing paired Termux worker to reconnect instead of failing
+            # the one-shot immediately during that normal handoff window.
+            executor_state: dict[str, Any] = {}
+            for _ in range(90):
+                ready, executor_state = live_control._executor_ready()
+                if ready:
+                    break
+                if executor_state.get("geo_blocked"):
+                    raise RuntimeError("Termux executor is geoblocked")
+                await asyncio.sleep(1)
+            else:
+                raise RuntimeError("Termux executor did not reconnect within 90s")
+
             pick["posted_at"] = _now_iso()
             result = await asyncio.to_thread(
                 _prepare_test_preview,
@@ -945,6 +970,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 unit_usdc=unit_usdc,
             )
             marker = {
+                "trigger_hash": trigger_hash,
                 "created_at": _now_iso(),
                 "pick": pick,
                 "preview": result,
@@ -979,6 +1005,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 return
         except Exception as exc:
             marker = {
+                "trigger_hash": trigger_hash,
                 "created_at": _now_iso(),
                 "status": "FAILED",
                 "error": f"{type(exc).__name__}: {exc}",
