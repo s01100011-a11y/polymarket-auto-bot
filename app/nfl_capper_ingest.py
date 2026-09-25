@@ -486,21 +486,7 @@ def _prepare_pick(
             + " exceeds MAX_AUTO_TRADE_USDC=$" + str(core.MAX_AUTO_TRADE_USDC)
         )
 
-    try:
-        event, market, outcome_label, outcome_obj = _find_market(pick, kind)
-    except Exception:
-        diagnostics = _diagnose_market_candidates(pick, kind)
-        print(
-            "NFL_CAPPER_TEST_MARKET_DIAGNOSTICS "
-            + json.dumps(
-                diagnostics[:200],
-                sort_keys=True,
-                separators=(",", ":"),
-                default=str,
-            ),
-            flush=True,
-        )
-        raise
+    event, market, outcome_label, outcome_obj = _find_market(pick, kind)
     asset_id = str(getattr(outcome_obj, "token_id", None) or getattr(outcome_obj, "position_id", None) or "")
     if not asset_id:
         raise RuntimeError("Matched Polymarket market has no tradable outcome token")
@@ -607,7 +593,21 @@ def _prepare_test_preview(
             + " exceeds MAX_AUTO_TRADE_USDC=$" + str(core.MAX_AUTO_TRADE_USDC)
         )
 
-    event, market, outcome_label, outcome_obj = _find_market(pick, kind)
+    try:
+        event, market, outcome_label, outcome_obj = _find_market(pick, kind)
+    except Exception:
+        diagnostics = _diagnose_market_candidates(pick, kind)
+        print(
+            "NFL_CAPPER_TEST_MARKET_DIAGNOSTICS "
+            + json.dumps(
+                diagnostics[:200],
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
+            flush=True,
+        )
+        raise
     asset_id = str(
         getattr(outcome_obj, "token_id", None)
         or getattr(outcome_obj, "position_id", None)
