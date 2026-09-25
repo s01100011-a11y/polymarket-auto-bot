@@ -153,7 +153,7 @@ class NflCapperMarketResolutionTests(unittest.TestCase):
             outcomes=SimpleNamespace(yes=yes, no=no),
             state=SimpleNamespace(accepting_orders=True),
         )
-        return SimpleNamespace(id=slug, slug=slug, title=title, markets=[market])
+        return SimpleNamespace(id=slug, slug=f"nfl-{slug}", title=title, markets=[market])
 
     @staticmethod
     def _client(events):
@@ -176,6 +176,47 @@ class NflCapperMarketResolutionTests(unittest.TestCase):
 
         return _Client()
 
+    def test_event_discovery_falls_back_from_full_name_to_nickname(self):
+        event = self._event("atl-gb-2026-09-25", "Falcons vs Packers")
+
+        class _Result:
+            def __init__(self, items):
+                self.items = items
+
+            def first_page(self):
+                return self
+
+        class _Client:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def list_events(self, **kwargs):
+                query = str(kwargs.get("title_search") or "").casefold()
+                if query == "atlanta falcons":
+                    return _Result([])
+                if query == "falcons":
+                    return _Result([event])
+                return _Result([])
+
+        pick = _pick(
+            selection="UNDER 43.5",
+            teams=["ATL", "GB"],
+            bet_types=["total"],
+            spread_lines=[],
+            total_side="UNDER",
+            total_line=43.5,
+        )
+
+        with patch.object(capper, "PublicClient", return_value=_Client()):
+            matched_event, _, label, outcome = capper._find_market(pick, "total")
+
+        self.assertEqual(matched_event.slug, "nfl-atl-gb-2026-09-25")
+        self.assertEqual(label, "No")
+        self.assertEqual(outcome.token_id, "atl-gb-2026-09-25-no")
+
     def test_one_team_total_resolves_when_exactly_one_event_matches(self):
         event = self._event("atl-was", "Atlanta Falcons vs Washington Commanders")
         pick = _pick(
@@ -188,7 +229,7 @@ class NflCapperMarketResolutionTests(unittest.TestCase):
         )
         with patch.object(capper, "PublicClient", return_value=self._client([event])):
             matched_event, _, label, outcome = capper._find_market(pick, "total")
-        self.assertEqual(matched_event.slug, "atl-was")
+        self.assertEqual(matched_event.slug, "nfl-atl-was")
         self.assertEqual(label, "No")
         self.assertEqual(outcome.token_id, "atl-was-no")
 
