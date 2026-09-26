@@ -382,6 +382,15 @@ def _apply_scoreboard_result(record: dict[str, Any], pick: dict[str, Any] | None
     return changed
 
 
+def _refresh_unresolved_closed_result(record: dict[str, Any]) -> bool:
+    """Grade a persisted closed signal even when no exact saved market remains."""
+    if str(record.get("status") or "") != "EVENT_CLOSED":
+        return False
+    if str(record.get("pick_result") or "").upper() in {"WIN", "LOSS", "PUSH"}:
+        return False
+    return _apply_scoreboard_result(record)
+
+
 def _event_date(event: Any) -> date | None:
     """Best-effort event date from Gamma schedule metadata or CFB slug/title."""
     schedule = getattr(event, "schedule", None)
@@ -2083,10 +2092,10 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             existing_status = str(existing.get("status") or "")
             if existing_status in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE"}:
                 continue
-            if (
-                existing_status == "EVENT_CLOSED"
-                and str(existing.get("pick_result") or "").upper() in {"WIN", "LOSS", "PUSH"}
-            ):
+            if existing_status == "EVENT_CLOSED":
+                if await asyncio.to_thread(_refresh_unresolved_closed_result, existing):
+                    existing["updated_at"] = _now_iso()
+                    changed = True
                 continue
             if existing.get("status") in {"MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE"}:
                 if await asyncio.to_thread(_refresh_spread_alternatives, existing):

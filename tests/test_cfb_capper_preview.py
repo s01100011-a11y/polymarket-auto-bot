@@ -1384,6 +1384,32 @@ class CfbScoreboardFallbackTests(unittest.TestCase):
 
         self.assertEqual(result["pick_result"], "LOSS")
 
+    def test_unresolved_closed_signal_is_regraded_without_saved_market(self):
+        record = {
+            "id": "northwestern-closed",
+            "status": "EVENT_CLOSED",
+            "selection": "NORTHWESTERN 21",
+            "pick": _pick(
+                posted_at="2026-09-25T22:32:01+00:00",
+                selection="NORTHWESTERN 21",
+                team_hint="Northwestern",
+                event_hints=["Northwestern"],
+                spread_lines=["+21"],
+            ),
+        }
+        resolved = {
+            "pick_result": "WIN",
+            "result_source": "espn_final_score",
+            "final_score": "Northwestern 23 - Indiana 29",
+        }
+
+        with patch.object(capper, "_scoreboard_result_for_pick", return_value=resolved):
+            changed = capper._refresh_unresolved_closed_result(record)
+
+        self.assertTrue(changed)
+        self.assertEqual(record["pick_result"], "WIN")
+        self.assertEqual(record["final_score"], "Northwestern 23 - Indiana 29")
+
     def test_open_execution_exposes_sell_button_state(self):
         record = {
             "id": "cfb-signal-open",
