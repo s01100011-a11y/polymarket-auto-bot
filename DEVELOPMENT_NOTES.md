@@ -1,3 +1,16 @@
+## 2026-09-26 — Finished-game grading fallback + capper hide/sell controls (#108)
+
+- Added a completed-game CFB grading fallback using ESPN final-score data when the exact original Polymarket market is no longer available, including legacy records that had previously rolled onto a later game.
+- The fallback grades supported full-game moneylines, spreads, and totals from the original parsed pick and final score. It only persists a result when exactly one completed game matches the pick/date hints.
+- Closed CFB alternate-line and invalid-future-match records now get a real WIN/LOSS/PUSH result when the final game can be identified. Final score/game context is shown on the finished card.
+- Finished cards no longer show stale live BUY quotes, and invalid future-game records no longer present the unrelated future market as the matched/open market.
+- Added a persistent Hide finished / Show finished toggle to the CFB capper panel.
+- Added SELL POSITION on CFB cards only when an actual execution record is still open (`ORDER_SUBMITTED` or `PARTIALLY_CLOSED`). The button uses the existing authenticated Railway -> Termux sell queue and sells the tracked position, not an untraded signal.
+- Added per-position NFL cards under each capper, with the same persistent Hide finished / Show finished toggle and SELL POSITION action for actual open NFL positions.
+- Finished NFL position rows retain settlement result and realized P/L; open rows remain distinct and sellable.
+- Signals that were never executed continue to show `Trade P/L — · NOT TRADED`; result grading does not create fictional betting P/L.
+- Added regression coverage for Northwestern +21 (final-score WIN), Army moneyline (WIN), Temple +3.5 at a 21-17 final (LOSS), CFB sell availability, and NFL open/finished position serialization.
+- Files changed: `app/cfb_capper_preview.py`, `app/nfl_capper_ingest.py`, `tests/test_cfb_capper_preview.py`, `tests/test_nfl_capper_ingest.py`, and `DEVELOPMENT_NOTES.md`.
 ## 2026-09-26 — CFB capper performance + finished result/P&L dashboard (#106)
 
 - Added NFL-style performance summaries to each CFB capper card for Slam and Syndicate: bets, open positions, W-L-P, win rate, graded stake, realized P/L, and ROI.
