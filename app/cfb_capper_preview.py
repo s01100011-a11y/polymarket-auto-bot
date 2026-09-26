@@ -7,7 +7,7 @@ import os
 import re
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -178,6 +178,84 @@ def _event_hints_for_pick(pick: dict[str, Any], kind: str) -> list[str]:
     return [hint] if hint else []
 
 
+def _event_date(event: Any) -> date | None:
+    """Best-effort event date from structured metadata or the CFB slug/title."""
+    for attr in (
+        "start_date",
+        "startDate",
+        "event_date",
+        "eventDate",
+        "end_date",
+        "endDate",
+    ):
+        parsed = _parse_iso(getattr(event, attr, None))
+        if parsed is not None:
+            return parsed.date()
+
+    text = " ".join(
+        [
+            str(getattr(event, "slug", "") or ""),
+            str(getattr(event, "title", "") or ""),
+        ]
+    )
+    match = re.search(r"\b(20\d{2})-(\d{2})-(\d{2})\b", text)
+    if not match:
+        return None
+    try:
+        return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return None
+
+
+def _event_key(event: Any) -> str:
+    return str(
+        getattr(event, "id", "")
+        or getattr(event, "slug", "")
+        or getattr(event, "title", "")
+    )
+
+
+def _narrow_one_team_events_by_posted_date(
+    ranked: list[tuple[int, Any, Any, str, Any]],
+    pick: dict[str, Any],
+) -> list[tuple[int, Any, Any, str, Any]]:
+    """Narrow one-team CFB picks to one nearby scheduled event without guessing."""
+    posted = _parse_iso(pick.get("posted_at"))
+    if posted is None:
+        return ranked
+
+    candidates: dict[str, int] = {}
+    posted_day = posted.date()
+    for row in ranked:
+        key = _event_key(row[1])
+        event_day = _event_date(row[1])
+        if not key or event_day is None:
+            continue
+        delta_days = (event_day - posted_day).days
+        # Allow one day behind for UTC/local-date boundaries and at most four
+        # days ahead. A week-later game must never inherit an old stale pick.
+        if -1 <= delta_days <= 4:
+            candidates[key] = delta_days
+
+    if not candidates:
+        return ranked
+
+    def priority(delta_days: int) -> tuple[int, int]:
+        return (0 if delta_days >= 0 else 1, abs(delta_days))
+
+    best_priority = min(priority(delta) for delta in candidates.values())
+    best_keys = {
+        key
+        for key, delta in candidates.items()
+        if priority(delta) == best_priority
+    }
+    if len(best_keys) != 1:
+        return ranked
+
+    best_key = next(iter(best_keys))
+    return [row for row in ranked if _event_key(row[1]) == best_key]
+
+
 def _select_outcome(market: Any, pick: dict[str, Any], kind: str) -> tuple[str, Any] | None:
     outcomes = [(label, obj) for label, obj in nfl._outcomes(market) if obj is not None]
     if len(outcomes) != 2:
@@ -281,17 +359,16 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
             f"No exact open Polymarket CFB {kind} market matched '{pick.get('selection')}'"
         )
 
-    event_keys = {
-        str(
-            getattr(row[1], "id", "")
-            or getattr(row[1], "slug", "")
-            or getattr(row[1], "title", "")
-        )
-        for row in ranked
-    }
+    event_keys = {_event_key(row[1]) for row in ranked}
     event_keys.discard("")
+    if len(event_keys) != 1 and len(hints) == 1:
+        ranked = _narrow_one_team_events_by_posted_date(ranked, pick)
+        event_keys = {_event_key(row[1]) for row in ranked}
+        event_keys.discard("")
     if len(event_keys) != 1:
-        raise ValueError("CFB pick matched multiple open events; preview blocked")
+        raise ValueError(
+            "CFB pick matched multiple open events and no unique nearby game could be resolved"
+        )
 
     ranked.sort(key=lambda row: row[0], reverse=True)
     best = ranked[0]
