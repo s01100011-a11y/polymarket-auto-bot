@@ -1213,3 +1213,11 @@ Current upstream contents at that commit:
 There is currently no NRL monitor/odds/PW/export/backfill implementation in the upstream repository to inspect or copy. `SNAPSHOT.md` records provenance and explicitly notes that the snapshot should be refreshed when source code is added.
 
 The snapshot is isolated under `research/` and is not imported by the live trading path.
+
+
+## 2026-09-26 — Fail capper polling closed on stale Telegram bridge (#123)
+
+- CFB and NFL capper workers now request `require_fresh=true` from the Telegram sports bridge.
+- If the bridge listener is disconnected or has unresolved channels, the bridge returns HTTP 503 and the worker records a polling error instead of reprocessing cached picks.
+- This prevents the dashboard from appearing healthy while new Telegram posts are actually missing.
+- Root cause incident and bridge-side safeguards are documented in `telegram-chatgpt-bridge#59`.

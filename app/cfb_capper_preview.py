@@ -2146,6 +2146,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                         "minutes": feed_window_minutes,
                         "limit": 300,
                         "include_graded": "false",
+                        "require_fresh": "true",
                     },
                 )
                 response.raise_for_status()
