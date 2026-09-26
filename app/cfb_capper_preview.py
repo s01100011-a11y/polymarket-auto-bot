@@ -830,6 +830,7 @@ def _status_pick_item(record: dict[str, Any]) -> dict[str, Any]:
     if posted is not None:
         age_seconds = max(0, int((datetime.now(timezone.utc) - posted).total_seconds()))
     return {
+        "status": record.get("status"),
         "selection": record.get("selection"),
         "posted_at": record.get("posted_at"),
         "updated_at": record.get("updated_at"),
@@ -886,6 +887,24 @@ def _recent_status_items(
         reverse=True,
     )
     return [_status_pick_item(row) for row in matching[:limit]]
+
+
+def _recent_all_items(
+    rows: list[dict[str, Any]],
+    *,
+    limit: int = 30,
+) -> list[dict[str, Any]]:
+    ordered = list(rows)
+    ordered.sort(
+        key=lambda row: str(
+            row.get("updated_at")
+            or row.get("posted_at")
+            or row.get("first_seen_at")
+            or ""
+        ),
+        reverse=True,
+    )
+    return [_status_pick_item(row) for row in ordered[:limit]]
 
 
 def _inject_dashboard_panel(html: str) -> str:
@@ -965,10 +984,39 @@ async function cfbManualBuy(signalId,btn){
   alert(String(e.message||e));
  }
 }
-function cfbCapperLine(x){
+const cfbActiveTabs={slam:'signals',syndicate:'signals'};
+let cfbLastSources={};
+function cfbTabSpec(x){
+ return [
+  ['signals','Signals',Number(x.signals||0),x.all_items||[],'signals'],
+  ['queued','Queued',Number(x.preview_queued||0),x.queued_items||[],'queued'],
+  ['done','Done',Number(x.preview_done||0),x.done_items||[],'done'],
+  ['failed','Failed',Number(x.preview_failed||0),x.failed_items||[],'failed'],
+  ['retrying','Retrying',Number(x.retrying||0),x.retrying_items||[],'retrying'],
+  ['pregame','Pregame',Number(x.pregame||0),x.pregame_items||[],'pregame'],
+  ['live','Live',Number(x.live||0),x.live_items||[],'live'],
+  ['closed','Closed',Number(x.closed||0),x.closed_items||[],'closed'],
+  ['unsupported','Unsupported',Number(x.unsupported||0),x.unsupported_items||[],'unsupported']
+ ];
+}
+function cfbSetTab(sourceKey,tab){
+ cfbActiveTabs[sourceKey]=tab;
+ const x=cfbLastSources[sourceKey==='slam'?'Slam - CFB':'Syndicate - CFB'];
+ const el=document.getElementById(sourceKey==='slam'?'cfbCapperSlam':'cfbCapperSyndicate');
+ if(el&&x)el.innerHTML=cfbCapperLine(x,sourceKey);
+}
+function cfbCapperLine(x,sourceKey){
  if(!x)return 'No tracked signals yet';
- const base='Signals '+(x.signals||0)+' · Queued '+(x.preview_queued||0)+' · Done '+(x.preview_done||0)+' · Failed '+(x.preview_failed||0)+'<br>Retrying '+(x.retrying||0)+' · Pregame '+(x.pregame||0)+' · Live '+(x.live||0)+' · Closed '+(x.closed||0)+' · Unsupported '+(x.unsupported||0);
- return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Previewed picks',x.previewed_items,'previewed')+cfbPickList('Matched pregame picks',x.pregame_items,'pregame')+cfbPickList('Matched live picks',x.live_items,'live')+cfbPickList('Matched / retrying picks',x.retrying_items,'retrying')+cfbPickList('Matched / preview failed',x.failed_items,'failed');
+ const active=cfbActiveTabs[sourceKey]||'signals';
+ const specs=cfbTabSpec(x);
+ const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>{
+  const selected=s[0]===active;
+  return '<button type="button" style="padding:5px 8px;min-height:34px;'+(selected?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="cfbSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+cfbEsc(s[1])+' '+s[2]+'</button>';
+ }).join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const items=spec[3]||[];
+ const body=items.length?cfbPickList(spec[1]+' signals',items,spec[4]):'<div style="margin-top:8px;opacity:.7">No '+cfbEsc(spec[1].toLowerCase())+' signals.</div>';
+ return tabs+body;
 }
 async function loadCfbCapperStats(){
  try{
@@ -977,10 +1025,11 @@ async function loadCfbCapperStats(){
   const state=document.getElementById('cfbCapperState'),meta=document.getElementById('cfbCapperMeta');
   let mode=' · '+String(d.mode||'').replaceAll('_',' ');
   if(state)state.textContent=(d.enabled?'ENABLED':'DISABLED')+(d.enabled?mode:'');
-  if(meta)meta.textContent='1u = \u0024'+Number(d.unit_usdc||10).toFixed(2)+' · auto fresh ≤ '+(d.max_pick_age_seconds||0)+'s · manual pregame/live while market open · odds refresh '+(d.poll_seconds||0)+'s';
+  if(meta)meta.textContent='1u = \u0024'+Number(d.unit_usdc||10).toFixed(2)+' · auto fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · manual pregame/live while market open · odds refresh '+(d.poll_seconds||0)+'s';
+  cfbLastSources=d.sources||{};
   const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
-  if(s)s.innerHTML=cfbCapperLine((d.sources||{})['Slam - CFB']);
-  if(y)y.innerHTML=cfbCapperLine((d.sources||{})['Syndicate - CFB']);
+  if(s)s.innerHTML=cfbCapperLine(cfbLastSources['Slam - CFB'],'slam');
+  if(y)y.innerHTML=cfbCapperLine(cfbLastSources['Syndicate - CFB'],'syndicate');
  }catch(e){
   const state=document.getElementById('cfbCapperState');if(state)state.textContent='Status unavailable: '+String(e);
  }
@@ -1006,6 +1055,10 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     enabled = os.getenv("CFB_CAPPER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
     poll_seconds = max(5, int(os.getenv("CFB_CAPPER_POLL_SECONDS", "15")))
     max_age_seconds = max(30, int(os.getenv("CFB_CAPPER_MAX_PICK_AGE_SECONDS", "180")))
+    feed_window_minutes = max(
+        180,
+        min(4320, int(os.getenv("CFB_CAPPER_FEED_WINDOW_MINUTES", "1440"))),
+    )
     unit_usdc = Decimal(os.getenv("CFB_CAPPER_UNIT_USDC", "10"))
     test_preview_raw = os.getenv("CFB_CAPPER_TEST_PREVIEW_JSON", "").strip()
     test_preview_marker = core.DATA_DIR / "cfb_capper_test_preview.json"
@@ -1076,7 +1129,11 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             async with httpx.AsyncClient(timeout=15) as client:
                 response = await client.get(
                     f"{bridge_url}/public/ncaaf",
-                    params={"minutes": 180, "limit": 120, "include_graded": "false"},
+                    params={
+                        "minutes": feed_window_minutes,
+                        "limit": 300,
+                        "include_graded": "false",
+                    },
                 )
                 response.raise_for_status()
                 feed = response.json()
@@ -1381,7 +1438,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "live": sum(1 for r in rows if r.get("status") == "MATCHED_LIVE"),
                 "closed": sum(1 for r in rows if r.get("status") == "EVENT_CLOSED"),
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
+                "all_items": _recent_all_items(rows),
                 "queued_items": _recent_status_items(rows, "PREVIEW_QUEUED"),
+                "done_items": _recent_status_items(rows, "PREVIEW_DONE"),
                 "previewed_items": _recent_status_items(rows, "PREVIEW_DONE"),
                 "retrying_items": _recent_status_items(
                     [r for r in rows if _saved_market_match(r) is not None],
@@ -1393,12 +1452,15 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 ),
                 "pregame_items": _recent_status_items(rows, "MATCHED_PREGAME"),
                 "live_items": _recent_status_items(rows, "MATCHED_LIVE"),
+                "closed_items": _recent_status_items(rows, "EVENT_CLOSED"),
+                "unsupported_items": _recent_status_items(rows, "IGNORED_UNSUPPORTED"),
             }
         return {
             "enabled": enabled,
             "mode": "PREVIEW_ONLY",
             "poll_seconds": poll_seconds,
             "max_pick_age_seconds": max_age_seconds,
+            "feed_window_minutes": feed_window_minutes,
             "unit_usdc": str(unit_usdc),
             "sources": counts,
             "status": dict(_STATUS),
