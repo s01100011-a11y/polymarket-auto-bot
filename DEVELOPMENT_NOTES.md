@@ -1,5 +1,24 @@
 ## 2026-09-26 — Forward executable PW spread capture (#15)
 
+## 2026-09-27 — PW direct-feed outage + NBA/WNBA Slack failover (#127)
+
+Incident:
+- Railway production and the Termux executor were healthy; executor heartbeat and work polling returned HTTP 200.
+- Railway Tailscale userspace networking started successfully and received Tailnet IP 100.127.133.47.
+- Both NBA and WNBA `/api/pw-export` polls failed TLS handshakes against the NBAMonitor peer via MagicDNS and direct Tailnet IP, across multiple Railway deployments. Restarting Railway therefore does not address the serving-side outage.
+
+Code findings/fix:
+- Existing Slack backup accepted basketball at the webhook gate but downstream parsing, alias matching, and live market URLs still contained WNBA-only assumptions.
+- Generalized team detection and outcome/event matching to NBA + WNBA while guarding against cross-league alias collisions such as `New York`.
+- Predicted Winner parsing now accepts both Slack dash format and the direct poller's colon/star format.
+- Parser preserves game ID, event timestamp, quarter and win probability when present so the existing cross-source signal key can suppress a duplicate when Tailnet recovers.
+- Live fallback derives `/sports/nba/` vs `/sports/wnba/` from the selected team.
+- No live/auto, executor, geoblock, price, spread, stake, or duplicate-position safety gate was removed or weakened.
+
+Validation:
+- Added `tests/test_slack_basketball_failover.py` covering NBA/WNBA team recognition, league routing, NBA Slack Predicted Winner parsing, direct-feed NBA format, and dedup-key construction.
+
+
 - Added `app/pw_spread_capture.py` as a research/shadow-only forward recorder; it has no order-placement, sizing, routing, or position-management path.
 - Every genuine persisted PW alert now gets a parallel spread-capture pass after the existing alert handlers. The recorder resolves the same WNBA event and enumerates every open full-game Polymarket spread token that can be mapped unambiguously to the PW-selected team.
 - Spread-line decoding reuses the existing fail-closed signed-line logic used by the CFB sports resolver, including inversion for the complementary team side.

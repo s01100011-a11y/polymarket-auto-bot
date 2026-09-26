@@ -25,17 +25,20 @@ def _clean(value: str) -> str:
 
 def _canonical_team(value: str) -> str | None:
     target = ingest._norm_text(_clean(value))
-    for team, aliases in ingest.WNBA_ALIASES.items():
-        if target == ingest._norm_text(team):
-            return team
-        if any(target == ingest._norm_text(alias) for alias in aliases):
-            return team
+    alias_maps = (ingest.WNBA_ALIASES, ingest.NBA_ALIASES)
+    for aliases_by_team in alias_maps:
+        for team, aliases in aliases_by_team.items():
+            if target == ingest._norm_text(team):
+                return team
+            if any(target == ingest._norm_text(alias) for alias in aliases):
+                return team
     # Header normally contains a full team name. Fall back to contained aliases.
-    for team, aliases in ingest.WNBA_ALIASES.items():
-        if ingest._norm_text(team) in target:
-            return team
-        if any(len(alias) > 3 and ingest._norm_text(alias) in target for alias in aliases):
-            return team
+    for aliases_by_team in alias_maps:
+        for team, aliases in aliases_by_team.items():
+            if ingest._norm_text(team) in target:
+                return team
+            if any(len(alias) > 3 and ingest._norm_text(alias) in target for alias in aliases):
+                return team
     return None
 
 
@@ -47,9 +50,12 @@ def _field(text: str, name: str) -> str | None:
 def _parse_alert(text: str) -> dict[str, Any]:
     raw = text or ""
     cleaned = _clean(raw)
-    teams = ingest._team_mentions(raw)
+    teams = ingest._basketball_team_mentions(raw)
 
-    header = re.search(r"Predicted\s+Winner\s*[—-]\s*([^\n]+)", cleaned, flags=re.I)
+    header = (
+        re.search(r"Predicted\s+Winner\s*[—-]\s*([^\n]+)", cleaned, flags=re.I)
+        or re.search(r"Predicted\s+Winner\s*:\s*([^\n]+)", cleaned, flags=re.I)
+    )
     alert_type = "predicted_winner" if header else "other"
     selection = _canonical_team(header.group(1)) if header else None
 
@@ -85,6 +91,10 @@ def _parse_alert(text: str) -> dict[str, Any]:
     if selection and selection not in game_teams:
         game_teams.insert(0, selection)
 
+    game_id_match = re.search(r"gameId/(\d+)", raw, flags=re.I)
+    event_ts_matches = list(re.finditer(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \+08)", raw))
+    event_ts = event_ts_matches[-1].group(1) if event_ts_matches else None
+
     parsed = {
         "raw_text": raw,
         "teams": game_teams or teams,
@@ -110,6 +120,14 @@ def _parse_alert(text: str) -> dict[str, Any]:
         "edge": edge_match.group(1) if edge_match else None,
         "scenario": _field(cleaned, "Scenario"),
     }
+    if selection and game_id_match:
+        parsed["pw"] = {
+            "game_id": game_id_match.group(1),
+            "predicted_winner": selection,
+            "event_ts": event_ts,
+            "quarter": parsed.get("quarter"),
+            "win_probability": win_probability,
+        }
     return parsed
 
 
@@ -120,7 +138,7 @@ def _paper_trade_from_alert(parsed: dict[str, Any], slack_event_id: str, slack_e
     if parsed.get("alert_type") != "predicted_winner" or not parsed.get("actionable"):
         raise ValueError(parsed.get("ignore_reason") or "Slack alert is not an actionable Predicted Winner signal")
     if parsed.get("market_kind") != "moneyline":
-        raise ValueError("WNBA Slack automation currently paper-trades moneyline only")
+        raise ValueError("NBA/WNBA Slack automation currently paper-trades moneyline only")
     if not parsed.get("selection"):
         raise ValueError("Could not identify predicted winner")
     return _original_paper_trade(parsed, slack_event_id, slack_event)
@@ -152,8 +170,8 @@ def _ignored_reason(body: dict[str, Any], preexisting: bool = False) -> str | No
     text = str(event.get("text") or "").strip()
     if not text:
         return "Empty message"
-    if ingest.SLACK_REQUIRE_WNBA and not ingest._looks_wnba(text):
-        return "Not WNBA"
+    if ingest.SLACK_REQUIRE_WNBA and not ingest._looks_basketball(text):
+        return "Not NBA/WNBA"
     if preexisting:
         return "Duplicate Slack event"
     event_time = body.get("event_time")

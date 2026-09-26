@@ -160,7 +160,10 @@ def _slack_trade_handler(
     event_slug = str(getattr(event, "slug", "") or "")
     if not event_slug:
         raise ValueError("Matched Polymarket event has no slug")
-    market_url = f"https://polymarket.com/sports/wnba/{event_slug}"
+    league = ingest._league_for_team(str(parsed.get("selection") or ""))
+    if league not in {"nba", "wnba"}:
+        raise ValueError("Could not determine NBA/WNBA league for predicted winner")
+    market_url = f"https://polymarket.com/sports/{league}/{event_slug}"
 
     if _active_or_pending(asset_id, market_url, outcome_label):
         raise ValueError("An open or pending LIVE position already exists for this selection")
@@ -190,7 +193,7 @@ def _slack_trade_handler(
         "requires_approval": not bool(core.auto_trading_enabled()),
         "request_id": queued["id"],
         "source": "slack_live",
-        "market": str(getattr(market, "question", None) or getattr(event, "title", "WNBA moneyline")),
+        "market": str(getattr(market, "question", None) or getattr(event, "title", f"{league.upper()} moneyline")),
         "market_url": market_url,
         "outcome": outcome_label,
         "asset_id": asset_id,
@@ -312,7 +315,7 @@ def _install_slack_live_controls() -> None:
     box = """
     <div class="slack-mode-box">
       <div class="slack-mode-head">
-        <div><div class="label">Slack WNBA live auto-prepare</div><div class="slack-mode-value" id="slackTradingMode">Checking…</div></div>
+        <div><div class="label">Slack NBA/WNBA live auto-prepare</div><div class="slack-mode-value" id="slackTradingMode">Checking…</div></div>
         <div class="slack-mode-state" id="slackExecutorState">Executor status…</div>
       </div>
       <div class="slack-mode-controls">
