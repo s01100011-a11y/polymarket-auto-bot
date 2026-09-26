@@ -610,6 +610,31 @@ def _refresh_spread_alternatives(record: dict[str, Any]) -> bool:
     pick = record.get("pick")
     if not isinstance(pick, dict):
         return False
+
+    existing = record.get("live_alternatives") or []
+    if isinstance(existing, list) and existing:
+        first = existing[0] if isinstance(existing[0], dict) else None
+        if first:
+            try:
+                lifecycle = _refresh_saved_event_state(first)
+                phase = _event_phase(lifecycle)
+                if phase == "CLOSED":
+                    changed = False
+                    for key, value in lifecycle.items():
+                        if record.get(key) != value:
+                            record[key] = value
+                            changed = True
+                    if record.get("event_phase") != "CLOSED":
+                        record["event_phase"] = "CLOSED"
+                        changed = True
+                    if record.get("status") != "EVENT_CLOSED":
+                        record["status"] = "EVENT_CLOSED"
+                        record["reason"] = "matched Polymarket event/market is closed"
+                        changed = True
+                    return changed
+            except Exception:
+                pass
+
     try:
         alternatives = _find_spread_alternatives(pick)
     except Exception as exc:
