@@ -1,3 +1,14 @@
+## 2026-09-26 — Explicit CFB live spread alternatives (#96)
+
+- If an exact tracked CFB spread is no longer listed, the signal is kept visible and the bot discovers nearby open spread markets for the same team/event.
+- Alternate spread buttons are explicit: they show the actual current line, executable best-ask cents, American-odds equivalent, and whether the line is better/worse than the original pick.
+- The original wager is never silently changed. An alternate is bought only after the user clicks that specifically labeled line.
+- Alternate discovery is fail-closed: it requires an explicit signed spread tied to the selected team and a unique same-date CFB event.
+- Each alternate is re-resolved and re-quoted again at click time. If the line has disappeared, the click is rejected and the dashboard must be refreshed.
+- Existing Termux online/geoblock, per-trade cap, daily budget, MAX_PRICE, MAX_SPREAD, duplicate/open-position, and exact asset-token guards remain in force.
+- Alternate orders retain the original strategy pick id/selection for dedupe/audit and also record the executed alternate line.
+- Pregame/Live tab counts include signals with explicit alternatives even when the original exact spread is unavailable.
+
 ## 2026-09-26 — CFB status tabs and current-slate recovery (#94)
 
 - Each Slam/Syndicate CFB card now exposes viewable tabs for Signals, Queued, Done, Failed, Retrying, Pregame, Live, Closed, and Unsupported instead of flattening all status counts into one block.
