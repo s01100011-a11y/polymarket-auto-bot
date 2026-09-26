@@ -259,7 +259,7 @@ def _narrow_one_team_events_by_posted_date(
         if priority(delta) == best_priority
     }
     if len(best_keys) != 1:
-        return []
+        return [row for row in ranked if _event_key(row[1]) in best_keys]
 
     best_key = next(iter(best_keys))
     return [row for row in ranked if _event_key(row[1]) == best_key]
