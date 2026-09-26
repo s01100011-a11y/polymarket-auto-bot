@@ -186,6 +186,23 @@ def _decimal_odds_for_pick(pick: dict[str, Any]) -> Decimal:
     return Decimal("1") + (Decimal("100") / Decimal("115"))
 
 
+def _audit_stake_for_pick(
+    pick: dict[str, Any],
+    unit_usdc: Decimal = Decimal("10"),
+) -> Decimal:
+    """Size a hypothetical wager to win the posted units, with a units floor.
+
+    Each posted unit targets unit_usdc profit. At even money and plus-money
+    prices, risk is never reduced below the posted-unit cash value.
+    """
+    target_profit = _units_for_pick(pick) * unit_usdc
+    profit_multiple = _decimal_odds_for_pick(pick) - Decimal("1")
+    if profit_multiple <= 0:
+        profit_multiple = Decimal("100") / Decimal("115")
+    required_stake = target_profit / profit_multiple
+    return max(target_profit, required_stake).quantize(Decimal("0.01"))
+
+
 def _missed_signal_stats(
     signals: dict[str, Any],
     executions: dict[str, Any],
@@ -222,12 +239,7 @@ def _missed_signal_stats(
                 continue
 
             pick = record.get("pick") if isinstance(record.get("pick"), dict) else {}
-            try:
-                stake = Decimal(str(record.get("stake_usdc")))
-                if stake <= 0:
-                    raise ValueError("non-positive stake")
-            except Exception:
-                stake = _stake_for_pick(pick, unit_usdc)
+            stake = _audit_stake_for_pick(pick, unit_usdc)
 
             graded += 1
             if result == "WIN":

@@ -1,3 +1,11 @@
+## 2026-09-26 — Target-win unit convention for missed P/L
+
+- Missed/untraded capper P/L now treats posted units as target profit rather than a flat risk amount.
+- With 1u = $10, negative odds size the hypothetical risk to win $10 per unit (for example -110 risks $11 and -200 risks $20).
+- Even-money and plus-money calls keep a minimum risk equal to the posted-unit cash value, so +100/+150/+300 all risk at least $10 for a 1u call.
+- Multi-unit calls scale the target profit and minimum risk by posted units.
+- The existing live order-submission sizing path is unchanged by this reporting fix.
+
 ## 2026-09-26 — Top portfolio value + total missed P/L stats (#114)
 
 - Added two account-level cards to the top performance strip: `Portfolio value` and `Missed P/L · total`.
