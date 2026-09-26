@@ -802,7 +802,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     @app.get("/api/cfb-cappers/status", dependencies=[Depends(dashboard._auth)])
     def cfb_capper_status() -> dict[str, Any]:
         signals = _load_signals()
-        counts: dict[str, dict[str, int]] = {}
+        counts: dict[str, dict[str, Any]] = {}
         for label in SOURCE_LABELS:
             rows = [r for r in signals.values() if r.get("source") == label]
             counts[label] = {
