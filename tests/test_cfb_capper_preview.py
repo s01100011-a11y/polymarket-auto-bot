@@ -1528,6 +1528,7 @@ class CfbFinishedResultsAndPerformanceTests(unittest.TestCase):
 
         self.assertIn("cfb-capper-performance", rendered)
         self.assertIn("Trade P/L", rendered)
+        self.assertIn("Missed P/L", rendered)
         self.assertIn("label:'WIN'", rendered)
         self.assertIn("label:'LOSS'", rendered)
         self.assertIn("NOT TRADED", rendered)

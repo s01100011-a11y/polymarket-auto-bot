@@ -1931,7 +1931,10 @@ function cfbCapperLine(x,sourceKey){
  const rawPnl=p.realized_pnl_usdc===null||p.realized_pnl_usdc===undefined?null:Number(p.realized_pnl_usdc);
  const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'$'+rawPnl.toFixed(2);
  const pnlClass=rawPnl===null||rawPnl===0?'flat':(rawPnl>0?'positive':'negative');
- const performance='<div class="cfb-capper-performance"><div>Bets '+(p.bets||0)+' · Open '+(p.open||0)+' · W-L-P '+(p.wins||0)+'-'+(p.losses||0)+'-'+(p.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(p.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">P/L '+pnl+'</span> · ROI '+roi+'</div></div>';
+ const missedRaw=Number(p.missed_pnl_usdc||0);
+ const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
+ const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
+ const performance='<div class="cfb-capper-performance"><div>Bets '+(p.bets||0)+' · Open '+(p.open||0)+' · W-L-P '+(p.wins||0)+'-'+(p.losses||0)+'-'+(p.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(p.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">P/L '+pnl+'</span> · ROI '+roi+'</div><div>Missed '+Number(p.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div></div>';
  const active=cfbActiveTabs[sourceKey]||'signals';
  const specs=cfbTabSpec(x);
  const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>{
@@ -2421,6 +2424,15 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             labels=SOURCE_LABELS,
             sport="CFB",
         )
+        missed = nfl._missed_signal_stats(
+            signals,
+            executions,
+            labels=SOURCE_LABELS,
+            sport="CFB",
+            unit_usdc=unit_usdc,
+        )
+        for label in SOURCE_LABELS:
+            performance.setdefault(label, {}).update(missed.get(label, {}))
         counts: dict[str, dict[str, Any]] = {}
         for label in SOURCE_LABELS:
             rows = [r for r in signals.values() if r.get("source") == label]

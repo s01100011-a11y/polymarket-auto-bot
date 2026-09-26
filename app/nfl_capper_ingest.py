@@ -6,7 +6,7 @@ import json
 import os
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -165,6 +165,90 @@ def _stake_for_pick(pick: dict[str, Any], unit_usdc: Decimal = Decimal("10")) ->
     return (_units_for_pick(pick) * unit_usdc).quantize(Decimal("0.01"))
 
 
+def _decimal_odds_for_pick(pick: dict[str, Any]) -> Decimal:
+    """Return posted decimal odds, falling back to the audit default of -115."""
+    try:
+        decimal_odds = Decimal(str(pick.get("decimal_odds")))
+        if decimal_odds > 1:
+            return decimal_odds
+    except Exception:
+        pass
+
+    try:
+        american = Decimal(str(pick.get("american_odds")))
+        if american > 0:
+            return Decimal("1") + (american / Decimal("100"))
+        if american < 0:
+            return Decimal("1") + (Decimal("100") / abs(american))
+    except Exception:
+        pass
+
+    return Decimal("1") + (Decimal("100") / Decimal("115"))
+
+
+def _missed_signal_stats(
+    signals: dict[str, Any],
+    executions: dict[str, Any],
+    *,
+    labels: tuple[str, ...] = SOURCE_LABELS,
+    sport: str = "NFL",
+    unit_usdc: Decimal = Decimal("10"),
+) -> dict[str, dict[str, Any]]:
+    """Hypothetical P/L for graded Telegram calls that never became real trades."""
+    traded_signal_ids: set[str] = set()
+    for rec in executions.values():
+        if not isinstance(rec, dict) or rec.get("parent_trade_id") or bool(rec.get("paper")):
+            continue
+        record_sport = str(rec.get("strategy_sport") or "").upper()
+        if sport and record_sport and record_sport != str(sport).upper():
+            continue
+        signal_id = str(rec.get("strategy_pick_id") or "")
+        if signal_id:
+            traded_signal_ids.add(signal_id)
+
+    out: dict[str, dict[str, Any]] = {}
+    for label in labels:
+        graded = wins = losses = pushes = 0
+        missed_pnl = Decimal("0")
+        for record in signals.values():
+            if not isinstance(record, dict) or record.get("source") != label:
+                continue
+            signal_id = str(record.get("id") or "")
+            if signal_id and signal_id in traded_signal_ids:
+                continue
+
+            result = str(record.get("pick_result") or "").upper()
+            if result not in {"WIN", "LOSS", "PUSH"}:
+                continue
+
+            pick = record.get("pick") if isinstance(record.get("pick"), dict) else {}
+            try:
+                stake = Decimal(str(record.get("stake_usdc")))
+                if stake <= 0:
+                    raise ValueError("non-positive stake")
+            except Exception:
+                stake = _stake_for_pick(pick, unit_usdc)
+
+            graded += 1
+            if result == "WIN":
+                wins += 1
+                missed_pnl += stake * (_decimal_odds_for_pick(pick) - Decimal("1"))
+            elif result == "LOSS":
+                losses += 1
+                missed_pnl -= stake
+            else:
+                pushes += 1
+
+        out[label] = {
+            "missed_graded": graded,
+            "missed_wins": wins,
+            "missed_losses": losses,
+            "missed_pushes": pushes,
+            "missed_pnl_usdc": str(missed_pnl.quantize(Decimal("0.01"))),
+        }
+    return out
+
+
 def _fingerprint(pick: dict[str, Any]) -> str:
     canonical = {
         "source": str(pick.get("source") or ""),
@@ -224,6 +308,173 @@ def _team_aliases(abbr: str) -> tuple[str, ...]:
 def _team_name(abbr: str) -> str:
     row = NFL_TEAMS.get(str(abbr).upper())
     return row[0] if row else str(abbr)
+
+
+def _espn_nfl_competitor_matches(abbr: str, competitor: dict[str, Any]) -> bool:
+    team = competitor.get("team") or {}
+    espn_abbr = str(team.get("abbreviation") or "").upper()
+    if espn_abbr == str(abbr).upper():
+        return True
+    text = " ".join(
+        str(team.get(key) or "")
+        for key in ("displayName", "shortDisplayName", "name", "location")
+    )
+    return _contains_alias(text, abbr)
+
+
+def _nfl_scoreboard_result_for_pick(
+    pick: dict[str, Any],
+    *,
+    cache: dict[str, list[dict[str, Any]]] | None = None,
+) -> dict[str, Any] | None:
+    """Grade one supported NFL game call from a completed ESPN final score."""
+    kind, _ = _classify_pick(pick)
+    posted = _parse_iso(pick.get("posted_at"))
+    teams = [str(x).upper() for x in (pick.get("teams") or []) if str(x).upper() in NFL_TEAMS]
+    if kind is None or posted is None or not teams:
+        return None
+
+    event_cache = cache if cache is not None else {}
+    matched: dict[str, dict[str, Any]] = {}
+    for offset in (-1, 0, 1, 2, 3, 4, 5, 6, 7):
+        game_day = (posted + timedelta(days=offset)).strftime("%Y%m%d")
+        events = event_cache.get(game_day)
+        if events is None:
+            try:
+                response = httpx.get(
+                    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
+                    params={"dates": game_day, "limit": 100},
+                    timeout=12,
+                )
+                response.raise_for_status()
+                events = list((response.json() or {}).get("events") or [])
+            except Exception:
+                events = []
+            event_cache[game_day] = events
+
+        for event in events:
+            competitions = event.get("competitions") or []
+            if not competitions:
+                continue
+            competition = competitions[0] or {}
+            status = ((competition.get("status") or {}).get("type") or {})
+            if not bool(status.get("completed")):
+                continue
+            competitors = competition.get("competitors") or []
+            if len(competitors) != 2:
+                continue
+            if not all(any(_espn_nfl_competitor_matches(team, comp) for comp in competitors) for team in teams):
+                continue
+            event_id = str(event.get("id") or "")
+            if event_id:
+                matched[event_id] = event
+
+    if len(matched) != 1:
+        return None
+
+    event = next(iter(matched.values()))
+    competition = (event.get("competitions") or [{}])[0] or {}
+    competitors = competition.get("competitors") or []
+    try:
+        scores = [Decimal(str(comp.get("score"))) for comp in competitors]
+    except Exception:
+        return None
+
+    labels = []
+    for comp in competitors:
+        team = comp.get("team") or {}
+        labels.append(str(team.get("shortDisplayName") or team.get("displayName") or team.get("name") or "").strip())
+    final_score = f"{labels[0]} {scores[0]:f} - {labels[1]} {scores[1]:f}"
+
+    result: str | None = None
+    selected_score: Decimal | None = None
+    opponent_score: Decimal | None = None
+    if kind in {"moneyline", "spread"}:
+        selected = teams[0]
+        selected_index = next(
+            (idx for idx, comp in enumerate(competitors) if _espn_nfl_competitor_matches(selected, comp)),
+            None,
+        )
+        if selected_index is None:
+            return None
+        other_index = 1 - selected_index
+        selected_score = scores[selected_index]
+        opponent_score = scores[other_index]
+        if kind == "moneyline":
+            result = "WIN" if selected_score > opponent_score else "LOSS" if selected_score < opponent_score else "PUSH"
+        else:
+            try:
+                line = Decimal(str((pick.get("spread_lines") or [])[0]))
+            except Exception:
+                return None
+            adjusted = selected_score + line
+            result = "WIN" if adjusted > opponent_score else "LOSS" if adjusted < opponent_score else "PUSH"
+    elif kind == "total":
+        try:
+            line = Decimal(str(pick.get("total_line")))
+        except Exception:
+            return None
+        total = scores[0] + scores[1]
+        side = str(pick.get("total_side") or "").upper()
+        if total == line:
+            result = "PUSH"
+        elif side == "OVER":
+            result = "WIN" if total > line else "LOSS"
+        elif side == "UNDER":
+            result = "WIN" if total < line else "LOSS"
+
+    if result is None:
+        return None
+    return {
+        "pick_result": result,
+        "result_source": "espn_final_score",
+        "result_event_id": str(event.get("id") or ""),
+        "result_event_title": str(event.get("name") or event.get("shortName") or ""),
+        "final_score": final_score,
+        "result_checked_at": _now_iso(),
+        "selected_final_score": str(selected_score) if selected_score is not None else None,
+        "opponent_final_score": str(opponent_score) if opponent_score is not None else None,
+    }
+
+
+def _refresh_nfl_signal_results(
+    signals: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    min_age_seconds: int = 4 * 60 * 60,
+    retry_seconds: int = 30 * 60,
+) -> bool:
+    current = now or datetime.now(timezone.utc)
+    changed = False
+    cache: dict[str, list[dict[str, Any]]] = {}
+    for record in signals.values():
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("pick_result") or "").upper() in {"WIN", "LOSS", "PUSH"}:
+            continue
+        pick = record.get("pick")
+        if not isinstance(pick, dict):
+            continue
+        kind, _ = _classify_pick(pick)
+        if kind is None:
+            continue
+        posted = _parse_iso(pick.get("posted_at"))
+        if posted is None or (current - posted).total_seconds() < min_age_seconds:
+            continue
+        last_lookup = _parse_iso(record.get("result_lookup_at"))
+        if last_lookup is not None and (current - last_lookup).total_seconds() < retry_seconds:
+            continue
+
+        record["result_lookup_at"] = current.isoformat()
+        changed = True
+        resolved = _nfl_scoreboard_result_for_pick(pick, cache=cache)
+        if not resolved:
+            continue
+        for key, value in resolved.items():
+            if record.get(key) != value:
+                record[key] = value
+                changed = True
+    return changed
 
 
 def _contains_alias(text: str, abbr: str) -> bool:
@@ -889,6 +1140,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         _STATUS["last_poll_at"] = _now_iso()
         signals = _load_signals()
         changed = _sync_queue_status(signals)
+        if await asyncio.to_thread(_refresh_nfl_signal_results, signals):
+            changed = True
         if not enabled:
             _STATUS["last_error"] = "NFL capper automation is disabled"
             if changed:
@@ -943,7 +1196,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                         for key in (
                             "source", "source_id", "source_key", "posted_at", "selection",
                             "teams", "bet_types", "period", "spread_lines",
-                            "total_side", "total_line", "units", "status",
+                            "total_side", "total_line", "units", "decimal_odds", "american_odds", "status",
                         )
                     }
                     print(
@@ -979,6 +1232,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         for pick in picks:
             fp = _fingerprint(pick)
             current = signals.get(fp)
+            if current and not isinstance(current.get("pick"), dict):
+                current["pick"] = pick
+                changed = True
             if current and current.get("status") in {
                 "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED", "IGNORED_STALE",
                 "IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE",
@@ -997,6 +1253,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "selection": pick.get("selection"),
                 "units": str(_units_for_pick(pick)),
                 "stake_usdc": str(_stake_for_pick(pick, unit_usdc)),
+                "pick": pick,
             }
 
             if source_label is None:
@@ -1202,10 +1459,18 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         executions = core._load(core.EXECUTIONS_FILE)
         if not isinstance(executions, dict):
             executions = {}
-        stats = _stats_from_executions(executions)
-        for label in SOURCE_LABELS:
-            stats.setdefault(label, {})["positions"] = _position_items(executions, label, sport="NFL")
         signals = _load_signals()
+        stats = _stats_from_executions(executions)
+        missed = _missed_signal_stats(
+            signals,
+            executions,
+            labels=SOURCE_LABELS,
+            sport="NFL",
+            unit_usdc=unit_usdc,
+        )
+        for label in SOURCE_LABELS:
+            stats.setdefault(label, {}).update(missed.get(label, {}))
+            stats[label]["positions"] = _position_items(executions, label, sport="NFL")
         signal_summary = {
             "queued": sum(1 for x in signals.values() if (x or {}).get("status") in {"QUEUED", "EXECUTOR_DONE"}),
             "failed": sum(1 for x in signals.values() if (x or {}).get("status") == "EXECUTOR_FAILED"),
@@ -1323,7 +1588,10 @@ function nflCapperLine(x){
  const rawPnl=x.realized_pnl_usdc===null||x.realized_pnl_usdc===undefined?null:Number(x.realized_pnl_usdc);
  const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'$'+rawPnl.toFixed(2);
  const pnlClass=rawPnl===null||rawPnl===0?'flat':(rawPnl>0?'positive':'negative');
- const metrics='<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">P/L '+pnl+'</span> · ROI '+roi+'</div>';
+ const missedRaw=Number(x.missed_pnl_usdc||0);
+ const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
+ const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
+ const metrics='<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">P/L '+pnl+'</span> · ROI '+roi+'</div><div>Missed '+Number(x.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div>';
  return metrics+nflPositionList(x);
 }
 async function loadNflCapperStats(){
