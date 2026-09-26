@@ -381,27 +381,32 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
 
 
 def _precise_event_start(event: Any, market: Any | None = None) -> datetime | None:
-    """Return an actual event start timestamp; reject date-only metadata."""
+    """Return an actual kickoff timestamp; reject date-only metadata."""
     sports = getattr(market, "sports", None) if market is not None else None
-    for source in (event, sports):
-        if source is None:
-            continue
-        for attr in (
-            "start_time", "startTime",
-            "start_date", "startDate",
+    sources = (sports, event)
+    # Sports-specific kickoff fields are more reliable than generic event dates.
+    for attrs in (
+        (
             "event_start_time", "eventStartTime",
             "game_start_time", "gameStartTime",
+            "start_time", "startTime",
             "scheduled_at", "scheduledAt",
-        ):
-            value = getattr(source, attr, None)
-            if value is None:
+        ),
+        ("start_date", "startDate"),
+    ):
+        for source in sources:
+            if source is None:
                 continue
-            text = str(value).strip()
-            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-                continue
-            parsed = _parse_iso(value)
-            if parsed is not None:
-                return parsed
+            for attr in attrs:
+                value = getattr(source, attr, None)
+                if value is None:
+                    continue
+                text = str(value).strip()
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+                    continue
+                parsed = _parse_iso(value)
+                if parsed is not None:
+                    return parsed
     return None
 
 
