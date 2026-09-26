@@ -1,3 +1,11 @@
+## 2026-09-26 — Resolve one-team CFB manual buys to the correct dated game (#86)
+
+- Fixed `BUY LIVE` for one-team CFB signals such as Clemson when Polymarket exposes more than one open/future event for that team.
+- The CFB resolver now uses the original pick `posted_at` plus structured event dates or the dated CFB event slug/title to narrow to one nearby game.
+- Safety remains fail-closed: only events from one day before through four days after the pick date are eligible for this date disambiguation, and ties/unknown dates still block instead of guessing.
+- A week-later game cannot inherit an old stale pick.
+- Added regression tests for selecting the current Clemson event and rejecting unrelated future events.
+
 ## 2026-09-26 — Manual CFB BUY LIVE button (#84)
 
 - Added a per-signal **BUY LIVE** button for CFB queued-preview, completed-preview, and stale signals in the dashboard.

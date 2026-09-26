@@ -198,6 +198,99 @@ class CfbMarketResolutionTests(unittest.TestCase):
         self.assertEqual(label, "Texas")
         self.assertEqual(outcome.token_id, "texas-token")
 
+    def test_one_team_pick_uses_posted_date_to_select_nearby_event(self):
+        def event(slug, title):
+            yes = SimpleNamespace(label="Clemson", token_id=slug + "-yes")
+            no = SimpleNamespace(label="Opponent", token_id=slug + "-no")
+            market = SimpleNamespace(
+                id=slug + "-ml",
+                question=title,
+                slug=slug + "-ml",
+                sports=SimpleNamespace(sports_market_type="moneyline", line=None),
+                outcomes=SimpleNamespace(yes=yes, no=no),
+                state=SimpleNamespace(accepting_orders=True),
+            )
+            return SimpleNamespace(
+                id=slug,
+                slug=slug,
+                title=title,
+                markets=[market],
+            )
+
+        target = event("cfb-clemson-unc-2026-09-26", "Clemson vs UNC")
+        future = event("cfb-clemson-fsu-2026-10-03", "Clemson vs FSU")
+
+        class _Client:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def list_events(self, **kwargs):
+                return CfbMarketResolutionTests._result([target, future])
+
+        pick = _pick(
+            selection="CLEMSON ML -135",
+            posted_at="2026-09-25T23:30:00+00:00",
+            team_hint="Clemson",
+            event_hints=["Clemson"],
+            bet_types=["moneyline"],
+            spread_lines=[],
+        )
+        with patch.object(capper, "PublicClient", return_value=_Client()):
+            matched_event, _, label, outcome = capper._find_market(pick, "moneyline")
+
+        self.assertEqual(matched_event.slug, "cfb-clemson-unc-2026-09-26")
+        self.assertEqual(label, "Clemson")
+        self.assertEqual(outcome.token_id, "cfb-clemson-unc-2026-09-26-yes")
+
+    def test_week_later_event_does_not_inherit_old_stale_pick(self):
+        def event(slug):
+            yes = SimpleNamespace(label="Clemson", token_id=slug + "-yes")
+            no = SimpleNamespace(label="Opponent", token_id=slug + "-no")
+            market = SimpleNamespace(
+                id=slug + "-ml",
+                question="Clemson moneyline",
+                slug=slug + "-ml",
+                sports=SimpleNamespace(sports_market_type="moneyline", line=None),
+                outcomes=SimpleNamespace(yes=yes, no=no),
+                state=SimpleNamespace(accepting_orders=True),
+            )
+            return SimpleNamespace(
+                id=slug,
+                slug=slug,
+                title="Clemson vs Opponent",
+                markets=[market],
+            )
+
+        events = [
+            event("cfb-clemson-a-2026-10-03"),
+            event("cfb-clemson-b-2026-10-10"),
+        ]
+
+        class _Client:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def list_events(self, **kwargs):
+                return CfbMarketResolutionTests._result(events)
+
+        pick = _pick(
+            selection="CLEMSON ML",
+            posted_at="2026-09-25T23:30:00+00:00",
+            team_hint="Clemson",
+            event_hints=["Clemson"],
+            bet_types=["moneyline"],
+            spread_lines=[],
+        )
+        with patch.object(capper, "PublicClient", return_value=_Client()):
+            with self.assertRaisesRegex(ValueError, "no unique nearby game"):
+                capper._find_market(pick, "moneyline")
+
     def test_multiple_matching_events_fail_closed(self):
         def event(slug):
             yes = SimpleNamespace(label="Baylor", token_id=slug + "-yes")
