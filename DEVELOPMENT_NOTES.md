@@ -1,3 +1,17 @@
+## 2026-09-26 — CFB capper performance + finished result/P&L dashboard (#106)
+
+- Added NFL-style performance summaries to each CFB capper card for Slam and Syndicate: bets, open positions, W-L-P, win rate, graded stake, realized P/L, and ROI.
+- CFB aggregate performance is calculated from actual execution records tagged with the matching CFB capper/source; signal cards that were never bought do not create fictional betting P/L.
+- Finished matched CFB signals now re-check the authoritative resolved Polymarket outcome token and display WIN, LOSS, or PUSH once resolution is available.
+- Finished WIN rows use green styling, LOSS rows use red styling, PUSH rows use amber styling, and unresolved finished rows remain neutral/grey.
+- Finished signal cards show actual trade P/L prominently when an execution exists. Signals that were tracked but never traded explicitly show `Trade P/L — · NOT TRADED`.
+- The CFB poller continues checking an `EVENT_CLOSED` record until Polymarket publishes a resolved/settled token value; once WIN/LOSS/PUSH is recorded, the result is persisted and no longer needs repeated settlement lookup.
+- Enlarged capper titles, status text, KPI text, and P/L emphasis for both NFL and CFB, including mobile layouts. Positive aggregate P/L is green and negative aggregate P/L is red.
+- Generalized the existing NFL execution-stat helper so the same accounting rules can be reused safely for CFB while filtering by sport when that metadata is present.
+- Files changed: `app/nfl_capper_ingest.py`, `app/cfb_capper_preview.py`, `tests/test_nfl_capper_ingest.py`, `tests/test_cfb_capper_preview.py`, and `DEVELOPMENT_NOTES.md`.
+- Verification added for CFB sport-filtered performance accounting, authoritative token resolution, per-signal execution/P&L enrichment, no fabricated P/L on untraded signals, and finished-result dashboard styling.
+- Deployment: implementation is on the task branch; production deployment follows merge to `main`.
+
 ## 2026-09-26 — CFB game-state colours (#104)
 
 - CFB signal rows are now colour-coded consistently in every tab, including the combined Signals tab.
