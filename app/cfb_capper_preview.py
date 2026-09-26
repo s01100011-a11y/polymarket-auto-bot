@@ -179,18 +179,27 @@ def _event_hints_for_pick(pick: dict[str, Any], kind: str) -> list[str]:
 
 
 def _event_date(event: Any) -> date | None:
-    """Best-effort event date from structured metadata or the CFB slug/title."""
-    for attr in (
-        "start_date",
-        "startDate",
-        "event_date",
-        "eventDate",
-        "end_date",
-        "endDate",
-    ):
-        parsed = _parse_iso(getattr(event, attr, None))
-        if parsed is not None:
-            return parsed.date()
+    """Best-effort event date from Gamma schedule metadata or CFB slug/title."""
+    schedule = getattr(event, "schedule", None)
+    for source in (schedule, event):
+        if source is None:
+            continue
+        for attr in (
+            "event_date",
+            "eventDate",
+            "start_time",
+            "startTime",
+            "start_date",
+            "startDate",
+            "end_date",
+            "endDate",
+        ):
+            value = getattr(source, attr, None)
+            if isinstance(value, date) and not isinstance(value, datetime):
+                return value
+            parsed = _parse_iso(value)
+            if parsed is not None:
+                return parsed.date()
 
     text = " ".join(
         [
@@ -238,7 +247,7 @@ def _narrow_one_team_events_by_posted_date(
             candidates[key] = delta_days
 
     if not candidates:
-        return ranked
+        return []
 
     def priority(delta_days: int) -> tuple[int, int]:
         return (0 if delta_days >= 0 else 1, abs(delta_days))
@@ -250,7 +259,7 @@ def _narrow_one_team_events_by_posted_date(
         if priority(delta) == best_priority
     }
     if len(best_keys) != 1:
-        return ranked
+        return []
 
     best_key = next(iter(best_keys))
     return [row for row in ranked if _event_key(row[1]) == best_key]
@@ -372,12 +381,15 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
             f"No exact open Polymarket CFB {kind} market matched '{pick.get('selection')}'"
         )
 
+    if len(hints) == 1:
+        ranked = _narrow_one_team_events_by_posted_date(ranked, pick)
+        if not ranked:
+            raise ValueError(
+                "No nearby dated Polymarket CFB event matched the one-team pick"
+            )
+
     event_keys = {_event_key(row[1]) for row in ranked}
     event_keys.discard("")
-    if len(event_keys) != 1 and len(hints) == 1:
-        ranked = _narrow_one_team_events_by_posted_date(ranked, pick)
-        event_keys = {_event_key(row[1]) for row in ranked}
-        event_keys.discard("")
     if len(event_keys) != 1:
         raise ValueError(
             "CFB pick matched multiple open events and no unique nearby game could be resolved"
@@ -526,13 +538,13 @@ def _find_spread_alternatives(
     if not rows:
         return []
 
+    if len(hints) == 1:
+        rows = _narrow_one_team_events_by_posted_date(rows, pick)
+        if not rows:
+            return []
+
     event_keys = {_event_key(row[1]) for row in rows}
     event_keys.discard("")
-    if len(event_keys) != 1 and len(hints) == 1:
-        narrowed = _narrow_one_team_events_by_posted_date(rows, pick)
-        event_keys = {_event_key(row[1]) for row in narrowed}
-        event_keys.discard("")
-        rows = narrowed
     if len(event_keys) != 1:
         return []
 
@@ -562,9 +574,7 @@ def _find_spread_alternatives(
         event_slug = str(getattr(event, "slug", "") or "")
         if not event_slug.startswith("cfb-"):
             continue
-        start_at = _precise_event_start(event, market)
-        accepting = getattr(getattr(market, "state", None), "accepting_orders", None)
-        closed_value = getattr(event, "closed", None)
+        lifecycle = _event_lifecycle_metadata(event, market)
         alt_id = hashlib.sha256(f"{asset_id}|{line_text}".encode("utf-8")).hexdigest()[:16]
         relative = "BETTER" if line > original else "WORSE"
         if line == original:
@@ -575,10 +585,7 @@ def _find_spread_alternatives(
             "market_type": "spread",
             "event_slug": event_slug,
             "event_title": str(getattr(event, "title", "") or ""),
-            "event_start_at": start_at.isoformat() if start_at is not None else None,
-            "event_start_checked_at": _now_iso(),
-            "event_closed": bool(closed_value) if closed_value is not None else False,
-            "market_accepting_orders": bool(accepting) if accepting is not None else None,
+            **lifecycle,
             "market": str(
                 getattr(market, "question", "")
                 or getattr(event, "title", "CFB spread")
@@ -649,8 +656,9 @@ def _refresh_spread_alternatives(record: dict[str, Any]) -> bool:
 
 def _precise_event_start(event: Any, market: Any | None = None) -> datetime | None:
     """Return an actual kickoff timestamp; reject date-only metadata."""
-    sports = getattr(market, "sports", None) if market is not None else None
-    sources = (sports, event)
+    market_sports = getattr(market, "sports", None) if market is not None else None
+    schedule = getattr(event, "schedule", None)
+    sources = (market_sports, schedule, event)
     # Sports-specific kickoff fields are more reliable than generic event dates.
     for attrs in (
         (
@@ -677,13 +685,66 @@ def _precise_event_start(event: Any, market: Any | None = None) -> datetime | No
     return None
 
 
+def _event_lifecycle_metadata(event: Any, market: Any | None = None) -> dict[str, Any]:
+    """Read Gamma's nested event state/schedule/sports lifecycle fields."""
+    state = getattr(event, "state", None)
+    schedule = getattr(event, "schedule", None)
+    sports = getattr(event, "sports", None)
+    start_at = _precise_event_start(event, market)
+
+    finished_at = None
+    for source in (schedule, event):
+        if source is None:
+            continue
+        for attr in ("finished_at", "finishedAt", "closed_time", "closedTime"):
+            finished_at = _parse_iso(getattr(source, attr, None))
+            if finished_at is not None:
+                break
+        if finished_at is not None:
+            break
+
+    def flag(name: str, fallback: str | None = None) -> bool | None:
+        value = getattr(state, name, None) if state is not None else None
+        if value is None and fallback:
+            value = getattr(event, fallback, None)
+        return bool(value) if value is not None else None
+
+    accepting = getattr(getattr(market, "state", None), "accepting_orders", None)
+    game_status = str(getattr(sports, "game_status", "") or "").strip() or None
+    return {
+        "event_start_at": start_at.isoformat() if start_at is not None else None,
+        "event_start_checked_at": _now_iso(),
+        "event_finished_at": finished_at.isoformat() if finished_at is not None else None,
+        "event_closed": flag("closed", "closed"),
+        "event_ended": flag("ended"),
+        "event_live": flag("live"),
+        "game_status": game_status,
+        "market_accepting_orders": bool(accepting) if accepting is not None else None,
+    }
+
+
 def _event_phase(record: dict[str, Any], now: datetime | None = None) -> str:
-    if bool(record.get("event_closed")):
+    current = now or datetime.now(timezone.utc)
+    status = nfl._norm(record.get("game_status") or "")
+    final_statuses = {
+        "final", "finished", "ended", "complete", "completed",
+        "closed", "post", "postgame",
+    }
+    if bool(record.get("event_closed")) or bool(record.get("event_ended")):
+        return "CLOSED"
+    finished = _parse_iso(record.get("event_finished_at"))
+    if finished is not None and current >= finished:
+        return "CLOSED"
+    if status in final_statuses or status.startswith("final"):
         return "CLOSED"
     if record.get("market_accepting_orders") is False:
         return "CLOSED"
+    if bool(record.get("event_live")):
+        return "LIVE"
+    if status in {"live", "in progress", "inprogress", "halftime", "half time"}:
+        return "LIVE"
     start = _parse_iso(record.get("event_start_at"))
-    if start is not None and (now or datetime.now(timezone.utc)) >= start:
+    if start is not None and current >= start:
         return "LIVE"
     return "PREGAME"
 
@@ -718,19 +779,14 @@ def _resolve_market_match(pick: dict[str, Any], kind: str) -> dict[str, Any]:
     if not event_slug.startswith("cfb-"):
         raise RuntimeError("Matched event is not a CFB Polymarket event")
 
-    start_at = _precise_event_start(event, market)
-    accepting = getattr(getattr(market, "state", None), "accepting_orders", None)
-    closed_value = getattr(event, "closed", None)
+    lifecycle = _event_lifecycle_metadata(event, market)
     return {
         "match_status": "MATCHED",
         "matched_at": _now_iso(),
         "market_type": kind,
         "event_slug": event_slug,
         "event_title": str(getattr(event, "title", "") or ""),
-        "event_start_at": start_at.isoformat() if start_at is not None else None,
-        "event_start_checked_at": _now_iso(),
-        "event_closed": bool(closed_value) if closed_value is not None else False,
-        "market_accepting_orders": bool(accepting) if accepting is not None else None,
+        **lifecycle,
         "market": str(
             getattr(market, "question", "")
             or getattr(event, "title", "CFB market")
@@ -764,11 +820,55 @@ def _saved_market_match(record: dict[str, Any] | None, kind: str | None = None) 
         "event_start_at": record.get("event_start_at"),
         "event_start_checked_at": record.get("event_start_checked_at"),
         "event_closed": record.get("event_closed"),
+        "event_ended": record.get("event_ended"),
+        "event_live": record.get("event_live"),
+        "event_finished_at": record.get("event_finished_at"),
+        "game_status": record.get("game_status"),
         "market_accepting_orders": record.get("market_accepting_orders"),
         "market": record.get("market"),
         "market_url": market_url,
         "outcome": outcome,
         "asset_id": asset_id,
+    }
+
+
+def _refresh_saved_event_state(record: dict[str, Any]) -> dict[str, Any]:
+    """Refresh the exact stored Gamma event/market by slug; never roll to another game."""
+    event_slug = str(record.get("event_slug") or "")
+    asset_id = str(record.get("asset_id") or "")
+    if not event_slug.startswith("cfb-") or not asset_id:
+        raise RuntimeError("Stored CFB match is missing event slug or asset id")
+
+    with PublicClient() as client:
+        event = client.get_event(slug=event_slug)
+
+    matched_market = None
+    for market in getattr(event, "markets", ()) or ():
+        for _, outcome in nfl._outcomes(market):
+            if outcome is None:
+                continue
+            token = str(
+                getattr(outcome, "token_id", None)
+                or getattr(outcome, "position_id", None)
+                or ""
+            )
+            if token == asset_id:
+                matched_market = market
+                break
+        if matched_market is not None:
+            break
+
+    lifecycle = _event_lifecycle_metadata(event, matched_market)
+    if matched_market is None and not (
+        lifecycle.get("event_closed")
+        or lifecycle.get("event_ended")
+        or _event_phase(lifecycle) == "CLOSED"
+    ):
+        raise RuntimeError("Stored CFB asset is no longer present on its matched event")
+
+    return {
+        "event_title": str(getattr(event, "title", "") or record.get("event_title") or ""),
+        **lifecycle,
     }
 
 
@@ -814,44 +914,23 @@ def _refresh_record_runtime(record: dict[str, Any]) -> bool:
         return False
 
     changed = False
-    if not record.get("event_start_checked_at"):
-        pick = record.get("pick")
-        kind = str(record.get("market_type") or "")
-        if isinstance(pick, dict) and kind:
-            try:
-                refreshed_match = _resolve_market_match(pick, kind)
-                if str(refreshed_match.get("asset_id") or "") == str(match.get("asset_id") or ""):
-                    record.update(refreshed_match)
-                    match = _saved_market_match(record) or match
-                    changed = True
-            except Exception as exc:
-                record["event_metadata_error"] = f"{type(exc).__name__}: {exc}"
+    try:
+        refreshed_state = _refresh_saved_event_state(record)
+        for key, value in refreshed_state.items():
+            if record.get(key) != value:
+                record[key] = value
+                changed = True
+        if record.get("event_metadata_error") is not None:
+            record["event_metadata_error"] = None
+            changed = True
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        if record.get("event_metadata_error") != error:
+            record["event_metadata_error"] = error
+            changed = True
 
+    match = _saved_market_match(record) or match
     phase = _event_phase(record)
-
-    # Once kickoff has passed, refresh the matched market state as well as odds.
-    # If the exact event/market remains open, keep the signal actionable as LIVE.
-    if phase == "LIVE":
-        pick = record.get("pick")
-        kind = str(record.get("market_type") or "")
-        if isinstance(pick, dict) and kind:
-            try:
-                refreshed_match = _resolve_market_match(pick, kind)
-                if str(refreshed_match.get("asset_id") or "") == str(match.get("asset_id") or ""):
-                    record.update(refreshed_match)
-                    match = _saved_market_match(record) or match
-                    phase = _event_phase(record)
-                    changed = True
-            except ValueError as exc:
-                if "No exact open Polymarket CFB" in str(exc):
-                    record["event_closed"] = True
-                    record["market_accepting_orders"] = False
-                    phase = "CLOSED"
-                    changed = True
-                else:
-                    record["event_metadata_error"] = f"{type(exc).__name__}: {exc}"
-            except Exception as exc:
-                record["event_metadata_error"] = f"{type(exc).__name__}: {exc}"
 
     if record.get("event_phase") != phase:
         record["event_phase"] = phase
