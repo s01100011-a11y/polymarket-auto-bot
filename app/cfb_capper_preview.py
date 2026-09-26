@@ -526,9 +526,10 @@ def _prepare_manual_buy(
         "trade_id": trade_id,
         "max_spread": str(core.MAX_SPREAD),
         "max_price_global": str(core.MAX_PRICE),
-        "source": "cfb_capper_manual",
+        "source": "termux_executor",
         "auto": False,
         "manual": True,
+        "strategy_execution_mode": "manual",
         "strategy_source": source_label,
         "strategy_sport": "CFB",
         "strategy_units": str(units),
@@ -633,7 +634,10 @@ function cfbPickList(title,items,kind){
   if(kind==='stale'&&item.reason)meta.push(cfbEsc(item.reason));
   if(item.manual_buy_status)meta.push('manual BUY '+cfbEsc(item.manual_buy_status));
   if(item.manual_buy_error)meta.push(cfbEsc(item.manual_buy_error));
-  const action=item.signal_id?'<button type="button" style="margin-top:6px" onclick="cfbManualBuy(\\''+cfbEsc(item.signal_id)+'\\',this)">BUY LIVE</button>':'';
+  const state=String(item.manual_buy_status||'').toUpperCase();
+  const locked=['PENDING','LEASED','DONE'].includes(state);
+  const label=state==='DONE'?'BOUGHT':(state==='PENDING'||state==='LEASED'?'BUY '+state:'BUY LIVE');
+  const action=item.signal_id?'<button type="button" style="margin-top:6px" data-signal-id="'+cfbEsc(item.signal_id)+'" onclick="cfbManualBuy(this.dataset.signalId,this)"'+(locked?' disabled':'')+'>'+label+'</button>':'';
   return '<div style="margin-top:5px;padding-top:5px;border-top:1px solid rgba(255,255,255,.07)"><b>'+cfbEsc(item.selection||'Unknown selection')+'</b>'+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+'<br>'+action+'</div>';
  }).join('');
  return '<div style="margin-top:8px"><b>'+cfbEsc(title)+'</b>'+rows+'</div>';
@@ -657,7 +661,7 @@ async function cfbManualBuy(signalId,btn){
 function cfbCapperLine(x){
  if(!x)return 'No tracked signals yet';
  const base='Signals '+(x.signals||0)+' · Queued '+(x.preview_queued||0)+' · Done '+(x.preview_done||0)+' · Failed '+(x.preview_failed||0)+'<br>Retrying '+(x.retrying||0)+' · Stale '+(x.stale||0)+' · Unsupported '+(x.unsupported||0);
- return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Stale picks',x.stale_items,'stale');
+ return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Previewed picks',x.previewed_items,'previewed')+cfbPickList('Stale picks',x.stale_items,'stale');
 }
 async function loadCfbCapperStats(){
  try{
@@ -1004,6 +1008,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "stale": sum(1 for r in rows if r.get("status") == "IGNORED_STALE"),
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
                 "queued_items": _recent_status_items(rows, "PREVIEW_QUEUED"),
+                "previewed_items": _recent_status_items(rows, "PREVIEW_DONE"),
                 "stale_items": _recent_status_items(rows, "IGNORED_STALE"),
             }
         return {
@@ -1025,10 +1030,10 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             raise HTTPException(status_code=404, detail="Unknown CFB signal")
         if record.get("source") not in SOURCE_LABELS:
             raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
-        if record.get("status") not in {"PREVIEW_QUEUED", "IGNORED_STALE"}:
+        if record.get("status") not in {"PREVIEW_QUEUED", "PREVIEW_DONE", "IGNORED_STALE"}:
             raise HTTPException(
                 status_code=409,
-                detail=f"CFB signal is {record.get('status')}; BUY LIVE is available only for queued or stale signals",
+                detail=f"CFB signal is {record.get('status')}; BUY LIVE is available only for queued, previewed, or stale signals",
             )
 
         pick = record.get("pick") if isinstance(record.get("pick"), dict) else None
