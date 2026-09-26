@@ -1479,12 +1479,16 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             "unsupported_ignored": sum(1 for x in signals.values() if (x or {}).get("status") == "IGNORED_UNSUPPORTED"),
             "untracked_source_ignored": sum(1 for x in signals.values() if (x or {}).get("status") == "IGNORED_UNTRACKED_SOURCE"),
         }
+        auto_trading = bool(core.auto_trading_enabled())
+        live_trading = bool(core.live_trading_enabled())
         return {
             "enabled": enabled,
             "unit_usdc": str(unit_usdc),
             "poll_seconds": poll_seconds,
             "max_pick_age_seconds": max_age_seconds,
-            "auto_trading": bool(core.auto_trading_enabled()),
+            "auto_trading": auto_trading,
+            "live_trading": live_trading,
+            "auto_live": bool(enabled and auto_trading and live_trading),
             "status": dict(_STATUS),
             "signals": signal_summary,
             "cappers": stats,
@@ -1599,7 +1603,7 @@ async function loadNflCapperStats(){
   const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
   if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
   const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
-  if(state)state.textContent=(d.enabled?'ENABLED':'DISABLED')+(d.auto_trading?' · AUTO LIVE':' · AUTO TRADING OFF');
+  if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
   if(meta)meta.textContent='1u = $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · poll '+(d.poll_seconds||0)+'s';
   nflLastCappers=d.cappers||{};
   const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
