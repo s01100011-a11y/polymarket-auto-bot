@@ -346,12 +346,14 @@ class CfbDashboardPanelTests(unittest.TestCase):
         self.assertIn('pregame_items', rendered)
         self.assertIn('Queued picks', rendered)
         self.assertIn('Matched pregame picks', rendered)
+        self.assertIn('Matched live picks', rendered)
+        self.assertIn('GAME LIVE', rendered)
         self.assertIn('Previewed picks', rendered)
         self.assertIn('BUY LIVE', rendered)
         self.assertIn('OPEN MARKET', rendered)
         self.assertIn('Matched:', rendered)
         self.assertIn('Live BUY', rendered)
-        self.assertIn('manual until event start', rendered)
+        self.assertIn('manual pregame/live while market open', rendered)
         self.assertIn('/api/cfb-cappers/manual-buy/', rendered)
 
     def test_injection_is_idempotent(self):
@@ -423,7 +425,7 @@ class CfbLifecycleAndOddsTests(unittest.TestCase):
         self.assertEqual(capper._american_odds_from_price("0.58"), "-138")
         self.assertEqual(capper._american_odds_from_price("0.40"), "+150")
 
-    def test_future_event_is_pregame_and_past_event_is_started(self):
+    def test_future_event_is_pregame_and_past_open_event_is_live(self):
         future = {
             "event_start_at": "2026-09-26T12:00:00+00:00",
             "market_accepting_orders": True,
@@ -434,7 +436,7 @@ class CfbLifecycleAndOddsTests(unittest.TestCase):
         }
         now = capper._parse_iso("2026-09-26T02:00:00+00:00")
         self.assertEqual(capper._event_phase(future, now), "PREGAME")
-        self.assertEqual(capper._event_phase(past, now), "STARTED")
+        self.assertEqual(capper._event_phase(past, now), "LIVE")
 
     def test_date_only_start_is_not_treated_as_midnight_kickoff(self):
         event = SimpleNamespace(start_date="2026-09-26")
@@ -449,6 +451,61 @@ class CfbLifecycleAndOddsTests(unittest.TestCase):
             capper._precise_event_start(event, market),
             capper._parse_iso("2026-09-26T19:30:00+00:00"),
         )
+
+
+    def test_runtime_refresh_keeps_started_open_market_live(self):
+        record = {
+            "id": "clemson",
+            "status": "MATCHED_PREGAME",
+            "match_status": "MATCHED",
+            "market_type": "moneyline",
+            "event_slug": "cfb-clemson-unc-2026-09-26",
+            "event_title": "Clemson vs UNC",
+            "event_start_at": "2020-01-01T00:00:00+00:00",
+            "event_start_checked_at": "2026-09-26T00:00:00+00:00",
+            "market_accepting_orders": True,
+            "market_url": "https://polymarket.com/sports/cfb/cfb-clemson-unc-2026-09-26",
+            "outcome": "Clemson",
+            "asset_id": "clemson-token",
+            "pick": _pick(
+                selection="CLEMSON ML",
+                team_hint="Clemson",
+                event_hints=["Clemson", "UNC"],
+                bet_types=["moneyline"],
+                spread_lines=[],
+            ),
+        }
+        refreshed = {
+            "match_status": "MATCHED",
+            "market_type": "moneyline",
+            "event_slug": "cfb-clemson-unc-2026-09-26",
+            "event_title": "Clemson vs UNC",
+            "event_start_at": "2020-01-01T00:00:00+00:00",
+            "event_start_checked_at": "2026-09-26T01:00:00+00:00",
+            "event_closed": False,
+            "market_accepting_orders": True,
+            "market": "Clemson vs UNC",
+            "market_url": "https://polymarket.com/sports/cfb/cfb-clemson-unc-2026-09-26",
+            "outcome": "Clemson",
+            "asset_id": "clemson-token",
+        }
+        with (
+            patch.object(capper, "_resolve_market_match", return_value=refreshed),
+            patch.object(capper, "_read_live_buy_quote", return_value={
+                "current_buy_price": "0.61",
+                "best_ask": "0.62",
+                "max_price": "0.62",
+                "spread": "0.02",
+                "live_odds_american": "-163",
+                "quote_updated_at": "2026-09-26T01:00:01+00:00",
+            }),
+        ):
+            changed = capper._refresh_record_runtime(record)
+
+        self.assertTrue(changed)
+        self.assertEqual(record["status"], "MATCHED_LIVE")
+        self.assertEqual(record["best_ask"], "0.62")
+        self.assertEqual(record["live_odds_american"], "-163")
 
 
 class CfbPreviewSafetyTests(unittest.TestCase):
@@ -683,32 +740,39 @@ class CfbPreviewSafetyTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["asset_id"], "saved-baylor-token")
         self.assertEqual(calls[0][1]["market_url"], saved["market_url"])
 
-    def test_manual_buy_blocks_started_event(self):
+    def test_live_event_phase_remains_actionable_while_market_open(self):
         saved = {
+            "status": "MATCHED_LIVE",
             "match_status": "MATCHED",
             "market_type": "spread",
             "event_slug": "cfb-baylor-tcu-2026-09-26",
             "event_title": "Baylor vs TCU",
             "event_start_at": "2020-01-01T00:00:00+00:00",
+            "market_accepting_orders": True,
             "market_url": "https://polymarket.com/sports/cfb/cfb-baylor-tcu-2026-09-26",
             "outcome": "Baylor",
             "asset_id": "saved-baylor-token",
         }
-        pick = _pick(
-            selection="BAYLOR +7",
-            team_hint="Baylor",
-            event_hints=["Baylor"],
-            bet_types=["spread"],
-            spread_lines=["+7"],
-        )
-        with self.assertRaisesRegex(RuntimeError, "already started or closed"):
-            capper._prepare_manual_buy(
-                pick,
-                core=SimpleNamespace(),
-                remote=SimpleNamespace(),
-                unit_usdc=Decimal("10"),
-                matched=saved,
-            )
+        item = capper._status_pick_item(saved)
+        self.assertEqual(item["event_phase"], "LIVE")
+        self.assertTrue(item["buy_available"])
+
+    def test_closed_market_is_not_actionable(self):
+        saved = {
+            "status": "EVENT_CLOSED",
+            "match_status": "MATCHED",
+            "market_type": "spread",
+            "event_slug": "cfb-baylor-tcu-2026-09-26",
+            "event_title": "Baylor vs TCU",
+            "event_start_at": "2020-01-01T00:00:00+00:00",
+            "market_accepting_orders": False,
+            "market_url": "https://polymarket.com/sports/cfb/cfb-baylor-tcu-2026-09-26",
+            "outcome": "Baylor",
+            "asset_id": "saved-baylor-token",
+        }
+        item = capper._status_pick_item(saved)
+        self.assertEqual(item["event_phase"], "CLOSED")
+        self.assertFalse(item["buy_available"])
 
     def test_status_buy_available_only_after_polymarket_match(self):
         unmatched = capper._status_pick_item(
