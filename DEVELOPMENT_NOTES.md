@@ -1,3 +1,12 @@
+## 2026-09-26 — Manual CFB BUY LIVE button (#84)
+
+- Added a per-signal **BUY LIVE** button for CFB queued-preview, completed-preview, and stale signals in the dashboard.
+- The click is treated as explicit manual authorization and does **not** enable or depend on `AUTO_TRADING`; unattended CFB remains preview-only.
+- Each click re-resolves the original sanitized pick against the current Polymarket CFB event/market, refreshes BUY price, best ask and spread, and then enqueues a Termux `BUY` with `auto=false`.
+- Existing dashboard per-order cap, daily budget, exact outcome token, max price/spread, executor heartbeat, Termux geoblock, BUY TTL and phone emergency ceiling remain enforced.
+- Duplicate queued/open manual buys for the same CFB signal are blocked.
+- Signal state tracks the manual request separately from the preview/stale classification so the dashboard can show PENDING/LEASED/DONE/FAILED without converting the CFB worker to automatic trading. Completed PREVIEW signals stay visible/actionable because PREVIEW execution normally finishes quickly.
+
 ## 2026-09-25 — One-shot CFB capper PREVIEW validation (#74)
 
 - Added `CFB_CAPPER_TEST_PREVIEW_JSON` for deterministic end-to-end CFB validation without waiting for a Telegram post.

@@ -5,13 +5,14 @@ import hashlib
 import json
 import os
 import re
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 import httpx
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from polymarket import PublicClient
 
 from app import dashboard_live_control_v4 as live_control
@@ -414,6 +415,153 @@ def _prepare_preview(
     }
 
 
+def _existing_manual_buy(core: Any, remote: Any, fingerprint: str) -> dict[str, Any] | None:
+    try:
+        remote._expire_stale_buys_persisted()
+    except Exception:
+        pass
+
+    try:
+        queue = remote._queue_load()
+    except Exception:
+        queue = {}
+
+    for queued in queue.values():
+        if queued.get("action") != "BUY" or queued.get("status") not in {"PENDING", "LEASED"}:
+            continue
+        payload = queued.get("payload") or {}
+        if str(payload.get("strategy_pick_id") or "") == fingerprint:
+            return queued
+
+    executions_file = getattr(core, "EXECUTIONS_FILE", None)
+    if executions_file is not None:
+        try:
+            executions = core._load(executions_file)
+        except Exception:
+            executions = {}
+        for trade in executions.values():
+            if trade.get("status") not in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}:
+                continue
+            if str(trade.get("strategy_pick_id") or "") == fingerprint:
+                return trade
+    return None
+
+
+def _prepare_manual_buy(
+    pick: dict[str, Any],
+    *,
+    core: Any,
+    remote: Any,
+    unit_usdc: Decimal,
+) -> dict[str, Any]:
+    """Queue one user-authorized CFB BUY after refreshing the live market."""
+    kind, reason = _classify_pick(pick)
+    if kind is None:
+        raise RuntimeError(reason or "unsupported CFB pick")
+
+    ready, executor_state = live_control._executor_ready()
+    if not ready:
+        if executor_state.get("geo_blocked"):
+            raise RuntimeError("Termux executor is geoblocked")
+        raise RuntimeError("Termux executor is offline")
+
+    units = _units_for_pick(pick)
+    stake = _stake_for_pick(pick, unit_usdc)
+    if stake > core.MAX_AUTO_TRADE_USDC:
+        raise RuntimeError(
+            f"Requested {units}u = ${stake} exceeds MAX_AUTO_TRADE_USDC=${core.MAX_AUTO_TRADE_USDC}"
+        )
+
+    fp = _fingerprint(pick)
+    if _existing_manual_buy(core, remote, fp) is not None:
+        raise RuntimeError("A live CFB BUY for this signal is already queued or open")
+
+    used = core._daily_budget_used()
+    pending = nfl._pending_auto_budget(remote)
+    if used + pending + stake > core.MAX_DAILY_BUDGET_USDC:
+        raise RuntimeError(
+            "Daily auto budget guard would be exceeded: "
+            f"used=${used}, pending=${pending}, requested=${stake}, "
+            f"limit=${core.MAX_DAILY_BUDGET_USDC}"
+        )
+
+    event, market, outcome_label, outcome_obj = _find_market(pick, kind)
+    asset_id = str(
+        getattr(outcome_obj, "token_id", None)
+        or getattr(outcome_obj, "position_id", None)
+        or ""
+    )
+    if not asset_id:
+        raise RuntimeError("Matched CFB market has no tradable outcome token")
+
+    with PublicClient() as client:
+        buy_price = Decimal(str(client.get_price(asset_id=asset_id, side="BUY")))
+        spread = Decimal(str(client.get_spread(asset_id=asset_id)))
+        book = client.get_order_book(asset_id=asset_id)
+
+    asks = getattr(book, "asks", None) or []
+    best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
+    if buy_price <= 0 or buy_price >= 1:
+        raise RuntimeError(f"Invalid current BUY price {buy_price}")
+    if best_ask is None:
+        raise RuntimeError("No current ask is available")
+    if best_ask > core.MAX_PRICE:
+        raise RuntimeError(f"Current best ask {best_ask} exceeds MAX_PRICE={core.MAX_PRICE}")
+    if spread > core.MAX_SPREAD:
+        raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
+
+    event_slug = str(getattr(event, "slug", "") or "")
+    if not event_slug.startswith("cfb-"):
+        raise RuntimeError("Matched event is not a CFB Polymarket event")
+
+    source_label = _source_label(pick)
+    trade_id = f"cfb-manual-{fp[:12]}-{uuid.uuid4().hex[:6]}"
+    payload = {
+        "market_url": f"https://polymarket.com/sports/cfb/{event_slug}",
+        "outcome": outcome_label,
+        "market_type": kind,
+        "asset_id": asset_id,
+        "max_price": str(best_ask),
+        "budget_usdc": str(stake),
+        "trade_id": trade_id,
+        "max_spread": str(core.MAX_SPREAD),
+        "max_price_global": str(core.MAX_PRICE),
+        "source": "termux_executor",
+        "auto": False,
+        "manual": True,
+        "strategy_execution_mode": "manual",
+        "strategy_source": source_label,
+        "strategy_sport": "CFB",
+        "strategy_units": str(units),
+        "strategy_unit_usdc": str(unit_usdc),
+        "strategy_pick_id": fp,
+        "strategy_posted_at": pick.get("posted_at"),
+        "strategy_selection": pick.get("selection"),
+        "strategy_telegram_source": pick.get("source"),
+    }
+    queued = remote._enqueue("BUY", payload)
+    return {
+        "status": "MANUAL_BUY_QUEUED",
+        "request_id": queued["id"],
+        "trade_id": trade_id,
+        "strategy_source": source_label,
+        "market_type": kind,
+        "market": str(
+            getattr(market, "question", "")
+            or getattr(event, "title", "CFB market")
+        ),
+        "market_url": payload["market_url"],
+        "outcome": outcome_label,
+        "asset_id": asset_id,
+        "units": str(units),
+        "stake_usdc": str(stake),
+        "current_buy_price": str(buy_price),
+        "best_ask": str(best_ask),
+        "max_price": str(best_ask),
+        "spread": str(spread),
+    }
+
+
 def _status_pick_item(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "selection": record.get("selection"),
@@ -425,6 +573,10 @@ def _status_pick_item(record: dict[str, Any]) -> dict[str, Any]:
         "outcome": record.get("outcome"),
         "reason": record.get("reason"),
         "request_id": record.get("request_id"),
+        "signal_id": record.get("id"),
+        "manual_buy_request_id": record.get("manual_buy_request_id"),
+        "manual_buy_status": record.get("manual_buy_status"),
+        "manual_buy_error": record.get("manual_buy_error"),
     }
 
 
@@ -480,14 +632,36 @@ function cfbPickList(title,items,kind){
   if(item.posted_at)meta.push('posted '+cfbPickTime(item.posted_at));
   if(kind==='queued'&&item.market)meta.push(cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
   if(kind==='stale'&&item.reason)meta.push(cfbEsc(item.reason));
-  return '<div style="margin-top:5px;padding-top:5px;border-top:1px solid rgba(255,255,255,.07)"><b>'+cfbEsc(item.selection||'Unknown selection')+'</b>'+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+'</div>';
+  if(item.manual_buy_status)meta.push('manual BUY '+cfbEsc(item.manual_buy_status));
+  if(item.manual_buy_error)meta.push(cfbEsc(item.manual_buy_error));
+  const state=String(item.manual_buy_status||'').toUpperCase();
+  const locked=['PENDING','LEASED','DONE'].includes(state);
+  const label=state==='DONE'?'BOUGHT':(state==='PENDING'||state==='LEASED'?'BUY '+state:'BUY LIVE');
+  const action=item.signal_id?'<button type="button" style="margin-top:6px" data-signal-id="'+cfbEsc(item.signal_id)+'" onclick="cfbManualBuy(this.dataset.signalId,this)"'+(locked?' disabled':'')+'>'+label+'</button>':'';
+  return '<div style="margin-top:5px;padding-top:5px;border-top:1px solid rgba(255,255,255,.07)"><b>'+cfbEsc(item.selection||'Unknown selection')+'</b>'+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+'<br>'+action+'</div>';
  }).join('');
  return '<div style="margin-top:8px"><b>'+cfbEsc(title)+'</b>'+rows+'</div>';
+}
+async function cfbManualBuy(signalId,btn){
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SUBMITTING…';
+ try{
+  const r=await fetch('/api/cfb-cappers/manual-buy/'+encodeURIComponent(signalId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual CFB BUY failed');
+  btn.textContent='QUEUED';
+  await loadCfbCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
 }
 function cfbCapperLine(x){
  if(!x)return 'No tracked signals yet';
  const base='Signals '+(x.signals||0)+' · Queued '+(x.preview_queued||0)+' · Done '+(x.preview_done||0)+' · Failed '+(x.preview_failed||0)+'<br>Retrying '+(x.retrying||0)+' · Stale '+(x.stale||0)+' · Unsupported '+(x.unsupported||0);
- return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Stale picks',x.stale_items,'stale');
+ return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Previewed picks',x.previewed_items,'previewed')+cfbPickList('Stale picks',x.stale_items,'stale');
 }
 async function loadCfbCapperStats(){
  try{
@@ -546,6 +720,22 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         changed = False
         queue = remote._queue_load()
         for rec in signals.values():
+            manual_request_id = str(rec.get("manual_buy_request_id") or "")
+            if manual_request_id:
+                manual = queue.get(manual_request_id)
+                if manual:
+                    manual_status = str(manual.get("status") or "")
+                    manual_error = manual.get("error")
+                    manual_result = manual.get("result")
+                    if rec.get("manual_buy_status") != manual_status:
+                        rec["manual_buy_status"] = manual_status
+                        changed = True
+                    if rec.get("manual_buy_error") != manual_error:
+                        rec["manual_buy_error"] = manual_error
+                        changed = True
+                    if manual_result is not None and rec.get("manual_buy_result") != manual_result:
+                        rec["manual_buy_result"] = manual_result
+                        changed = True
             if rec.get("status") != "PREVIEW_QUEUED" or not rec.get("request_id"):
                 continue
             queued = queue.get(str(rec.get("request_id")))
@@ -609,6 +799,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         for pick in picks:
             fp = _fingerprint(pick)
             current = signals.get(fp)
+            if current and not current.get("pick"):
+                current["pick"] = pick
+                changed = True
             if current and current.get("status") in {
                 "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
                 "IGNORED_STALE", "IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE",
@@ -625,6 +818,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "selection": pick.get("selection"),
                 "units": str(_units_for_pick(pick)),
                 "stake_usdc": str(_stake_for_pick(pick, unit_usdc)),
+                "pick": pick,
             }
 
             if source_label is None:
@@ -814,6 +1008,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "stale": sum(1 for r in rows if r.get("status") == "IGNORED_STALE"),
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
                 "queued_items": _recent_status_items(rows, "PREVIEW_QUEUED"),
+                "previewed_items": _recent_status_items(rows, "PREVIEW_DONE"),
                 "stale_items": _recent_status_items(rows, "IGNORED_STALE"),
             }
         return {
@@ -824,6 +1019,61 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             "unit_usdc": str(unit_usdc),
             "sources": counts,
             "status": dict(_STATUS),
+        }
+
+
+    @app.post("/api/cfb-cappers/manual-buy/{signal_id}", dependencies=[Depends(dashboard._auth)])
+    def cfb_capper_manual_buy(signal_id: str) -> dict[str, Any]:
+        signals = _load_signals()
+        record = signals.get(signal_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Unknown CFB signal")
+        if record.get("source") not in SOURCE_LABELS:
+            raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
+        if record.get("status") not in {"PREVIEW_QUEUED", "PREVIEW_DONE", "IGNORED_STALE"}:
+            raise HTTPException(
+                status_code=409,
+                detail=f"CFB signal is {record.get('status')}; BUY LIVE is available only for queued, previewed, or stale signals",
+            )
+
+        pick = record.get("pick") if isinstance(record.get("pick"), dict) else None
+        if pick is None:
+            feed = core._load(last_feed_file)
+            for candidate in (feed.get("picks") or []) if isinstance(feed, dict) else []:
+                if isinstance(candidate, dict) and _fingerprint(candidate) == signal_id:
+                    pick = candidate
+                    break
+        if pick is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Original CFB pick details are no longer available to safely re-resolve the live market",
+            )
+
+        try:
+            result = _prepare_manual_buy(
+                pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        record["manual_buy_request_id"] = result["request_id"]
+        record["manual_buy_trade_id"] = result["trade_id"]
+        record["manual_buy_status"] = "PENDING"
+        record["manual_buy_error"] = None
+        record["manual_buy_at"] = _now_iso()
+        record["updated_at"] = _now_iso()
+        signals[signal_id] = record
+        _save_signals(signals)
+        return {
+            "ok": True,
+            "manual": True,
+            "auto": False,
+            **result,
         }
 
     dashboard.DASHBOARD_HTML = _inject_dashboard_panel(dashboard.DASHBOARD_HTML)
