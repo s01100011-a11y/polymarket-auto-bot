@@ -1,0 +1,1196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymarket Auto Bot — Documentation</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #1c2128;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #6e7681;
+    --accent: #58a6ff;
+    --accent-hover: #79c0ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --orange: #db6d28;
+    --purple: #bc8cff;
+    --code-bg: #0d1117;
+    --pre-bg: #161b22;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+  /* Layout */
+  .layout {
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    overflow-y: auto;
+    z-index: 100;
+    padding: 20px 0;
+  }
+  .sidebar-title {
+    padding: 0 20px 16px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+  .sidebar-title small {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-top: 2px;
+  }
+  .nav-section {
+    padding: 8px 20px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+  }
+  .nav-link {
+    display: block;
+    padding: 4px 20px 4px 28px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    border-left: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .nav-link:hover {
+    color: var(--text);
+    background: var(--bg-tertiary);
+    text-decoration: none;
+    border-left-color: var(--accent);
+  }
+  .nav-link.active {
+    color: var(--accent);
+    border-left-color: var(--accent);
+    background: var(--bg-tertiary);
+  }
+
+  /* Main content */
+  .main {
+    margin-left: 280px;
+    flex: 1;
+    max-width: 900px;
+    padding: 40px 48px 80px;
+  }
+
+  h1 {
+    font-size: 32px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  h2 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-top: 48px;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 32px;
+    margin-bottom: 12px;
+  }
+  h4 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-top: 24px;
+    margin-bottom: 8px;
+    color: var(--text-secondary);
+  }
+  p { margin-bottom: 12px; }
+  .subtitle {
+    color: var(--text-secondary);
+    font-size: 16px;
+    margin-bottom: 32px;
+  }
+
+  /* Code */
+  code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 13px;
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--accent);
+  }
+  pre {
+    background: var(--pre-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    overflow-x: auto;
+    margin: 12px 0 20px;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    color: var(--text);
+    font-size: inherit;
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 20px;
+    font-size: 13.5px;
+  }
+  th {
+    text-align: left;
+    padding: 10px 14px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  td {
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:hover td { background: var(--bg-secondary); }
+
+  /* Lists */
+  ul, ol {
+    margin: 8px 0 16px 24px;
+  }
+  li { margin-bottom: 4px; }
+
+  /* Badges */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .badge-green { background: rgba(63,185,80,0.15); color: var(--green); }
+  .badge-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .badge-red { background: rgba(248,81,73,0.15); color: var(--red); }
+  .badge-blue { background: rgba(88,166,255,0.15); color: var(--accent); }
+  .badge-purple { background: rgba(188,140,255,0.15); color: var(--purple); }
+
+  /* Cards */
+  .card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 12px 0 20px;
+  }
+  .card-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  .card p { color: var(--text-secondary); font-size: 14px; }
+
+  /* Diagram */
+  .diagram {
+    background: var(--pre-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    overflow-x: auto;
+    margin: 12px 0 20px;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre;
+    color: var(--text-secondary);
+  }
+
+  /* Callout */
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--bg-secondary);
+    padding: 12px 16px;
+    margin: 12px 0 20px;
+    border-radius: 0 6px 6px 0;
+    font-size: 14px;
+    color: var(--text-secondary);
+  }
+  .callout strong { color: var(--text); }
+  .callout-warn { border-left-color: var(--yellow); }
+  .callout-danger { border-left-color: var(--red); }
+
+  /* Safety layers */
+  .safety-layer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    border-left: 3px solid var(--green);
+    background: var(--bg-secondary);
+    margin: 4px 0;
+    border-radius: 0 4px 4px 0;
+    font-size: 13px;
+  }
+  .safety-layer .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    background: var(--green);
+    color: var(--bg);
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  /* Back to top */
+  .back-to-top {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    z-index: 50;
+    transition: all 0.15s;
+  }
+  .back-to-top:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
+
+  /* Mobile */
+  .sidebar-toggle {
+    display: none;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 200;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  @media (max-width: 860px) {
+    .sidebar { transform: translateX(-100%); transition: transform 0.25s; }
+    .sidebar.open { transform: translateX(0); }
+    .sidebar-toggle { display: block; }
+    .main { margin-left: 0; padding: 60px 20px 80px; }
+  }
+
+  /* Flow steps */
+  .flow-step {
+    display: flex;
+    gap: 12px;
+    margin: 8px 0;
+    align-items: flex-start;
+  }
+  .flow-step .step-icon {
+    width: 28px;
+    height: 28px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .flow-step .step-text { font-size: 14px; color: var(--text-secondary); }
+  .flow-step .step-text strong { color: var(--text); }
+
+  .section-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 48px 0;
+  }
+</style>
+</head>
+<body>
+
+<button class="sidebar-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">Menu</button>
+
+<div class="layout">
+
+<!-- Sidebar Navigation -->
+<nav class="sidebar">
+  <div class="sidebar-title">
+    Polymarket Auto Bot
+    <small>Automated Sports Trading Service</small>
+  </div>
+
+  <div class="nav-section">Overview</div>
+  <a class="nav-link" href="#overview">Overview</a>
+  <a class="nav-link" href="#supported-sports">Supported Sports</a>
+
+  <div class="nav-section">Architecture</div>
+  <a class="nav-link" href="#high-level-architecture">High-Level Architecture</a>
+  <a class="nav-link" href="#module-chain">Module Chain</a>
+  <a class="nav-link" href="#signal-paths">Signal Ingestion Paths</a>
+  <a class="nav-link" href="#execution-flow">Order Execution Flow</a>
+  <a class="nav-link" href="#deployment">Deployment Topology</a>
+
+  <div class="nav-section">Modules</div>
+  <a class="nav-link" href="#core-engine">Core Trading Engine</a>
+  <a class="nav-link" href="#dashboard-layer">Dashboard Layer</a>
+  <a class="nav-link" href="#signal-ingestion">Signal Ingestion</a>
+  <a class="nav-link" href="#research-modules">Research Modules</a>
+  <a class="nav-link" href="#termux-executor">Termux Executor</a>
+  <a class="nav-link" href="#infrastructure">Infrastructure</a>
+
+  <div class="nav-section">Related Systems</div>
+  <a class="nav-link" href="#nbamonitor">NBAMonitor (upstream)</a>
+  <a class="nav-link" href="#nrlmonitor">NRLMonitor (research)</a>
+  <a class="nav-link" href="#telegram-bridge">Telegram Bridge</a>
+
+  <div class="nav-section">Processing Flows</div>
+  <a class="nav-link" href="#wnba-flow">WNBA Predicted Winner</a>
+  <a class="nav-link" href="#nfl-cfb-flow">NFL/CFB Capper</a>
+  <a class="nav-link" href="#termux-flow">Termux Executor</a>
+  <a class="nav-link" href="#watch-loop-flow">Watch Loop</a>
+
+  <div class="nav-section">Configuration</div>
+  <a class="nav-link" href="#env-vars">Environment Variables</a>
+  <a class="nav-link" href="#safety-gates">Safety Gates</a>
+
+  <div class="nav-section">Reference</div>
+  <a class="nav-link" href="#installation">Installation</a>
+  <a class="nav-link" href="#api-endpoints">API Endpoints</a>
+  <a class="nav-link" href="#glossary">Glossary</a>
+  <a class="nav-link" href="#file-index">File Index</a>
+</nav>
+
+<!-- Main Content -->
+<main class="main">
+
+<!-- ============================================================ -->
+<h1>Polymarket Auto Bot</h1>
+<p class="subtitle">Automated sports prediction-market trading service for Polymarket, built on the official <code>polymarket-client</code> Python SDK.</p>
+
+<p>The bot ingests live game signals from upstream monitors and Telegram cappers, matches them to Polymarket prediction markets, applies configurable risk controls, and executes limit orders &mdash; either automatically or through a manual approval queue. It runs on Railway (cloud) with a Termux executor (Android phone) for on-device wallet signing.</p>
+
+<!-- ============================================================ -->
+<h2 id="overview">Overview</h2>
+
+<h4>Key Capabilities</h4>
+<ul>
+  <li><strong>Multi-source signal ingestion</strong> &mdash; WNBA Predicted Winner calls via Slack webhooks and direct Tailnet feed, NFL/CFB capper picks via Telegram bridge</li>
+  <li><strong>Dual execution mode</strong> &mdash; Paper trading (simulated) and live trading (real USDC orders) with triple-gate safety</li>
+  <li><strong>Watch-until-price queue</strong> &mdash; Signals are monitored until the market price reaches the configured limit or the signal expires</li>
+  <li><strong>Risk management</strong> &mdash; Per-trade caps, daily budget limits, maximum price/spread thresholds, political market blocking</li>
+  <li><strong>Real-time dashboard</strong> &mdash; Dark-themed web UI with P&amp;L tracking, position management, live/paper mode controls, SELL buttons</li>
+  <li><strong>Termux executor</strong> &mdash; Android-based order executor for wallet-local signing via the Polymarket SDK</li>
+  <li><strong>Research tooling</strong> &mdash; Spread capture, scalping analysis, game reconstruction, and backtesting modules</li>
+</ul>
+
+<h3 id="supported-sports">Supported Sports</h3>
+<table>
+  <thead><tr><th>Sport</th><th>Signal Source</th><th>Status</th></tr></thead>
+  <tbody>
+    <tr><td>WNBA</td><td>NBAMonitor Predicted Winner calls</td><td><span class="badge badge-green">Active &mdash; live</span></td></tr>
+    <tr><td>NFL</td><td>Telegram cappers (SLAM, Syndicate)</td><td><span class="badge badge-green">Active &mdash; live</span></td></tr>
+    <tr><td>CFB</td><td>Telegram cappers (SLAM, Syndicate)</td><td><span class="badge badge-yellow">Preview only</span></td></tr>
+    <tr><td>NBA</td><td>NBAMonitor (shared infrastructure)</td><td><span class="badge badge-blue">Planned</span></td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="high-level-architecture">High-Level Architecture</h2>
+
+<div class="diagram">                           SIGNAL SOURCES
+    ┌──────────────┐   ┌──────────────────┐   ┌──────────────────┐
+    │  NBAMonitor   │   │  Telegram Bridge  │   │  Manual /auto/*  │
+    │  (WNBA/NBA)  │   │  (NFL/CFB Cappers)│   │  API Signals     │
+    └──────┬───────┘   └────────┬─────────┘   └────────┬─────────┘
+           │                    │                       │
+      ┌────┴────┐               │                       │
+      │  Slack  │  Tailnet      │                       │
+      │  Push   │  Poll         │                       │
+      └────┬────┘────┬──────────┘                       │
+           │         │                                  │
+    ═══════╪═════════╪══════════════════════════════════╪═══════════
+           ▼         ▼          RAILWAY BOT             ▼
+    ┌─────────────────────────────────────────────────────────────┐
+    │                    FastAPI Application                       │
+    │                                                             │
+    │  ┌─────────────┐  ┌───────────────┐  ┌──────────────────┐  │
+    │  │ Slack Ingest │  │ PW Export     │  │ NFL/CFB Capper   │  │
+    │  │ + WNBA Parse │  │ Ingest (Pull) │  │ Ingest (Poll)    │  │
+    │  └──────┬───────┘  └───────┬───────┘  └────────┬─────────┘  │
+    │         └──────────────────┼────────────────────┘            │
+    │                            ▼                                │
+    │              Signal Dedup &amp; Validation                      │
+    │                            ▼                                │
+    │              Strategy Filters (quarter/edge/EV)             │
+    │                            ▼                                │
+    │              Core Trading Engine (risk, quote, execute)     │
+    │                            │                                │
+    │              ┌─────────────┴──────────────┐                 │
+    │              ▼                            ▼                 │
+    │        Executor Queue              Paper Trade              │
+    └──────────────┬─────────────────────────────────────────────┘
+                   │
+                   ▼
+    ┌─────────────────────────┐
+    │  Termux Executor        │
+    │  (Android / Wallet)     │──────────▶  Polymarket CLOB
+    └─────────────────────────┘</div>
+
+<!-- ============================================================ -->
+<h2 id="module-chain">Module Chain</h2>
+
+<p>The FastAPI application is assembled through a <strong>linear module chain</strong>. Each module imports the previous one's <code>app</code> object and adds its own routes:</p>
+
+<div class="diagram">app/main.py                          Core trading engine, risk checks, watch loop
+  └─ app/dashboard.py                Web dashboard, auth, settings
+       └─ app/slack_ingest.py        Slack webhook ingestion, WNBA team matching
+            └─ app/slack_wnba.py     WNBA Predicted Winner message parsing
+                 └─ ...              (dashboard metrics, filters, P&amp;L layers)
+                      └─ app/wnba_pw_history_v7-v10.py    PW alert SQLite database
+                           └─ app/wnba_pw_filters_v11.py  PW strategy filters
+                                └─ app/wnba_pw_strategy_test_v12.py  Strategy testing
+                                     └─ app/wnba_pw_research_v13.py  [ENTRYPOINT]</div>
+
+<p>The entrypoint module (<code>wnba_pw_research_v13.py</code>) also installs plugin-style modules:</p>
+
+<div class="diagram">wnba_pw_research_v13.py
+  ├── pw_research_sync.install()        Research data sync via Tailnet
+  ├── pw_scalping_research.install()    Scalping opportunity analysis
+  ├── pw_market_research.install()      Market depth research
+  ├── pw_spread_capture.install()       Forward spread capture
+  ├── pw_game_reconstruction.install()  Game timeline reconstruction
+  ├── pw_spread_backtest.install()      Spread strategy backtesting
+  ├── nfl_capper_ingest.install()       NFL Telegram capper polling
+  └── cfb_capper_preview.install()      CFB capper preview/validation</div>
+
+<p>A parallel chain between <code>dashboard.py</code> and <code>slack_ingest.py</code> handles live trading and executor management:</p>
+
+<div class="diagram">app/live_trading.py                  Live BUY/SELL test endpoints
+  └─ app/wallet_dashboard.py        Wallet balance/portfolio display
+       └─ app/live_test_dashboard.py     Sports market validation
+            └─ app/termux_executor_dashboard.py   Executor queue &amp; pairing
+                 └─ app/termux_executor_dashboard_v2.py  P&amp;L estimation
+                      └─ app/dashboard_metrics_v3.py     Reconciliation
+                           └─ app/dashboard_live_control_v4.py  Slack mode controls</div>
+
+<!-- ============================================================ -->
+<h2 id="signal-paths">Signal Ingestion Paths</h2>
+
+<p>The bot receives trading signals through four independent paths:</p>
+
+<div class="card">
+  <div class="card-title">Path 1 &mdash; Slack Events (WNBA, push)</div>
+  <p>NBAMonitor sends a Slack alert when a PW call is generated. Slack's Events API pushes the message to the bot's <code>/slack/events</code> webhook.<br><strong>Latency: ~1&ndash;3 seconds</strong> from call generation.</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Path 2 &mdash; PW Export Direct Feed (WNBA, pull)</div>
+  <p>The bot polls NBAMonitor's <code>/api/pw-export</code> every 8 seconds over the Tailscale VPN. Uses HTTP CONNECT through Tailscale's outbound proxy with TLS.<br><strong>Latency: ~4&ndash;8 seconds</strong> average.</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Path 3 &mdash; NFL Capper Ingest (NFL, pull)</div>
+  <p>Polls a Telegram-to-HTTP bridge every 15 seconds for NFL picks from professional cappers (SLAM, Syndicate). Parses team names, odds, and unit sizing.</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Path 4 &mdash; CFB Capper Preview (CFB, pull)</div>
+  <p>Same architecture as NFL but in <strong>preview/validation mode</strong> &mdash; picks are parsed and validated but never queued for real execution.</p>
+</div>
+
+<div class="callout">
+  <strong>Deduplication:</strong> Paths 1 and 2 can receive the same WNBA signal. The bot deduplicates via content-hash identity matching (<code>_pw_signal_key()</code> / <code>_identity()</code>), so a signal arriving on both paths executes at most once.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="execution-flow">Order Execution Flow</h2>
+
+<div class="diagram">Signal Received
+      │
+      ▼
+Parse &amp; Validate ──▶ Dedup Check ──── duplicate ──▶ SKIP
+                           │
+                           │ new
+                           ▼
+                    Strategy Filter ──── filtered ──▶ LOG_SKIP
+                    (quarter/edge/EV)
+                           │ pass
+                           ▼
+                    Risk Checks ──── exceeded ──▶ REJECT
+                    • budget cap
+                    • max price
+                    • max spread
+                    • political block
+                           │ pass
+                           ▼
+                    Market Matching ──── no match ──▶ LOG_ERROR
+                    (Polymarket API)
+                           │ matched
+                           ▼
+                    Quote &amp; Spread ──── spread too wide ──▶ WAITING
+                    (order book)
+                           │ ok
+                           ▼
+                    Geoblock Check ──── blocked ──▶ REJECT
+                           │ ok
+                           ▼
+              ┌────────────┴────────────┐
+              │                         │
+        LIVE + AUTO              LIVE=false
+              │                         │
+              ▼                         ▼
+    Executor Queue            Paper Trade
+    (Termux pickup)           (simulated)
+              │
+              ▼
+    Limit Order on
+    Polymarket CLOB</div>
+
+<!-- ============================================================ -->
+<h2 id="deployment">Deployment Topology</h2>
+
+<div class="diagram">                    TAILSCALE VPN (Tailnet)
+  ┌─────────────────────┐           ┌──────────────────────────┐
+  │   Home Server        │  Tailnet  │   Railway (Cloud)         │
+  │                     │◀────────▶│                          │
+  │  NBAMonitor         │  HTTPS   │  Polymarket Auto Bot     │
+  │  • ESPN poll (30s)  │          │  • FastAPI + Uvicorn     │
+  │  • PW generation    │          │  • Tailscale userspace   │
+  │  • /api/pw-export   │          │  • SOCKS5 proxy          │
+  │  • Slack alerts     │          │  • Signal ingestion      │
+  │  :8445              │          │  • Dashboard             │
+  └─────────────────────┘          └────────────┬─────────────┘
+                                                │
+  ┌─────────────────────┐   Executor Queue      │
+  │   Android Phone      │◀─────────────────────┘
+  │   (Termux)           │   HTTPS polling
+  │  • Wallet keys      │────────────────────▶ Polymarket CLOB
+  │  • Order signing    │   Limit orders
+  └─────────────────────┘
+
+  External Services:
+    Slack Events API ──▶ Railway /slack/events
+    Telegram Bridge  ──▶ Railway (polled by NFL/CFB ingest)
+    Polymarket API   ◀── Railway (quotes) + Termux (orders)</div>
+
+<div class="callout callout-warn">
+  <strong>Note:</strong> The Railway deployment uses a Docker container with <code>start.sh</code> as the entrypoint, which boots Tailscale userspace networking before starting Uvicorn. The <code>railway.json</code> specifies a Nixpacks builder with <code>app.main:app</code>, but the actual production entrypoint should be confirmed &mdash; <code>start.sh</code> launches <code>app.wnba_pw_research_v13:app</code>.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="core-engine">Core Trading Engine</h2>
+
+<h4><code>app/main.py</code> &mdash; Trading Core</h4>
+<p>The foundation of the entire application. Provides:</p>
+<ul>
+  <li><strong>FastAPI app</strong> instance and lifespan management</li>
+  <li><code>live_trading_enabled()</code> / <code>auto_trading_enabled()</code> &mdash; runtime env var checks (not cached at import time)</li>
+  <li><code>_quote()</code> &mdash; fetches order book from Polymarket's CLOB, calculates best ask/bid and spread</li>
+  <li><code>_risk_checks()</code> &mdash; enforces per-trade cap, daily budget, max price, max spread, political blocking</li>
+  <li><code>_execute_limit()</code> &mdash; places a limit order on Polymarket via the SDK</li>
+  <li><code>_watch_loop()</code> &mdash; background async loop polling the watch queue every <code>AUTO_POLL_SECONDS</code></li>
+  <li>JSON file storage with <code>threading.Lock</code> and atomic tmp-then-rename writes</li>
+</ul>
+
+<h4><code>app/structured_logging.py</code> &mdash; JSON Structured Logging</h4>
+<p>Configurable JSON log formatter with UTC timestamps, severity levels, and structured trading context fields (<code>event</code>, <code>trade_id</code>, <code>request_id</code>, <code>stage</code>, <code>reason</code>, <code>status</code>). Controlled by <code>LOG_LEVEL</code>.</p>
+
+<!-- ============================================================ -->
+<h2 id="dashboard-layer">Dashboard Layer</h2>
+
+<h4><code>app/dashboard.py</code> &mdash; Web Dashboard (v0.5.3)</h4>
+<p>Dark-themed HTML dashboard with HTTP Basic authentication. Features: trading parameter display, auto-trading toggle, active watches, pending approvals, execution history, SELL buttons, executor status.</p>
+
+<h4><code>app/dashboard_metrics_v3.py</code> &mdash; Reconciliation Engine</h4>
+<p>Periodic reconciliation of local trade records against on-chain Polymarket state. Detects fills, partial closes, and settlement.</p>
+
+<h4><code>app/dashboard_live_control_v4.py</code> &mdash; Slack Trading Mode</h4>
+<p>Controls paper vs. live for Slack-sourced signals. Railway <code>AUTO_TRADING</code> env var is authoritative and overrides dashboard state.</p>
+
+<h4><code>app/dashboard_filters_v5.py</code> &mdash; Trade Filtering</h4>
+<p>Portfolio value calculation, trade bucketing (paper vs. live), and filtering logic.</p>
+
+<h4><code>app/dashboard_pnl_filters_v6.py</code> &mdash; P&amp;L by Mode</h4>
+<p>Splits P&amp;L history into paper and live buckets with periodic sampling (every 10s, up to 5760 entries).</p>
+
+<h4><code>app/wallet_dashboard.py</code> &mdash; Wallet Display</h4>
+<p>Connects to the Polymarket SDK to display real-time wallet balance, allowance, and portfolio value.</p>
+
+<h4><code>app/live_trading.py</code> &mdash; Live Test Endpoints</h4>
+<p>Protected BUY/SELL endpoints for manual live trading tests. Validates against supported sports market types.</p>
+
+<!-- ============================================================ -->
+<h2 id="signal-ingestion">Signal Ingestion</h2>
+
+<h4><code>app/slack_ingest.py</code> &mdash; Slack Events Ingestion</h4>
+<p>Receives Slack Events API webhooks at <code>/slack/events</code>. HMAC signature verification, channel filtering, WNBA team name matching (15 teams with aliases), alert age checking.</p>
+
+<h4><code>app/slack_wnba.py</code> &mdash; WNBA PW Message Parser</h4>
+<p>Specialized parser for NBAMonitor "Predicted Winner" messages. Extracts: winner, win probability, consensus, quarter, edge, moneyline odds. Patches <code>slack_ingest</code> at import time.</p>
+
+<h4><code>app/pw_export_ingest.py</code> &mdash; Direct PW Feed Poller</h4>
+<p>Polls NBAMonitor's <code>/api/pw-export</code> via Tailscale VPN. HTTP CONNECT through proxy with TLS, MagicDNS preferred, peer-IP fallback. Bootstrap safety: first poll sets cursor only. Dedup via content-hash.</p>
+
+<h4><code>app/nfl_capper_ingest.py</code> &mdash; NFL Capper Polling</h4>
+<p>Polls Telegram-ChatGPT bridge for NFL picks. Sources: SLAM, Syndicate. 32-team alias dictionary, American odds parsing, unit sizing.</p>
+
+<h4><code>app/cfb_capper_preview.py</code> &mdash; CFB Capper Preview</h4>
+<p>Mirrors NFL architecture for college football in preview/validation mode &mdash; parsed and logged but never queued for real execution.</p>
+
+<!-- ============================================================ -->
+<h2 id="research-modules">Research Modules</h2>
+
+<p>Installed as plugins via <code>.install()</code> and add research API endpoints:</p>
+
+<table>
+  <thead><tr><th>Module</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>pw_research_sync.py</code></td><td>Synchronize PW call data from NBAMonitor via Tailnet</td></tr>
+    <tr><td><code>pw_market_research.py</code></td><td>Order book depth, liquidity, and market structure analysis</td></tr>
+    <tr><td><code>pw_scalping_research.py</code></td><td>Scalping opportunity identification from price/spread patterns</td></tr>
+    <tr><td><code>pw_spread_capture.py</code></td><td>Real-time forward spread sampling (1s intervals, 5min window)</td></tr>
+    <tr><td><code>pw_game_reconstruction.py</code></td><td>Complete game timeline reconstruction for post-game analysis</td></tr>
+    <tr><td><code>pw_spread_backtest.py</code></td><td>Historical backtesting of spread-based entry strategies</td></tr>
+    <tr><td><code>wnba_pw_history_v7&ndash;v10</code></td><td>SQLite-backed PW alert database with grading and P&amp;L</td></tr>
+    <tr><td><code>wnba_pw_filters_v11.py</code></td><td>Configurable PW filters (quarter, venue, ML range, edge, EV)</td></tr>
+    <tr><td><code>wnba_pw_strategy_test_v12.py</code></td><td>Live strategy testing with filter combinations</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="termux-executor">Termux Executor</h2>
+
+<h4><code>scripts/termux_executor.py</code> &mdash; On-Device Executor</h4>
+<p>Runs on an Android phone in Termux. Polls the Railway bot's executor queue, signs transactions locally using the Polymarket wallet private key, submits limit orders via <code>SecureClient</code>, monitors fills, reports results back. Emergency max USDC backstop.</p>
+
+<h4><code>app/termux_executor_dashboard.py</code> &mdash; Server-Side Queue</h4>
+<p>Executor pairing via shared secret, queue item lifecycle (pending &rarr; claimed &rarr; executed &rarr; confirmed), TTL-based expiry, heartbeat monitoring.</p>
+
+<!-- ============================================================ -->
+<h2 id="infrastructure">Infrastructure</h2>
+
+<h4><code>start.sh</code> &mdash; Container Entrypoint</h4>
+<p>Boots the Docker container: starts <code>tailscaled</code> in userspace mode with SOCKS5/HTTP proxy, authenticates to Tailnet, launches Uvicorn.</p>
+
+<h4><code>Dockerfile</code> &mdash; Container Image</h4>
+<p>Multi-stage build: Tailscale binaries from <code>tailscale/tailscale:stable</code>, Python 3.12 slim with app and dependencies.</p>
+
+<h4><code>railway.json</code> &mdash; Railway Config</h4>
+<p>Health check at <code>/health</code> (30s timeout), restart on failure (max 10 retries), Nixpacks builder.</p>
+
+<!-- ============================================================ -->
+<h2 id="nbamonitor">NBAMonitor (upstream)</h2>
+
+<div class="card">
+  <div class="card-title">Separate upstream system &mdash; not part of this repository</div>
+  <p>A read-only vendored snapshot is kept in <code>research/upstream_nbamonitor/</code> for reference (pinned to commit <code>7fc3285</code>).</p>
+</div>
+
+<p><strong>What NBAMonitor does:</strong></p>
+<ul>
+  <li>Polls ESPN APIs every 30 seconds for live game data (scores, quarter, clock)</li>
+  <li>Evaluates configurable conditions (score differential, momentum, quarter thresholds)</li>
+  <li>Generates Predicted Winner (PW) calls when conditions trigger</li>
+  <li>Sends Slack alerts with structured PW call details</li>
+  <li>Serves <code>/api/pw-export</code> &mdash; JSON API returning all PW calls since a given timestamp</li>
+  <li>Runs on a home server accessible via Tailscale VPN</li>
+</ul>
+
+<p><strong>Connection paths:</strong></p>
+<ol>
+  <li><strong>Slack push:</strong> NBAMonitor &rarr; Slack &rarr; Events API &rarr; bot's <code>/slack/events</code></li>
+  <li><strong>Direct pull:</strong> Bot &rarr; Tailscale VPN &rarr; NBAMonitor <code>/api/pw-export</code> (HTTPS)</li>
+</ol>
+
+<!-- ============================================================ -->
+<h2 id="nrlmonitor">NRLMonitor (research only)</h2>
+<p>Vendored snapshot of an NRL (Australian rugby league) monitor in <code>research/upstream_nrlmonitor/</code>. Currently <strong>research-only</strong> &mdash; no active NRL ingestion exists. Provides reference architecture for potential league expansion.</p>
+
+<!-- ============================================================ -->
+<h2 id="telegram-bridge">Telegram-ChatGPT Bridge</h2>
+<p>External service that sanitizes and serves Telegram messages over HTTP. NFL and CFB ingest modules poll this bridge for new picks. Hosted separately on Railway.</p>
+
+<!-- ============================================================ -->
+<h2 id="wnba-flow">WNBA Predicted Winner Flow</h2>
+
+<div class="diagram">NBAMonitor detects PW condition (ESPN live data)
+         │
+         ├────────────────────────────────┐
+         │                                │
+         ▼                                ▼
+  Slack alert sent                /api/pw-export updated
+         │                                │
+         ▼                                ▼
+  Slack Events push              pw_export_ingest polls
+  (~1-3s latency)                every 8s (~4-8s latency)
+         │                                │
+         ▼                                ▼
+  slack_ingest.py                _tailnet_https_json()
+  • HMAC verify                  • HTTP CONNECT via proxy
+  • Channel filter               • TLS to NBAMonitor
+  • Age check                    • MagicDNS preferred
+         │                                │
+         ▼                                ▼
+  slack_wnba.py                  Content-hash dedup
+  • Parse PW fields                     │
+  • Extract odds/edge                   │
+         │                              │
+         ▼                              │
+  _existing_pw_signal() ◀───────────────┘
+  (cross-path dedup)
+         │
+         ▼ (first arrival wins)
+  Strategy filter (v11/v12)
+  • Quarter: Q3/Q4      • Edge: ≥8pp
+  • Venue: home/away     • EV: ≥8%
+  • ML range: +100..+399
+         │
+         ▼ (pass)
+  core._execute_limit() or paper trade</div>
+
+<!-- ============================================================ -->
+<h2 id="nfl-cfb-flow">NFL/CFB Capper Flow</h2>
+
+<div class="diagram">Telegram capper posts pick (SLAM / Syndicate)
+         │
+         ▼
+  Telegram-ChatGPT Bridge (sanitize, serve over HTTP)
+         │
+         ▼
+  nfl_capper_ingest.py polls every 15s
+  • Source filtering (SLAM, Syndicate)
+  • Pick age check (≤180s)
+  • Team name parsing (32-team alias dict)
+  • Odds extraction (American format)
+  • Unit sizing (1u = $10 default)
+         │
+         ▼
+  Polymarket market search
+  • Match team to prediction market
+  • Verify market is open
+         │
+         ▼
+  Risk checks → Executor queue (or paper trade)</div>
+
+<!-- ============================================================ -->
+<h2 id="termux-flow">Termux Executor Flow</h2>
+
+<div class="diagram">Railway bot queues order (termux_executor_queue.json)
+         │
+         ▼
+  Termux executor polls queue via HTTPS
+         │
+         ▼
+  Validate order params (emergency max USDC, market open)
+         │
+         ▼
+  SecureClient.create() with local private key
+         │
+         ▼
+  Place limit order on CLOB
+         │
+         ▼
+  Wait for fill (6-8s)
+         │
+         ▼
+  Report result to Railway (fill price, shares, fees)
+         │
+         ▼
+  Dashboard reflects new position</div>
+
+<!-- ============================================================ -->
+<h2 id="watch-loop-flow">Watch Loop Flow</h2>
+
+<div class="diagram">Signal submitted to /auto/watch or /auto/execute
+         │
+         ▼
+  Stored in watchlist.json with max_price + expires_at
+         │
+         ▼
+  _watch_loop() runs every AUTO_POLL_SECONDS (30s)
+         │
+         ▼ (for each watch item)
+  Expired? ──── yes ──▶ Remove
+         │ no
+         ▼
+  Already executed? ──── yes ──▶ Skip (dedup by signal_id)
+         │ no
+         ▼
+  Quote market (best ask)
+         │
+         ▼
+  ask ≤ max_price? ──── no ──▶ Wait for next cycle
+         │ yes
+         ▼
+  Risk checks → Execute</div>
+
+<!-- ============================================================ -->
+<h2 id="env-vars">Environment Variables</h2>
+
+<p>Copy <code>.env.example</code> to <code>.env</code> and configure. Key groups:</p>
+
+<h3>Safety &amp; Mode</h3>
+<table>
+  <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>LIVE_TRADING</code></td><td><code>false</code></td><td>Master switch for real orders</td></tr>
+    <tr><td><code>AUTO_TRADING</code></td><td><code>false</code></td><td>Enables automatic execution without manual approval</td></tr>
+    <tr><td><code>BLOCK_POLITICAL_AUTO</code></td><td><code>true</code></td><td>Prevents automatic execution on political markets</td></tr>
+  </tbody>
+</table>
+
+<h3>Risk Limits</h3>
+<table>
+  <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>MAX_TRADE_USDC</code></td><td><code>100</code></td><td>Maximum USDC per manual trade</td></tr>
+    <tr><td><code>MAX_AUTO_TRADE_USDC</code></td><td><code>25</code></td><td>Maximum USDC per automatic trade</td></tr>
+    <tr><td><code>MAX_DAILY_BUDGET_USDC</code></td><td><code>100</code></td><td>Max total USDC per day</td></tr>
+    <tr><td><code>MAX_PRICE</code></td><td><code>0.95</code></td><td>Maximum price the bot will pay</td></tr>
+    <tr><td><code>MAX_SPREAD</code></td><td><code>0.08</code></td><td>Maximum bid-ask spread for execution</td></tr>
+    <tr><td><code>AUTO_POLL_SECONDS</code></td><td><code>30</code></td><td>Watch loop polling interval (min 10s)</td></tr>
+    <tr><td><code>TRADING_TIMEZONE</code></td><td><code>Asia/Kuala_Lumpur</code></td><td>Timezone for daily budget reset</td></tr>
+  </tbody>
+</table>
+
+<h3>Authentication</h3>
+<table>
+  <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>SIGNAL_SECRET</code></td><td><em>(required)</em></td><td>Secret for <code>/auto/*</code> endpoints</td></tr>
+    <tr><td><code>DASHBOARD_USER</code></td><td><code>admin</code></td><td>Dashboard HTTP Basic username</td></tr>
+    <tr><td><code>DASHBOARD_PASSWORD</code></td><td><em>(required)</em></td><td>Dashboard HTTP Basic password</td></tr>
+    <tr><td><code>POLYMARKET_PRIVATE_KEY</code></td><td><em>(empty)</em></td><td>Wallet private key &mdash; <strong>never commit</strong></td></tr>
+    <tr><td><code>POLYMARKET_DEPOSIT_WALLET</code></td><td><em>(empty)</em></td><td>Polymarket deposit wallet address</td></tr>
+  </tbody>
+</table>
+
+<h3>Slack</h3>
+<table>
+  <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>SLACK_EVENTS_ENABLED</code></td><td><code>false</code></td><td>Enable Slack Events webhook</td></tr>
+    <tr><td><code>SLACK_SIGNING_SECRET</code></td><td><em>(empty)</em></td><td>Slack HMAC signing secret</td></tr>
+    <tr><td><code>SLACK_CHANNEL_ID</code></td><td><em>(empty)</em></td><td>Restrict to specific channel</td></tr>
+    <tr><td><code>SLACK_MAX_ALERT_AGE_SECONDS</code></td><td><code>180</code></td><td>Reject stale events</td></tr>
+  </tbody>
+</table>
+
+<h3>PW Export (Direct Feed)</h3>
+<table>
+  <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>PW_EXPORT_INGEST_ENABLED</code></td><td><code>true</code></td><td>Enable direct PW feed polling</td></tr>
+    <tr><td><code>PW_WNBA_EXPORT_URL</code></td><td><em>(Tailnet URL)</em></td><td>NBAMonitor <code>/api/pw-export</code> endpoint</td></tr>
+    <tr><td><code>PW_EXPORT_POLL_SECONDS</code></td><td><code>8</code></td><td>Polling interval</td></tr>
+    <tr><td><code>PW_TAILNET_PEER</code></td><td><em>(peer IP)</em></td><td>Fallback Tailscale peer IP</td></tr>
+  </tbody>
+</table>
+
+<h3>NFL/CFB Capper</h3>
+<table>
+  <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>NFL_CAPPER_ENABLED</code></td><td><code>true</code></td><td>Enable NFL polling</td></tr>
+    <tr><td><code>NFL_CAPPER_UNIT_USDC</code></td><td><code>10</code></td><td>USDC per unit</td></tr>
+    <tr><td><code>NFL_CAPPER_POLL_SECONDS</code></td><td><code>15</code></td><td>Polling interval</td></tr>
+    <tr><td><code>NFL_CAPPER_BRIDGE_URL</code></td><td><em>(bridge URL)</em></td><td>Telegram bridge endpoint</td></tr>
+    <tr><td><code>CFB_CAPPER_ENABLED</code></td><td><code>true</code></td><td>Enable CFB preview</td></tr>
+  </tbody>
+</table>
+
+<h3>Tailscale</h3>
+<table>
+  <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>TS_AUTHKEY</code></td><td><em>(required)</em></td><td>Tailscale authentication key</td></tr>
+    <tr><td><code>TS_HOSTNAME</code></td><td><code>railway-polymarket-bot</code></td><td>Tailscale node hostname</td></tr>
+    <tr><td><code>TS_PROXY_ADDR</code></td><td><code>127.0.0.1:1055</code></td><td>SOCKS5/HTTP proxy address</td></tr>
+  </tbody>
+</table>
+
+<h3>Executor &amp; Research</h3>
+<table>
+  <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>EXECUTOR_BUY_TTL_SECONDS</code></td><td><code>180</code></td><td>Max wait for Termux executor</td></tr>
+    <tr><td><code>EXECUTOR_EMERGENCY_MAX_USDC</code></td><td><code>500</code></td><td>Hard emergency backstop</td></tr>
+    <tr><td><code>PW_SPREAD_CAPTURE_ENABLED</code></td><td><code>true</code></td><td>Forward spread capture</td></tr>
+    <tr><td><code>PW_STRATEGY_TEST_ENABLED</code></td><td><code>true</code></td><td>Strategy testing</td></tr>
+    <tr><td><code>LOG_LEVEL</code></td><td><code>INFO</code></td><td>Structured logging level</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="safety-gates">Safety Gates</h2>
+
+<p>Defense-in-depth with 8 independent safety layers:</p>
+
+<div class="safety-layer"><span class="num">1</span> <code>LIVE_TRADING=false</code> (default) &mdash; No real USDC can move. All orders are paper.</div>
+<div class="safety-layer"><span class="num">2</span> <code>AUTO_TRADING=false</code> (default) &mdash; Even if live, automatic signals require manual approval.</div>
+<div class="safety-layer"><span class="num">3</span> <code>BLOCK_POLITICAL_AUTO=true</code> (default) &mdash; Political markets excluded from automation.</div>
+<div class="safety-layer"><span class="num">4</span> Per-trade caps &mdash; <code>MAX_AUTO_TRADE_USDC</code> (25), <code>MAX_TRADE_USDC</code> (100)</div>
+<div class="safety-layer"><span class="num">5</span> Daily budget &mdash; <code>MAX_DAILY_BUDGET_USDC</code> (100) resets at midnight in <code>TRADING_TIMEZONE</code></div>
+<div class="safety-layer"><span class="num">6</span> Market quality &mdash; <code>MAX_PRICE</code> (0.95), <code>MAX_SPREAD</code> (0.08)</div>
+<div class="safety-layer"><span class="num">7</span> Geoblock &mdash; Polymarket eligibility checked before every execution</div>
+<div class="safety-layer"><span class="num">8</span> Executor emergency cap &mdash; <code>EXECUTOR_EMERGENCY_MAX_USDC</code> (500) hard limit on Termux</div>
+
+<!-- ============================================================ -->
+<h2 id="installation">Installation</h2>
+
+<h3>Termux (Android)</h3>
+<div class="callout callout-warn"><strong>Warning:</strong> Do not run from Android shared storage (<code>~/storage/downloads</code>). Copy into the Termux home directory first.</div>
+
+<pre><code>pkg update
+pkg install python clang rust make pkg-config libffi openssl unzip -y
+cd ~
+unzip polymarket-auto-bot.zip
+cd polymarket-auto-bot
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env with your configuration</code></pre>
+
+<p>Start the server:</p>
+<pre><code>uvicorn app.main:app --host 127.0.0.1 --port 8787</code></pre>
+
+<p>Start the executor:</p>
+<pre><code>python scripts/termux_executor.py</code></pre>
+
+<div class="callout">Do not run <code>pip install --upgrade pip</code> in Termux &mdash; Termux warns that replacing its packaged pip can break the Python package.</div>
+
+<h3>Railway (Cloud)</h3>
+<p>The Railway deployment uses Docker with the provided <code>Dockerfile</code> and <code>start.sh</code>:</p>
+<ol>
+  <li>Set all required environment variables in the Railway dashboard</li>
+  <li>Ensure <code>TS_AUTHKEY</code> is set for Tailscale VPN connectivity</li>
+  <li>The container boots Tailscale in userspace mode, authenticates, then starts Uvicorn</li>
+</ol>
+<p>Health check: <code>GET /health</code> (30s timeout, restart on failure, max 10 retries).</p>
+
+<!-- ============================================================ -->
+<h2 id="api-endpoints">API Endpoints</h2>
+
+<h3>Signal Endpoints</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>POST</code></td><td><code>/auto/watch</code></td><td>Signal Secret</td><td>Submit signal to watch queue</td></tr>
+    <tr><td><code>GET</code></td><td><code>/auto/watch</code></td><td>Signal Secret</td><td>List current watch queue</td></tr>
+    <tr><td><code>POST</code></td><td><code>/auto/execute</code></td><td>Signal Secret</td><td>One-shot execution</td></tr>
+    <tr><td><code>POST</code></td><td><code>/slack/events</code></td><td>Slack HMAC</td><td>Slack Events webhook</td></tr>
+  </tbody>
+</table>
+
+<h3>Trading Endpoints</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>POST</code></td><td><code>/prepare</code></td><td>Dashboard</td><td>Prepare manual trade</td></tr>
+    <tr><td><code>POST</code></td><td><code>/approve/{trade_id}</code></td><td>Dashboard</td><td>Approve prepared trade</td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/live/buy</code></td><td>Dashboard</td><td>Live test BUY</td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/live/sell/{trade_id}</code></td><td>Dashboard</td><td>Live test SELL</td></tr>
+  </tbody>
+</table>
+
+<h3>Dashboard &amp; Status</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td><code>/</code></td><td>Dashboard</td><td>Main dashboard UI</td></tr>
+    <tr><td><code>GET</code></td><td><code>/health</code></td><td>None</td><td>Health check (503 if stale)</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/snapshot</code></td><td>Dashboard</td><td>Dashboard data snapshot</td></tr>
+    <tr><td><code>GET/PUT</code></td><td><code>/api/settings</code></td><td>Dashboard</td><td>Trading parameter management</td></tr>
+    <tr><td><code>GET/PUT</code></td><td><code>/api/slack-mode</code></td><td>Dashboard</td><td>Slack trading mode</td></tr>
+  </tbody>
+</table>
+
+<h3>Executor Endpoints</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td><code>/api/executor/queue</code></td><td>Executor Token</td><td>Poll for pending orders</td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/executor/claim/{id}</code></td><td>Executor Token</td><td>Claim queue item</td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/executor/result/{id}</code></td><td>Executor Token</td><td>Report execution result</td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/executor/heartbeat</code></td><td>Executor Token</td><td>Executor heartbeat</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="glossary">Glossary</h2>
+
+<table>
+  <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+  <tbody>
+    <tr><td><strong>CLOB</strong></td><td>Central Limit Order Book &mdash; Polymarket's order matching system</td></tr>
+    <tr><td><strong>PW</strong></td><td>Predicted Winner &mdash; signal from NBAMonitor when in-game conditions predict a winner</td></tr>
+    <tr><td><strong>Paper Trade</strong></td><td>Simulated trade recorded for tracking but not submitted to Polymarket</td></tr>
+    <tr><td><strong>Live Trade</strong></td><td>Real trade submitted to Polymarket's CLOB using USDC</td></tr>
+    <tr><td><strong>Watch Queue</strong></td><td>Signals monitored until target price is reached or they expire</td></tr>
+    <tr><td><strong>Signal</strong></td><td>A trading recommendation from any source (PW call, capper pick, manual)</td></tr>
+    <tr><td><strong>Executor</strong></td><td>Termux-based component holding wallet keys and submitting signed orders</td></tr>
+    <tr><td><strong>Tailnet</strong></td><td>Tailscale VPN network connecting Railway bot to NBAMonitor</td></tr>
+    <tr><td><strong>MagicDNS</strong></td><td>Tailscale's DNS resolving node hostnames within the Tailnet</td></tr>
+    <tr><td><strong>Edge</strong></td><td>Difference between model-estimated and market-implied probability (percentage points)</td></tr>
+    <tr><td><strong>EV</strong></td><td>Expected Value &mdash; expected profit/loss given edge and odds</td></tr>
+    <tr><td><strong>Moneyline (ML)</strong></td><td>American odds format (+150 = $100 bet wins $150; -200 = $200 bet wins $100)</td></tr>
+    <tr><td><strong>Spread</strong></td><td>Difference between best bid and best ask in the order book</td></tr>
+    <tr><td><strong>Geoblock</strong></td><td>Polymarket's geographic eligibility check &mdash; verified before every order</td></tr>
+    <tr><td><strong>Triple Gate</strong></td><td>Three independent switches required for automatic live trading</td></tr>
+    <tr><td><strong>Capper</strong></td><td>Professional sports handicapper publishing picks (SLAM, Syndicate)</td></tr>
+    <tr><td><strong>Bridge</strong></td><td>Telegram-to-HTTP service sanitizing and serving capper messages</td></tr>
+    <tr><td><strong>Dedup</strong></td><td>Deduplication &mdash; preventing duplicate signal execution across paths</td></tr>
+    <tr><td><strong>USDC</strong></td><td>USD Coin &mdash; stablecoin used for Polymarket trading</td></tr>
+    <tr><td><strong>Reconciliation</strong></td><td>Comparing local records against on-chain state to detect fills/settlements</td></tr>
+    <tr><td><strong>Backfill</strong></td><td>Importing historical PW call data into SQLite for research</td></tr>
+    <tr><td><strong>Quarter Filter</strong></td><td>Strategy filter trading PW calls only during specific game quarters</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="file-index">File Index</h2>
+
+<h3>By File</h3>
+<table>
+  <thead><tr><th>File</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>app/main.py</code></td><td>Core trading engine, risk checks, watch loop</td></tr>
+    <tr><td><code>app/dashboard.py</code></td><td>Web dashboard, auth, settings (v0.5.3)</td></tr>
+    <tr><td><code>app/slack_ingest.py</code></td><td>Slack Events webhook ingestion</td></tr>
+    <tr><td><code>app/slack_wnba.py</code></td><td>WNBA Predicted Winner message parsing</td></tr>
+    <tr><td><code>app/pw_export_ingest.py</code></td><td>Direct PW feed poller (Tailnet)</td></tr>
+    <tr><td><code>app/nfl_capper_ingest.py</code></td><td>NFL Telegram capper polling</td></tr>
+    <tr><td><code>app/cfb_capper_preview.py</code></td><td>CFB capper preview/validation</td></tr>
+    <tr><td><code>app/live_trading.py</code></td><td>Live BUY/SELL test endpoints</td></tr>
+    <tr><td><code>app/wallet_dashboard.py</code></td><td>Wallet balance and portfolio display</td></tr>
+    <tr><td><code>app/live_test_dashboard.py</code></td><td>Sports market validation</td></tr>
+    <tr><td><code>app/termux_executor_dashboard.py</code></td><td>Executor queue and pairing</td></tr>
+    <tr><td><code>app/dashboard_metrics_v3.py</code></td><td>Reconciliation engine</td></tr>
+    <tr><td><code>app/dashboard_live_control_v4.py</code></td><td>Slack trading mode controls</td></tr>
+    <tr><td><code>app/dashboard_filters_v5.py</code></td><td>Trade filtering</td></tr>
+    <tr><td><code>app/dashboard_pnl_filters_v6.py</code></td><td>P&amp;L by mode (paper/live)</td></tr>
+    <tr><td><code>app/wnba_pw_history_v7&ndash;v10.py</code></td><td>PW alert SQLite database</td></tr>
+    <tr><td><code>app/wnba_pw_filters_v11.py</code></td><td>PW strategy filters</td></tr>
+    <tr><td><code>app/wnba_pw_strategy_test_v12.py</code></td><td>Strategy testing</td></tr>
+    <tr><td><code>app/wnba_pw_research_v13.py</code></td><td>Entrypoint &mdash; installs all plugins</td></tr>
+    <tr><td><code>app/pw_research_sync.py</code></td><td>Research data sync via Tailnet</td></tr>
+    <tr><td><code>app/pw_market_research.py</code></td><td>Market depth research</td></tr>
+    <tr><td><code>app/pw_scalping_research.py</code></td><td>Scalping opportunity analysis</td></tr>
+    <tr><td><code>app/pw_spread_capture.py</code></td><td>Forward spread capture</td></tr>
+    <tr><td><code>app/pw_game_reconstruction.py</code></td><td>Game timeline reconstruction</td></tr>
+    <tr><td><code>app/pw_spread_backtest.py</code></td><td>Spread strategy backtesting</td></tr>
+    <tr><td><code>app/structured_logging.py</code></td><td>JSON structured logging</td></tr>
+    <tr><td><code>scripts/termux_executor.py</code></td><td>On-device order executor</td></tr>
+    <tr><td><code>scripts/start_termux_executor.sh</code></td><td>Executor startup script</td></tr>
+    <tr><td><code>start.sh</code></td><td>Container entrypoint (Tailscale + Uvicorn)</td></tr>
+    <tr><td><code>Dockerfile</code></td><td>Docker container image</td></tr>
+    <tr><td><code>railway.json</code></td><td>Railway deployment configuration</td></tr>
+    <tr><td><code>research/upstream_nbamonitor/</code></td><td>Vendored NBAMonitor snapshot (read-only)</td></tr>
+    <tr><td><code>research/upstream_nrlmonitor/</code></td><td>Vendored NRLMonitor snapshot (research)</td></tr>
+  </tbody>
+</table>
+
+<h3>By Concept</h3>
+<table>
+  <thead><tr><th>Concept</th><th>Key Files</th></tr></thead>
+  <tbody>
+    <tr><td>Order execution</td><td><code>main.py</code>, <code>live_trading.py</code>, <code>termux_executor.py</code></td></tr>
+    <tr><td>Risk management</td><td><code>main.py</code> (<code>_risk_checks</code>), <code>.env.example</code></td></tr>
+    <tr><td>Signal ingestion</td><td><code>slack_ingest.py</code>, <code>pw_export_ingest.py</code>, <code>nfl_capper_ingest.py</code></td></tr>
+    <tr><td>WNBA trading</td><td><code>slack_wnba.py</code>, <code>wnba_pw_filters_v11.py</code>, <code>wnba_pw_strategy_test_v12.py</code></td></tr>
+    <tr><td>NFL/CFB trading</td><td><code>nfl_capper_ingest.py</code>, <code>cfb_capper_preview.py</code></td></tr>
+    <tr><td>Dashboard</td><td><code>dashboard.py</code>, <code>dashboard_*.py</code>, <code>wallet_dashboard.py</code></td></tr>
+    <tr><td>Deployment</td><td><code>start.sh</code>, <code>Dockerfile</code>, <code>railway.json</code></td></tr>
+    <tr><td>Tailscale VPN</td><td><code>start.sh</code>, <code>pw_export_ingest.py</code>, <code>pw_research_sync.py</code></td></tr>
+    <tr><td>Research</td><td><code>pw_spread_capture.py</code>, <code>pw_market_research.py</code>, <code>pw_spread_backtest.py</code></td></tr>
+    <tr><td>Termux</td><td><code>scripts/termux_executor.py</code>, <code>termux_executor_dashboard.py</code></td></tr>
+  </tbody>
+</table>
+
+<hr class="section-divider">
+
+<p style="color: var(--text-muted); font-size: 13px;">
+  Full engineering history is maintained in <a href="../DEVELOPMENT_NOTES.md">DEVELOPMENT_NOTES.md</a>.
+</p>
+
+</main>
+</div>
+
+<a href="#" class="back-to-top">Back to top</a>
+
+<script>
+// Sidebar active state
+const links = document.querySelectorAll('.nav-link');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      links.forEach(l => l.classList.remove('active'));
+      const id = entry.target.id;
+      const active = document.querySelector(`.nav-link[href="#${id}"]`);
+      if (active) active.classList.add('active');
+    }
+  });
+}, { rootMargin: '-80px 0px -70% 0px' });
+
+document.querySelectorAll('h2[id], h3[id]').forEach(el => observer.observe(el));
+
+// Mobile sidebar close on nav
+links.forEach(link => {
+  link.addEventListener('click', () => {
+    document.querySelector('.sidebar').classList.remove('open');
+  });
+});
+</script>
+
+</body>
+</html>
