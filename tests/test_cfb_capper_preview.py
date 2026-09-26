@@ -249,12 +249,62 @@ class CfbDashboardPanelTests(unittest.TestCase):
         self.assertIn('Syndicate - CFB', rendered)
         self.assertIn('/api/cfb-cappers/status', rendered)
         self.assertIn('preview_queued', rendered)
+        self.assertIn('queued_items', rendered)
+        self.assertIn('stale_items', rendered)
+        self.assertIn('Queued picks', rendered)
+        self.assertIn('Stale picks', rendered)
 
     def test_injection_is_idempotent(self):
         html = '<style></style>\n  <div class="tabs"></div>\n<script></script>'
         once = capper._inject_dashboard_panel(html)
         twice = capper._inject_dashboard_panel(once)
         self.assertEqual(once, twice)
+
+
+    def test_status_pick_items_show_recent_queue_details(self):
+        rows = [
+            {
+                "status": "PREVIEW_QUEUED",
+                "selection": "TEXAS ML",
+                "units": "1",
+                "stake_usdc": "10.00",
+                "posted_at": "2026-09-25T22:00:00+00:00",
+                "updated_at": "2026-09-25T22:01:00+00:00",
+                "market": "Texas vs Tennessee",
+                "outcome": "Texas",
+                "request_id": "exec-old",
+            },
+            {
+                "status": "PREVIEW_QUEUED",
+                "selection": "NAVY -6.5",
+                "units": "2",
+                "stake_usdc": "20.00",
+                "posted_at": "2026-09-25T22:30:00+00:00",
+                "updated_at": "2026-09-25T22:31:00+00:00",
+                "market": "Navy vs Air Force",
+                "outcome": "Navy",
+                "request_id": "exec-new",
+            },
+        ]
+        items = capper._recent_status_items(rows, "PREVIEW_QUEUED")
+        self.assertEqual([item["selection"] for item in items], ["NAVY -6.5", "TEXAS ML"])
+        self.assertEqual(items[0]["stake_usdc"], "20.00")
+        self.assertEqual(items[0]["market"], "Navy vs Air Force")
+
+    def test_status_pick_items_include_stale_reason(self):
+        rows = [
+            {
+                "status": "IGNORED_STALE",
+                "selection": "CLEMSON ML -135",
+                "units": "2",
+                "stake_usdc": "20.00",
+                "posted_at": "2026-09-25T20:00:00+00:00",
+                "reason": "pick age exceeds 180s freshness limit",
+            }
+        ]
+        items = capper._recent_status_items(rows, "IGNORED_STALE")
+        self.assertEqual(items[0]["selection"], "CLEMSON ML -135")
+        self.assertIn("180s", items[0]["reason"])
 
 
 class CfbPreviewSafetyTests(unittest.TestCase):
