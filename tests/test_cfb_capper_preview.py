@@ -348,6 +348,8 @@ class CfbDashboardPanelTests(unittest.TestCase):
         self.assertIn('Stale picks', rendered)
         self.assertIn('Previewed picks', rendered)
         self.assertIn('BUY LIVE', rendered)
+        self.assertIn('OPEN MARKET', rendered)
+        self.assertIn('Matched:', rendered)
         self.assertIn('/api/cfb-cappers/manual-buy/', rendered)
 
     def test_injection_is_idempotent(self):
@@ -555,6 +557,111 @@ class CfbPreviewSafetyTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["strategy_execution_mode"], "manual")
         self.assertEqual(calls[0][1]["asset_id"], "baylor-token")
         self.assertEqual(calls[0][1]["max_price"], "0.47")
+
+    def test_manual_buy_uses_saved_match_without_re_resolving_event(self):
+        saved = {
+            "match_status": "MATCHED",
+            "market_type": "spread",
+            "event_slug": "cfb-baylor-tcu-2026-09-26",
+            "event_title": "Baylor vs TCU",
+            "market": "Baylor +7",
+            "market_url": "https://polymarket.com/sports/cfb/cfb-baylor-tcu-2026-09-26",
+            "outcome": "Baylor",
+            "asset_id": "saved-baylor-token",
+        }
+
+        class _Book:
+            asks = [SimpleNamespace(price="0.47")]
+
+        class _Client:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def get_price(self, **kwargs):
+                self.asset_id = kwargs["asset_id"]
+                return "0.46"
+
+            def get_spread(self, **kwargs):
+                return "0.02"
+
+            def get_order_book(self, **kwargs):
+                return _Book()
+
+        core = SimpleNamespace(
+            MAX_AUTO_TRADE_USDC=Decimal("50"),
+            MAX_DAILY_BUDGET_USDC=Decimal("100"),
+            MAX_PRICE=Decimal("0.95"),
+            MAX_SPREAD=Decimal("0.08"),
+            EXECUTIONS_FILE=None,
+            _daily_budget_used=lambda: Decimal("0"),
+        )
+        calls = []
+
+        class _Remote:
+            def _queue_load(self):
+                return {}
+
+            def _expire_stale_buys_persisted(self):
+                return []
+
+            def _enqueue(self, action, payload):
+                calls.append((action, payload))
+                return {"id": "saved-match-buy"}
+
+        pick = _pick(
+            selection="BAYLOR +7",
+            team_hint="Baylor",
+            event_hints=["Baylor"],
+            bet_types=["spread"],
+            spread_lines=["+7"],
+        )
+
+        with (
+            patch.object(capper.live_control, "_executor_ready", return_value=(True, {})),
+            patch.object(capper, "_find_market", side_effect=AssertionError("must not re-resolve")),
+            patch.object(capper, "PublicClient", return_value=_Client()),
+            patch.object(capper.nfl, "_pending_auto_budget", return_value=Decimal("0")),
+        ):
+            result = capper._prepare_manual_buy(
+                pick,
+                core=core,
+                remote=_Remote(),
+                unit_usdc=Decimal("10"),
+                matched=saved,
+            )
+
+        self.assertEqual(result["asset_id"], "saved-baylor-token")
+        self.assertEqual(calls[0][1]["asset_id"], "saved-baylor-token")
+        self.assertEqual(calls[0][1]["market_url"], saved["market_url"])
+
+    def test_status_buy_available_only_after_polymarket_match(self):
+        unmatched = capper._status_pick_item(
+            {
+                "id": "unmatched",
+                "status": "IGNORED_STALE",
+                "selection": "CLEMSON ML",
+            }
+        )
+        self.assertFalse(unmatched["buy_available"])
+
+        matched = capper._status_pick_item(
+            {
+                "id": "matched",
+                "status": "IGNORED_STALE",
+                "selection": "CLEMSON ML",
+                "match_status": "MATCHED",
+                "market_type": "moneyline",
+                "market_url": "https://polymarket.com/sports/cfb/cfb-clemson-unc-2026-09-26",
+                "outcome": "Clemson",
+                "asset_id": "clemson-token",
+                "market": "Clemson vs UNC",
+            }
+        )
+        self.assertTrue(matched["buy_available"])
+        self.assertEqual(matched["market"], "Clemson vs UNC")
 
     def test_prepare_preview_respects_global_auto_trading_gate(self):
         core = SimpleNamespace(
