@@ -779,6 +779,58 @@ def _stats_from_executions(
     return out
 
 
+def _position_items(
+    executions: dict[str, Any],
+    label: str,
+    *,
+    sport: str = "NFL",
+    limit: int = 40,
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for rec in executions.values():
+        if not isinstance(rec, dict) or rec.get("parent_trade_id"):
+            continue
+        if rec.get("strategy_source") != label:
+            continue
+        record_sport = str(rec.get("strategy_sport") or "").upper()
+        if sport and record_sport and record_sport != str(sport).upper():
+            continue
+        status = str(rec.get("status") or "")
+        settlement = rec.get("settlement") or {}
+        result = str(settlement.get("result") or "").upper() or None
+        if result not in {"WIN", "LOSS", "PUSH"}:
+            result = None
+        quote = rec.get("quote") or {}
+        realized = rec.get("realized_pnl")
+        stake = rec.get("actual_cost_usdc") or rec.get("budget_usdc")
+        items.append({
+            "trade_id": rec.get("id"),
+            "selection": rec.get("strategy_selection") or quote.get("requested_outcome") or quote.get("market"),
+            "status": status,
+            "result": result,
+            "stake_usdc": stake,
+            "realized_pnl_usdc": realized,
+            "market": quote.get("market"),
+            "market_url": quote.get("market_url"),
+            "outcome": quote.get("resolved_outcome") or quote.get("requested_outcome"),
+            "submitted_at": rec.get("submitted_at") or rec.get("created_at"),
+            "closed_at": rec.get("closed_at"),
+            "sell_available": status in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"},
+            "finished": bool(
+                result
+                or status in {
+                    "SETTLED_WIN", "SETTLED_LOSS", "SETTLED_PUSH",
+                    "CLOSED", "CLOSED_RECONCILED",
+                }
+            ),
+        })
+    items.sort(
+        key=lambda item: str(item.get("closed_at") or item.get("submitted_at") or ""),
+        reverse=True,
+    )
+    return items[:limit]
+
+
 def install(*, app: Any, dashboard: Any, core: Any) -> None:
     global _INSTALLED
     if _INSTALLED:
@@ -1147,7 +1199,12 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     app.router.lifespan_context = _lifespan
 
     def _stats_payload() -> dict[str, Any]:
-        stats = _stats_from_executions(core._load(core.EXECUTIONS_FILE))
+        executions = core._load(core.EXECUTIONS_FILE)
+        if not isinstance(executions, dict):
+            executions = {}
+        stats = _stats_from_executions(executions)
+        for label in SOURCE_LABELS:
+            stats.setdefault(label, {})["positions"] = _position_items(executions, label, sport="NFL")
         signals = _load_signals()
         signal_summary = {
             "queued": sum(1 for x in signals.values() if (x or {}).get("status") in {"QUEUED", "EXECUTOR_DONE"}),
@@ -1185,7 +1242,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     if 'id="nflCapperStats"' not in html:
         panel = r"""
   <div class="nfl-capper-panel" id="nflCapperStats">
-    <div class="nfl-capper-head"><div><div class="label">NFL capper auto-trading</div><div class="nfl-capper-state" id="nflCapperState">Loading…</div></div><div class="nfl-capper-meta" id="nflCapperMeta"></div></div>
+    <div class="nfl-capper-head"><div><div class="label">NFL capper auto-trading</div><div class="nfl-capper-state" id="nflCapperState">Loading…</div></div><div><div class="nfl-capper-meta" id="nflCapperMeta"></div><button type="button" id="nflFinishedToggle" style="margin-top:8px" onclick="nflToggleFinished()">Hide finished</button></div></div>
     <div class="nfl-capper-grid">
       <div class="nfl-capper-card"><b>Slam - NFL</b><div class="nfl-capper-kpis" id="nflCapperSlam">—</div></div>
       <div class="nfl-capper-card"><b>Syndicate - NFL</b><div class="nfl-capper-kpis" id="nflCapperSyndicate">—</div></div>
@@ -1194,10 +1251,71 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
 """
         html = html.replace('  <div class="tabs">', panel + '  <div class="tabs">', 1)
         css = r"""
-.nfl-capper-panel{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px;margin:14px 0}.nfl-capper-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.nfl-capper-state{font-size:15px;font-weight:850;margin-top:5px}.nfl-capper-meta{font-size:12px;color:var(--muted);text-align:right;line-height:1.45}.nfl-capper-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.nfl-capper-card{border:1px solid var(--border);border-radius:10px;background:#0d1522;padding:13px}.nfl-capper-card>b{font-size:18px;line-height:1.3}.nfl-capper-kpis{font-size:14px;color:var(--muted);line-height:1.75;margin-top:7px}.nfl-capper-kpis .capper-pnl{font-size:17px;font-weight:900}.nfl-capper-kpis .capper-pnl.positive{color:#86efac}.nfl-capper-kpis .capper-pnl.negative{color:#fca5a5}.nfl-capper-kpis .capper-pnl.flat{color:var(--muted)}@media(max-width:650px){.nfl-capper-grid{grid-template-columns:1fr}.nfl-capper-head{flex-direction:column}.nfl-capper-meta{text-align:left}.nfl-capper-card>b{font-size:19px}.nfl-capper-kpis{font-size:15px}.nfl-capper-kpis .capper-pnl{font-size:18px}}
+.nfl-capper-panel{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px;margin:14px 0}.nfl-capper-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.nfl-capper-state{font-size:15px;font-weight:850;margin-top:5px}.nfl-capper-meta{font-size:12px;color:var(--muted);text-align:right;line-height:1.45}.nfl-capper-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.nfl-capper-card{border:1px solid var(--border);border-radius:10px;background:#0d1522;padding:13px}.nfl-capper-card>b{font-size:18px;line-height:1.3}.nfl-capper-kpis{font-size:14px;color:var(--muted);line-height:1.75;margin-top:7px}.nfl-capper-kpis .capper-pnl{font-size:17px;font-weight:900}.nfl-capper-kpis .capper-pnl.positive{color:#86efac}.nfl-capper-kpis .capper-pnl.negative{color:#fca5a5}.nfl-capper-kpis .capper-pnl.flat{color:var(--muted)}.nfl-position-row{margin-top:8px;padding:9px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.08)}.nfl-position-row.win{background:rgba(34,197,94,.11);border-color:rgba(34,197,94,.40);border-left:4px solid #22c55e}.nfl-position-row.loss{background:rgba(239,68,68,.10);border-color:rgba(239,68,68,.40);border-left:4px solid #ef4444}.nfl-position-row.push{background:rgba(245,158,11,.10);border-color:rgba(245,158,11,.38);border-left:4px solid #f59e0b}.nfl-position-row.open{background:rgba(59,130,246,.08);border-color:rgba(59,130,246,.32);border-left:4px solid #3b82f6}.nfl-position-title{font-size:15px;font-weight:850}.nfl-position-pnl{font-size:16px;font-weight:900}.nfl-position-pnl.positive{color:#86efac}.nfl-position-pnl.negative{color:#fca5a5}@media(max-width:650px){.nfl-capper-grid{grid-template-columns:1fr}.nfl-capper-head{flex-direction:column}.nfl-capper-meta{text-align:left}.nfl-capper-card>b{font-size:19px}.nfl-capper-kpis{font-size:15px}.nfl-capper-kpis .capper-pnl{font-size:18px}.nfl-position-title{font-size:16px}.nfl-position-pnl{font-size:17px}}
 """
         html = html.replace("</style>", css + "</style>", 1)
         js = r"""
+function nflEsc(v){
+ return String(v??'').replace(/[&<>\"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch]));
+}
+let nflHideFinished=localStorage.getItem('nflHideFinished')==='1';
+let nflLastCappers={};
+function nflUpdateFinishedToggle(){
+ const btn=document.getElementById('nflFinishedToggle');
+ if(btn)btn.textContent=nflHideFinished?'Show finished':'Hide finished';
+}
+function nflToggleFinished(){
+ nflHideFinished=!nflHideFinished;
+ localStorage.setItem('nflHideFinished',nflHideFinished?'1':'0');
+ nflUpdateFinishedToggle();
+ const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
+ if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL']);
+ if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL']);
+}
+function nflPositionList(x){
+ const items=Array.isArray(x.positions)?x.positions:[];
+ const visible=nflHideFinished?items.filter(item=>!item.finished):items;
+ if(!visible.length)return '<div style="margin-top:9px;opacity:.7">'+(nflHideFinished&&items.length?'Finished positions hidden.':'No capper positions yet.')+'</div>';
+ return '<div style="margin-top:9px"><b>Positions</b>'+visible.map(item=>{
+  const result=String(item.result||'').toUpperCase();
+  const cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':item.sell_available?'open':'';
+  const badge=result|| (item.sell_available?'OPEN':String(item.status||''));
+  const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
+  const pnl=raw===null?'':('<div class="nfl-position-pnl '+(raw>0?'positive':raw<0?'negative':'')+'">P/L '+(raw>0?'+':'')+'$'+raw.toFixed(2)+'</div>');
+  const stake=item.stake_usdc===null||item.stake_usdc===undefined?'':' · Stake $'+Number(item.stake_usdc).toFixed(2);
+  const sell=(item.trade_id&&item.sell_available)?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+(badge?' · '+nflEsc(badge):'')+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+sell+'</div>';
+ }).join('')+'</div>';
+}
+async function nflSellPosition(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'});
+  const q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'});
+   const sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){
+    btn.textContent='SOLD';
+    await loadNflCapperStats();
+    return;
+   }
+   if(sd.status==='FAILED')throw new Error(sd.error||'SELL failed');
+  }
+  throw new Error('SELL timed out waiting for Termux');
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
 function nflCapperLine(x){
  if(!x)return 'No tracked trades yet';
  const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
@@ -1205,7 +1323,8 @@ function nflCapperLine(x){
  const rawPnl=x.realized_pnl_usdc===null||x.realized_pnl_usdc===undefined?null:Number(x.realized_pnl_usdc);
  const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'$'+rawPnl.toFixed(2);
  const pnlClass=rawPnl===null||rawPnl===0?'flat':(rawPnl>0?'positive':'negative');
- return '<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">P/L '+pnl+'</span> · ROI '+roi+'</div>';
+ const metrics='<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">P/L '+pnl+'</span> · ROI '+roi+'</div>';
+ return metrics+nflPositionList(x);
 }
 async function loadNflCapperStats(){
  try{
@@ -1214,9 +1333,11 @@ async function loadNflCapperStats(){
   const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
   if(state)state.textContent=(d.enabled?'ENABLED':'DISABLED')+(d.auto_trading?' · AUTO LIVE':' · AUTO TRADING OFF');
   if(meta)meta.textContent='1u = $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · poll '+(d.poll_seconds||0)+'s';
+  nflLastCappers=d.cappers||{};
   const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
-  if(s)s.innerHTML=nflCapperLine((d.cappers||{})['Slam - NFL']);
-  if(y)y.innerHTML=nflCapperLine((d.cappers||{})['Syndicate - NFL']);
+  if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL']);
+  if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL']);
+  nflUpdateFinishedToggle();
  }catch(e){
   const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
  }

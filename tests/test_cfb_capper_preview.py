@@ -1279,6 +1279,132 @@ class CfbPreviewSafetyTests(unittest.TestCase):
             )
 
 
+class CfbScoreboardFallbackTests(unittest.TestCase):
+    @staticmethod
+    def _response(team_a, score_a, team_b, score_b, event_id="game-1"):
+        payload = {
+            "events": [
+                {
+                    "id": event_id,
+                    "name": f"{team_a} vs {team_b}",
+                    "competitions": [
+                        {
+                            "status": {"type": {"completed": True}},
+                            "competitors": [
+                                {
+                                    "score": str(score_a),
+                                    "team": {
+                                        "displayName": f"{team_a} Team",
+                                        "shortDisplayName": team_a,
+                                        "name": team_a,
+                                        "location": team_a,
+                                        "abbreviation": team_a[:4].upper(),
+                                    },
+                                },
+                                {
+                                    "score": str(score_b),
+                                    "team": {
+                                        "displayName": f"{team_b} Team",
+                                        "shortDisplayName": team_b,
+                                        "name": team_b,
+                                        "location": team_b,
+                                        "abbreviation": team_b[:4].upper(),
+                                    },
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+
+        class _Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return payload
+
+        return _Response()
+
+    def test_northwestern_plus_21_grades_win_from_final_score(self):
+        pick = _pick(
+            posted_at="2026-09-25T22:32:01+00:00",
+            selection="NORTHWESTERN 21",
+            team_hint="Northwestern",
+            event_hints=["Northwestern"],
+            spread_lines=["+21"],
+        )
+        with patch.object(
+            capper.httpx,
+            "get",
+            return_value=self._response("Northwestern", 23, "Indiana", 29),
+        ):
+            result = capper._scoreboard_result_for_pick(pick)
+
+        self.assertEqual(result["pick_result"], "WIN")
+        self.assertIn("Northwestern 23", result["final_score"])
+        self.assertEqual(result["result_source"], "espn_final_score")
+
+    def test_army_moneyline_grades_win_from_final_score(self):
+        pick = _pick(
+            source="The Syndicate",
+            source_key="syndicate",
+            posted_at="2026-09-25T15:39:48+00:00",
+            selection="Army To Win",
+            team_hint="Army",
+            event_hints=["Army"],
+            bet_types=["moneyline"],
+            spread_lines=[],
+            units=2,
+        )
+        with patch.object(
+            capper.httpx,
+            "get",
+            return_value=self._response("Army", 21, "Temple", 17),
+        ):
+            result = capper._scoreboard_result_for_pick(pick)
+
+        self.assertEqual(result["pick_result"], "WIN")
+
+    def test_temple_plus_3_5_grades_loss_at_21_17(self):
+        pick = _pick(
+            posted_at="2026-09-25T19:46:30+00:00",
+            selection="TEMPLE +3.5",
+            team_hint="Temple",
+            event_hints=["Temple"],
+            spread_lines=["+3.5"],
+        )
+        with patch.object(
+            capper.httpx,
+            "get",
+            return_value=self._response("Army", 21, "Temple", 17),
+        ):
+            result = capper._scoreboard_result_for_pick(pick)
+
+        self.assertEqual(result["pick_result"], "LOSS")
+
+    def test_open_execution_exposes_sell_button_state(self):
+        record = {
+            "id": "cfb-signal-open",
+            "status": "MATCHED_LIVE",
+            "selection": "CLEMSON ML",
+        }
+        executions = {
+            "trade-open": {
+                "id": "trade-open",
+                "strategy_pick_id": "cfb-signal-open",
+                "status": "ORDER_SUBMITTED",
+                "budget_usdc": "10",
+            }
+        }
+
+        item = capper._status_pick_item(record, executions)
+
+        self.assertEqual(item["trade_id"], "trade-open")
+        self.assertTrue(item["sell_available"])
+
+
 class CfbFinishedResultsAndPerformanceTests(unittest.TestCase):
     def test_resolved_signal_outcome_uses_authoritative_token_resolution(self):
         yes = SimpleNamespace(label="Clemson", token_id="clemson-token", price="1")
@@ -1379,6 +1505,10 @@ class CfbFinishedResultsAndPerformanceTests(unittest.TestCase):
         self.assertIn("label:'WIN'", rendered)
         self.assertIn("label:'LOSS'", rendered)
         self.assertIn("NOT TRADED", rendered)
+        self.assertIn("cfbFinishedToggle", rendered)
+        self.assertIn("Hide finished", rendered)
+        self.assertIn("SELL POSITION", rendered)
+        self.assertIn("cfbSellPosition", rendered)
 
 
 if __name__ == "__main__":

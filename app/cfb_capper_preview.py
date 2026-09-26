@@ -7,7 +7,7 @@ import os
 import re
 import uuid
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
@@ -224,6 +224,162 @@ def _event_hints_for_pick(pick: dict[str, Any], kind: str) -> list[str]:
         return explicit
     hint = str(pick.get("team_hint") or "").strip()
     return [hint] if hint else []
+
+
+def _espn_competitor_names(competitor: dict[str, Any]) -> list[str]:
+    team = competitor.get("team") or {}
+    values = [
+        team.get("displayName"),
+        team.get("shortDisplayName"),
+        team.get("name"),
+        team.get("location"),
+        team.get("abbreviation"),
+    ]
+    return [str(value).strip() for value in values if str(value or "").strip()]
+
+
+def _espn_hint_matches_competitor(hint: str, competitor: dict[str, Any]) -> bool:
+    needle = _norm_text(hint)
+    if not needle:
+        return False
+    for value in _espn_competitor_names(competitor):
+        candidate = _norm_text(value)
+        if not candidate:
+            continue
+        if needle == candidate or f" {needle} " in f" {candidate} " or f" {candidate} " in f" {needle} ":
+            return True
+    return False
+
+
+def _scoreboard_result_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
+    """Grade a completed CFB pick from ESPN's final score when the market is unavailable."""
+    kind, _ = _classify_pick(pick)
+    posted = _parse_iso(pick.get("posted_at"))
+    if kind is None or posted is None:
+        return None
+
+    hints = _event_hints_for_pick(pick, kind)
+    if not hints:
+        return None
+
+    matched: dict[str, dict[str, Any]] = {}
+    for offset in (0, -1, 1):
+        game_day = (posted + timedelta(days=offset)).strftime("%Y%m%d")
+        try:
+            response = httpx.get(
+                "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
+                params={"dates": game_day, "limit": 1000},
+                timeout=12,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            continue
+
+        for event in payload.get("events") or []:
+            competitions = event.get("competitions") or []
+            if not competitions:
+                continue
+            competition = competitions[0] or {}
+            status = ((competition.get("status") or {}).get("type") or {})
+            if not bool(status.get("completed")):
+                continue
+            competitors = competition.get("competitors") or []
+            if len(competitors) != 2:
+                continue
+            if not all(any(_espn_hint_matches_competitor(hint, comp) for comp in competitors) for hint in hints):
+                continue
+            event_id = str(event.get("id") or "")
+            if event_id:
+                matched[event_id] = event
+
+    if len(matched) != 1:
+        return None
+
+    event = next(iter(matched.values()))
+    competition = (event.get("competitions") or [{}])[0] or {}
+    competitors = competition.get("competitors") or []
+    try:
+        scores = [Decimal(str(comp.get("score"))) for comp in competitors]
+    except Exception:
+        return None
+
+    short_names = []
+    for comp in competitors:
+        team = comp.get("team") or {}
+        short_names.append(
+            str(team.get("shortDisplayName") or team.get("displayName") or team.get("name") or "").strip()
+        )
+    final_score = f"{short_names[0]} {scores[0]:f} - {short_names[1]} {scores[1]:f}"
+
+    result: str | None = None
+    selected_score: Decimal | None = None
+    opponent_score: Decimal | None = None
+
+    if kind in {"moneyline", "spread"}:
+        selected_hint = str(pick.get("team_hint") or "").strip()
+        selected_index = next(
+            (idx for idx, comp in enumerate(competitors) if _espn_hint_matches_competitor(selected_hint, comp)),
+            None,
+        )
+        if selected_index is None:
+            return None
+        other_index = 1 - selected_index
+        selected_score = scores[selected_index]
+        opponent_score = scores[other_index]
+        if kind == "moneyline":
+            result = "WIN" if selected_score > opponent_score else "LOSS" if selected_score < opponent_score else "PUSH"
+        else:
+            try:
+                line = Decimal(str((pick.get("spread_lines") or [])[0]))
+            except Exception:
+                return None
+            adjusted = selected_score + line
+            result = "WIN" if adjusted > opponent_score else "LOSS" if adjusted < opponent_score else "PUSH"
+    elif kind == "total":
+        try:
+            line = Decimal(str(pick.get("total_line")))
+        except Exception:
+            return None
+        total = scores[0] + scores[1]
+        side = str(pick.get("total_side") or "").upper()
+        if total == line:
+            result = "PUSH"
+        elif side == "OVER":
+            result = "WIN" if total > line else "LOSS"
+        elif side == "UNDER":
+            result = "WIN" if total < line else "LOSS"
+
+    if result is None:
+        return None
+
+    return {
+        "pick_result": result,
+        "result_source": "espn_final_score",
+        "result_event_id": str(event.get("id") or ""),
+        "result_event_title": str(event.get("name") or event.get("shortName") or ""),
+        "final_score": final_score,
+        "result_checked_at": _now_iso(),
+        "selected_final_score": str(selected_score) if selected_score is not None else None,
+        "opponent_final_score": str(opponent_score) if opponent_score is not None else None,
+    }
+
+
+def _apply_scoreboard_result(record: dict[str, Any], pick: dict[str, Any] | None = None) -> bool:
+    if str(record.get("pick_result") or "").upper() in {"WIN", "LOSS", "PUSH"}:
+        return False
+    source_pick = pick if isinstance(pick, dict) else record.get("pick")
+    if not isinstance(source_pick, dict):
+        return False
+    resolved = _scoreboard_result_for_pick(source_pick)
+    if not resolved:
+        return False
+    changed = False
+    for key, value in resolved.items():
+        if record.get(key) != value:
+            record[key] = value
+            changed = True
+    return changed
 
 
 def _event_date(event: Any) -> date | None:
@@ -679,6 +835,8 @@ def _refresh_spread_alternatives(record: dict[str, Any]) -> bool:
                         record["status"] = "EVENT_CLOSED"
                         record["reason"] = "matched Polymarket event/market is closed"
                         changed = True
+                    if _apply_scoreboard_result(record, pick):
+                        changed = True
                     return changed
             except Exception:
                 pass
@@ -1000,6 +1158,7 @@ def _repair_stored_future_match(record: dict[str, Any]) -> bool:
             "legacy future-game match rejected; original nearby event is no longer open"
         )
         record["match_error"] = f"{type(exact_exc).__name__}: {exact_exc}"
+        _apply_scoreboard_result(record, pick)
         return True
 
     record.update(corrected)
@@ -1088,6 +1247,8 @@ def _refresh_record_runtime(record: dict[str, Any]) -> bool:
     """Refresh pregame lifecycle and dashboard odds for one matched signal."""
     match = _saved_market_match(record)
     if match is None:
+        if str(record.get("status") or "") == "EVENT_CLOSED":
+            return _apply_scoreboard_result(record)
         return False
 
     changed = False
@@ -1137,6 +1298,8 @@ def _refresh_record_runtime(record: dict[str, Any]) -> bool:
                 if record.get("settlement_error") != error:
                     record["settlement_error"] = error
                     changed = True
+        if _apply_scoreboard_result(record):
+            changed = True
         return changed
 
     if phase == "LIVE":
@@ -1421,7 +1584,11 @@ def _status_pick_item(
         "signal_age_seconds": age_seconds,
         "units": record.get("units"),
         "stake_usdc": record.get("stake_usdc"),
-        "match_status": "MATCHED" if saved_match else record.get("match_status"),
+        "match_status": (
+            record.get("match_status")
+            if record.get("match_status") == "INVALID_FUTURE_MATCH"
+            else "MATCHED" if saved_match else record.get("match_status")
+        ),
         "market_type": record.get("market_type"),
         "market": record.get("market"),
         "market_url": record.get("market_url"),
@@ -1457,10 +1624,15 @@ def _status_pick_item(
         "settlement_terminal_price": record.get("settlement_terminal_price"),
         "settlement_error": record.get("settlement_error"),
         "trade_executed": execution is not None,
+        "trade_id": (execution or {}).get("id"),
         "trade_status": (execution or {}).get("status"),
         "trade_result": trade_result,
         "trade_pnl_usdc": realized_pnl,
         "trade_stake_usdc": trade_stake,
+        "sell_available": bool((execution or {}).get("status") in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}),
+        "result_source": record.get("result_source"),
+        "result_event_title": record.get("result_event_title"),
+        "final_score": record.get("final_score"),
     }
 
 
@@ -1509,7 +1681,7 @@ def _inject_dashboard_panel(html: str) -> str:
 
     panel = r"""
   <div class="nfl-capper-panel" id="cfbCapperStats">
-    <div class="nfl-capper-head"><div><div class="label">CFB capper status</div><div class="nfl-capper-state" id="cfbCapperState">Loading…</div></div><div class="nfl-capper-meta" id="cfbCapperMeta"></div></div>
+    <div class="nfl-capper-head"><div><div class="label">CFB capper status</div><div class="nfl-capper-state" id="cfbCapperState">Loading…</div></div><div><div class="nfl-capper-meta" id="cfbCapperMeta"></div><button type="button" id="cfbFinishedToggle" style="margin-top:8px" onclick="cfbToggleFinished()">Hide finished</button></div></div>
     <div class="nfl-capper-grid">
       <div class="nfl-capper-card"><b>Slam - CFB</b><div class="nfl-capper-kpis" id="cfbCapperSlam">—</div></div>
       <div class="nfl-capper-card"><b>Syndicate - CFB</b><div class="nfl-capper-kpis" id="cfbCapperSyndicate">—</div></div>
@@ -1592,20 +1764,24 @@ function cfbPhaseVisual(item){
 }
 function cfbPickList(title,items,kind){
  if(!Array.isArray(items)||!items.length)return '';
- const rows=items.map(item=>{
+ const visible=cfbHideFinished?items.filter(item=>String(item.event_phase||'').toUpperCase()!=='CLOSED'&&String(item.status||'').toUpperCase()!=='EVENT_CLOSED'):items;
+ if(!visible.length)return '<div style="margin-top:8px;opacity:.7">'+(cfbHideFinished?'Finished games hidden.':'No signals.')+'</div>';
+ const rows=visible.map(item=>{
   const meta=[];
   if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(cfbEsc(item.units)+'u');
   if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('\u0024'+Number(item.stake_usdc).toFixed(2));
   if(item.posted_at)meta.push('posted '+cfbPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+cfbAge(item.signal_age_seconds):''));
-  if(item.market)meta.push('Matched: '+cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
+  if(item.market&&String(item.match_status||'')!=='INVALID_FUTURE_MATCH')meta.push('Matched: '+cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
+  if(item.result_event_title)meta.push('Game '+cfbEsc(item.result_event_title));
   if(item.event_phase==='LIVE')meta.push('GAME LIVE');
   else if(item.event_phase==='CLOSED')meta.push('GAME FINISHED');
   else if(item.event_start_at)meta.push('starts '+cfbPickTime(item.event_start_at));
-  if(item.best_ask!==null&&item.best_ask!==undefined&&item.best_ask!==''){
+  if(item.event_phase!=='CLOSED'&&item.best_ask!==null&&item.best_ask!==undefined&&item.best_ask!==''){
    const cents=(Number(item.best_ask)*100).toFixed(1).replace(/\.0$/,'');
    meta.push('Live BUY '+cents+'¢'+(item.live_odds_american?' ('+cfbEsc(item.live_odds_american)+')':''));
   }
-  if(item.live_quote_error)meta.push('live odds unavailable');
+  if(item.event_phase!=='CLOSED'&&item.live_quote_error)meta.push('live odds unavailable');
+  if(item.final_score)meta.push('Final '+cfbEsc(item.final_score));
   if(item.status)meta.push('status '+cfbEsc(item.status));
   if(item.reason&&['pregame','live','closed','unsupported','failed','signals'].includes(kind))meta.push(cfbEsc(item.reason));
   if(item.last_error&&['retrying','failed','signals'].includes(kind))meta.push(cfbEsc(item.last_error));
@@ -1623,8 +1799,9 @@ function cfbPickList(title,items,kind){
    const odds=alt.live_odds_american?' ('+cfbEsc(alt.live_odds_american)+')':'';
    return '<button type="button" style="margin-top:6px;margin-right:6px" data-signal-id="'+cfbEsc(item.signal_id)+'" data-alt-id="'+cfbEsc(alt.alternative_id)+'" onclick="cfbManualAltBuy(this.dataset.signalId,this.dataset.altId,this)"'+(locked?' disabled':'')+'>BUY '+cfbEsc(alt.spread_line)+' @ '+cents+'¢'+odds+relative+'</button>';
   }).join('');
-  const marketAction=(item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+cfbEsc(item.market_url)+'">OPEN MARKET</a>':'';
-  const action=buyAction+altActions+marketAction;
+  const sellAction=(item.trade_id&&item.sell_available)?'<button type="button" style="margin-top:6px;margin-left:6px" data-trade-id="'+cfbEsc(item.trade_id)+'" onclick="cfbSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  const marketAction=(item.event_phase!=='CLOSED'&&String(item.match_status||'')!=='INVALID_FUTURE_MATCH'&&item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+cfbEsc(item.market_url)+'">OPEN MARKET</a>':'';
+  const action=buyAction+altActions+sellAction+marketAction;
   const visual=cfbPhaseVisual(item);
   const badge=visual.label?'<span style="display:inline-block;margin-left:7px;padding:2px 6px;border-radius:999px;font-size:12px;font-weight:850;letter-spacing:.03em;vertical-align:1px;'+visual.badge+'">'+visual.label+'</span>':'';
   let pnlLine='';
@@ -1673,6 +1850,48 @@ async function cfbManualAltBuy(signalId,altId,btn){
   btn.textContent=original;
   alert(String(e.message||e));
  }
+}
+async function cfbSellPosition(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'});
+  const q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'});
+   const sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){
+    btn.textContent='SOLD';
+    await loadCfbCapperStats();
+    return;
+   }
+   if(sd.status==='FAILED')throw new Error(sd.error||'SELL failed');
+  }
+  throw new Error('SELL timed out waiting for Termux');
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+let cfbHideFinished=localStorage.getItem('cfbHideFinished')==='1';
+function cfbUpdateFinishedToggle(){
+ const btn=document.getElementById('cfbFinishedToggle');
+ if(btn)btn.textContent=cfbHideFinished?'Show finished':'Hide finished';
+}
+function cfbToggleFinished(){
+ cfbHideFinished=!cfbHideFinished;
+ localStorage.setItem('cfbHideFinished',cfbHideFinished?'1':'0');
+ cfbUpdateFinishedToggle();
+ const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
+ if(s&&cfbLastSources['Slam - CFB'])s.innerHTML=cfbCapperLine(cfbLastSources['Slam - CFB'],'slam');
+ if(y&&cfbLastSources['Syndicate - CFB'])y.innerHTML=cfbCapperLine(cfbLastSources['Syndicate - CFB'],'syndicate');
 }
 const cfbActiveTabs={slam:'signals',syndicate:'signals'};
 let cfbLastSources={};
@@ -1727,6 +1946,7 @@ async function loadCfbCapperStats(){
   const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
   if(s)s.innerHTML=cfbCapperLine(cfbLastSources['Slam - CFB'],'slam');
   if(y)y.innerHTML=cfbCapperLine(cfbLastSources['Syndicate - CFB'],'syndicate');
+  cfbUpdateFinishedToggle();
  }catch(e){
   const state=document.getElementById('cfbCapperState');if(state)state.textContent='Status unavailable: '+String(e);
  }
