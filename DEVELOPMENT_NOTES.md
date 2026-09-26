@@ -1,3 +1,13 @@
+## 2026-09-26 — Capper missed P/L tracking (#112)
+
+- Added `Missed P/L` to every Slam/Syndicate NFL and CFB capper performance card.
+- A missed call is a graded Telegram signal with no real execution record. Real executions are excluded even after they are sold or settled; paper-only executions still count as missed real trades.
+- The dashboard shows both the number of graded missed calls and their net hypothetical P/L.
+- Hypothetical missed P/L uses the configured $10-per-unit stake (or the sport-specific configured unit value) and the odds carried by the Telegram pick. If neither decimal nor American odds are present, the existing audit default of -115 is used. WIN earns stake × (decimal odds - 1), LOSS loses the stake, and PUSH is $0.
+- CFB uses its existing persisted pick results, including final-score fallback grading, so already-finished untraded calls feed the missed-P/L total immediately.
+- NFL signals now persist the parsed Telegram pick and periodically grade supported full-game moneyline/spread/total calls from completed ESPN NFL scores. This lets stale, failed, or otherwise unexecuted NFL calls populate missed P/L after the game finishes.
+- NFL final-score lookup is throttled and caches scoreboard days within each grading pass to avoid repeated requests across signals.
+- Added tests for -115 fallback math, posted decimal odds, exclusion of real trades, treatment of paper-only executions, NFL spread grading, and the CFB dashboard label.
 ## 2026-09-26 — Regrade unresolved closed CFB signals (#110)
 
 - Production verification after #109 showed Northwestern +21 remained `EVENT_CLOSED` without `pick_result` because closed alternate-market records no longer entered the alternate refresh branch.
