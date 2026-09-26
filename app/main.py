@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, HttpUrl
 from polymarket import PublicClient, SecureClient
 from app.structured_logging import configure_logging, log_event
@@ -504,7 +504,7 @@ def _watch_health_snapshot(now: datetime | None = None) -> dict:
 @app.get("/health")
 def health():
     watch_health = _watch_health_snapshot()
-    return {
+    payload = {
         "ok": bool(watch_health["healthy"]),
         "version": "0.3.0",
         "live_trading": live_trading_enabled(),
@@ -519,6 +519,7 @@ def health():
         "max_spread": str(MAX_SPREAD),
         "block_political_auto": BLOCK_POLITICAL_AUTO,
     }
+    return JSONResponse(status_code=200 if watch_health["healthy"] else 503, content=payload)
 
 
 @app.post("/prepare")
