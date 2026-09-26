@@ -52,7 +52,10 @@ def _parse_alert(text: str) -> dict[str, Any]:
     cleaned = _clean(raw)
     teams = ingest._basketball_team_mentions(raw)
 
-    header = re.search(r"Predicted\s+Winner\s*[—-]\s*([^\n]+)", cleaned, flags=re.I)
+    header = (
+        re.search(r"Predicted\s+Winner\s*[—-]\s*([^\n]+)", cleaned, flags=re.I)
+        or re.search(r"Predicted\s+Winner\s*:\s*([^\n]+)", cleaned, flags=re.I)
+    )
     alert_type = "predicted_winner" if header else "other"
     selection = _canonical_team(header.group(1)) if header else None
 
@@ -88,6 +91,10 @@ def _parse_alert(text: str) -> dict[str, Any]:
     if selection and selection not in game_teams:
         game_teams.insert(0, selection)
 
+    game_id_match = re.search(r"gameId/(\d+)", raw, flags=re.I)
+    event_ts_matches = list(re.finditer(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \+08)", raw))
+    event_ts = event_ts_matches[-1].group(1) if event_ts_matches else None
+
     parsed = {
         "raw_text": raw,
         "teams": game_teams or teams,
@@ -113,6 +120,14 @@ def _parse_alert(text: str) -> dict[str, Any]:
         "edge": edge_match.group(1) if edge_match else None,
         "scenario": _field(cleaned, "Scenario"),
     }
+    if selection and game_id_match:
+        parsed["pw"] = {
+            "game_id": game_id_match.group(1),
+            "predicted_winner": selection,
+            "event_ts": event_ts,
+            "quarter": parsed.get("quarter"),
+            "win_probability": win_probability,
+        }
     return parsed
 
 
