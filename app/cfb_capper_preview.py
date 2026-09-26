@@ -874,7 +874,7 @@ def _recent_status_items(
     rows: list[dict[str, Any]],
     status: str,
     *,
-    limit: int = 8,
+    limit: int = 30,
 ) -> list[dict[str, Any]]:
     matching = [row for row in rows if row.get("status") == status]
     matching.sort(
@@ -892,7 +892,7 @@ def _recent_status_items(
 def _recent_all_items(
     rows: list[dict[str, Any]],
     *,
-    limit: int = 30,
+    limit: int = 60,
 ) -> list[dict[str, Any]]:
     ordered = list(rows)
     ordered.sort(
@@ -953,8 +953,9 @@ function cfbPickList(title,items,kind){
    meta.push('Live BUY '+cents+'¢'+(item.live_odds_american?' ('+cfbEsc(item.live_odds_american)+')':''));
   }
   if(item.live_quote_error)meta.push('live odds unavailable');
-  if((kind==='pregame'||kind==='live')&&item.reason)meta.push(cfbEsc(item.reason));
-  if(kind==='retrying'&&item.last_error)meta.push(cfbEsc(item.last_error));
+  if(item.status)meta.push('status '+cfbEsc(item.status));
+  if(item.reason&&['pregame','live','closed','unsupported','failed','signals'].includes(kind))meta.push(cfbEsc(item.reason));
+  if(item.last_error&&['retrying','failed','signals'].includes(kind))meta.push(cfbEsc(item.last_error));
   if(!item.buy_available&&item.match_status!=='MATCHED')meta.push('Polymarket match pending');
   if(item.manual_buy_status)meta.push('manual BUY '+cfbEsc(item.manual_buy_status));
   if(item.manual_buy_error)meta.push(cfbEsc(item.manual_buy_error));
