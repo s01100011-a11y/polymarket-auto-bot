@@ -603,6 +603,48 @@ class CfbLifecycleAndOddsTests(unittest.TestCase):
         self.assertEqual(record["best_ask"], "0.62")
         self.assertEqual(record["live_odds_american"], "-163")
 
+    def test_runtime_rejects_legacy_temple_future_game_rollover(self):
+        record = {
+            "id": "temple",
+            "status": "MATCHED_PREGAME",
+            "match_status": "MATCHED",
+            "market_type": "spread",
+            "event_slug": "cfb-templ-sfl-2026-10-03",
+            "event_title": "Temple vs South Florida",
+            "event_start_at": "2026-10-03T23:00:00+00:00",
+            "event_start_checked_at": "2026-09-26T02:39:00+00:00",
+            "market_accepting_orders": True,
+            "market_url": "https://polymarket.com/sports/cfb/cfb-templ-sfl-2026-10-03",
+            "outcome": "Temple",
+            "asset_id": "wrong-future-temple-token",
+            "pick": _pick(
+                selection="TEMPLE +3.5",
+                posted_at="2026-09-25T19:46:30+00:00",
+                team_hint="Temple",
+                event_hints=["Temple"],
+                bet_types=["spread"],
+                spread_lines=["+3.5"],
+            ),
+        }
+        self.assertFalse(capper._stored_match_within_pick_window(record))
+        with (
+            patch.object(
+                capper,
+                "_resolve_market_match",
+                side_effect=ValueError("No nearby dated Polymarket CFB event matched the one-team pick"),
+            ),
+            patch.object(capper, "_find_spread_alternatives", return_value=[]),
+            patch.object(capper, "_read_live_buy_quote", side_effect=AssertionError("wrong future event must never quote")),
+        ):
+            changed = capper._refresh_record_runtime(record)
+
+        self.assertTrue(changed)
+        self.assertEqual(record["status"], "EVENT_CLOSED")
+        self.assertEqual(record["event_phase"], "CLOSED")
+        self.assertEqual(record["match_status"], "INVALID_FUTURE_MATCH")
+        self.assertFalse(record["market_accepting_orders"])
+        self.assertIn("future-game match rejected", record["reason"])
+
     def test_runtime_refresh_moves_finished_pregame_record_to_closed(self):
         record = {
             "id": "temple",

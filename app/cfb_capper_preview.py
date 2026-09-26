@@ -857,6 +857,110 @@ def _saved_market_match(record: dict[str, Any] | None, kind: str | None = None) 
     }
 
 
+def _stored_match_within_pick_window(record: dict[str, Any]) -> bool:
+    """Reject legacy one-team matches that point at a later unrelated game."""
+    pick = record.get("pick")
+    if not isinstance(pick, dict):
+        return True
+    kind, _ = _classify_pick(pick)
+    if kind is None:
+        return True
+    hints = _event_hints_for_pick(pick, kind)
+    if len(hints) != 1:
+        return True
+
+    posted = _parse_iso(pick.get("posted_at"))
+    if posted is None:
+        return True
+
+    event_day = None
+    start = _parse_iso(record.get("event_start_at"))
+    if start is not None:
+        event_day = start.date()
+    if event_day is None:
+        slug = str(record.get("event_slug") or "")
+        match = re.search(r"\b(20\d{2})-(\d{2})-(\d{2})\b", slug)
+        if match:
+            try:
+                event_day = date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+            except ValueError:
+                event_day = None
+    if event_day is None:
+        return True
+
+    delta_days = (event_day - posted.date()).days
+    return -1 <= delta_days <= 4
+
+
+def _repair_stored_future_match(record: dict[str, Any]) -> bool:
+    """Migrate a legacy wrong-game match or close it if the original event is gone."""
+    pick = record.get("pick")
+    if not isinstance(pick, dict):
+        return False
+    kind, reason = _classify_pick(pick)
+    if kind is None:
+        record["status"] = "IGNORED_UNSUPPORTED"
+        record["reason"] = reason or "unsupported CFB pick"
+        return True
+
+    try:
+        corrected = _resolve_market_match(pick, kind)
+    except Exception as exact_exc:
+        if kind == "spread":
+            try:
+                alternatives = _find_spread_alternatives(pick)
+            except Exception:
+                alternatives = []
+            if alternatives:
+                first = alternatives[0]
+                for key in (
+                    "asset_id", "outcome", "market", "matched_at",
+                    "event_closed", "event_ended", "event_live",
+                    "event_finished_at", "game_status", "market_accepting_orders",
+                ):
+                    record.pop(key, None)
+                record["live_alternatives"] = alternatives
+                record["match_status"] = "ALTERNATE_AVAILABLE"
+                record["event_slug"] = first.get("event_slug")
+                record["event_title"] = first.get("event_title")
+                record["event_start_at"] = first.get("event_start_at")
+                record["event_start_checked_at"] = first.get("event_start_checked_at")
+                record["event_phase"] = first.get("event_phase")
+                record["market_url"] = first.get("market_url")
+                record["status"] = (
+                    "MATCHED_LIVE_ALTERNATE"
+                    if first.get("event_phase") == "LIVE"
+                    else "MATCHED_PREGAME_ALTERNATE"
+                )
+                record["reason"] = (
+                    "legacy future-game match rejected; showing explicit nearby live alternatives"
+                )
+                record["match_error"] = f"{type(exact_exc).__name__}: {exact_exc}"
+                return True
+
+        # The previously stored event is known to be outside the allowed pick
+        # window, and no valid nearby open replacement exists. Do not let the
+        # stale signal become buyable against a later game.
+        record["event_closed"] = True
+        record["event_ended"] = True
+        record["event_live"] = False
+        record["market_accepting_orders"] = False
+        record["event_phase"] = "CLOSED"
+        record["status"] = "EVENT_CLOSED"
+        record["match_status"] = "INVALID_FUTURE_MATCH"
+        record["reason"] = (
+            "legacy future-game match rejected; original nearby event is no longer open"
+        )
+        record["match_error"] = f"{type(exact_exc).__name__}: {exact_exc}"
+        return True
+
+    record.update(corrected)
+    record["event_phase"] = _event_phase(record)
+    record["reason"] = "legacy future-game match corrected to the nearby original event"
+    record["match_error"] = None
+    return True
+
+
 def _refresh_saved_event_state(record: dict[str, Any]) -> dict[str, Any]:
     """Refresh the exact stored Gamma event/market by slug; never roll to another game."""
     event_slug = str(record.get("event_slug") or "")
@@ -939,6 +1043,9 @@ def _refresh_record_runtime(record: dict[str, Any]) -> bool:
         return False
 
     changed = False
+    if not _stored_match_within_pick_window(record):
+        return _repair_stored_future_match(record)
+
     try:
         refreshed_state = _refresh_saved_event_state(record)
         for key, value in refreshed_state.items():

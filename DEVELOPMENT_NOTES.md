@@ -1,3 +1,12 @@
+## 2026-09-26 — Reject legacy CFB future-game rollovers (#101 follow-up)
+
+- Production tracing confirmed the old Temple +3.5 signal had been attached to `cfb-templ-sfl-2026-10-03`, a later Temple game, after the original event disappeared from the open-event search.
+- Existing stored one-team matches are now checked against the pick's original posted date on every runtime refresh.
+- A stored event more than four days after (or more than one day before) the pick is treated as a legacy wrong-game match and cannot remain buyable.
+- The bot first attempts to recover the correct nearby exact market; for spread picks it can fall back to explicit nearby alternate lines.
+- If no valid nearby open event remains, the signal moves to `EVENT_CLOSED` with `INVALID_FUTURE_MATCH` rather than carrying the pick into a later game.
+- This migration also repairs already-persisted bad matches from before the stricter date guard was deployed.
+
 ## 2026-09-26 — Finished CFB lifecycle revalidation (#101)
 
 - Fixed finished games such as Temple remaining under Pregame.
