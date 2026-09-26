@@ -667,6 +667,8 @@ class CfbPreviewSafetyTests(unittest.TestCase):
             "market_type": "spread",
             "event_slug": "cfb-baylor-tcu-2026-09-26",
             "event_title": "Baylor vs TCU",
+            "event_start_at": "2020-01-01T00:00:00+00:00",
+            "market_accepting_orders": True,
             "market": "Baylor +7",
             "market_url": "https://polymarket.com/sports/cfb/cfb-baylor-tcu-2026-09-26",
             "outcome": "Baylor",
@@ -739,6 +741,7 @@ class CfbPreviewSafetyTests(unittest.TestCase):
         self.assertEqual(result["asset_id"], "saved-baylor-token")
         self.assertEqual(calls[0][1]["asset_id"], "saved-baylor-token")
         self.assertEqual(calls[0][1]["market_url"], saved["market_url"])
+        self.assertEqual(calls[0][1]["strategy_event_phase"], "LIVE")
 
     def test_live_event_phase_remains_actionable_while_market_open(self):
         saved = {
