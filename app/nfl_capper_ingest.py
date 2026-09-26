@@ -1152,7 +1152,12 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             async with httpx.AsyncClient(timeout=15) as client:
                 response = await client.get(
                     f"{bridge_url}/public/nfl",
-                    params={"minutes": 180, "limit": 120, "include_graded": "false"},
+                    params={
+                        "minutes": 180,
+                        "limit": 120,
+                        "include_graded": "false",
+                        "require_fresh": "true",
+                    },
                 )
                 response.raise_for_status()
                 feed = response.json()
