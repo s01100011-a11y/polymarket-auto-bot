@@ -128,7 +128,7 @@ def live_status():
         "private_key_configured": private_key,
         "deposit_wallet_configured": bool(wallet),
         "deposit_wallet": _mask_wallet(wallet) if wallet else None,
-        "live_trading": core.LIVE_TRADING,
+        "live_trading": core.live_trading_enabled(),
         "auto_trading": core.auto_trading_enabled(),
         "slack_paper_only": ingest.SLACK_PAPER_ONLY,
         "test_max_usdc": str(LIVE_TEST_MAX_USDC),
@@ -193,7 +193,7 @@ def _validate_test_market(req: LiveTestBuy):
 
 @app.post("/api/live/test-buy", dependencies=[Depends(dashboard._auth)])
 def live_test_buy(req: LiveTestBuy):
-    if not core.LIVE_TRADING:
+    if not core.live_trading_enabled():
         raise HTTPException(status_code=409, detail="LIVE_TRADING is disabled")
 
     _, market, asset_id, outcome_label, buy_price, spread, requested_shares = _validate_test_market(req)
@@ -298,7 +298,7 @@ def live_test_buy(req: LiveTestBuy):
 
 @app.post("/api/live/test-sell/{trade_id}", dependencies=[Depends(dashboard._auth)])
 def live_test_sell(trade_id: str, req: LiveTestSell):
-    if not core.LIVE_TRADING:
+    if not core.live_trading_enabled():
         raise HTTPException(status_code=409, detail="LIVE_TRADING is disabled")
 
     executions = core._load(core.EXECUTIONS_FILE)
