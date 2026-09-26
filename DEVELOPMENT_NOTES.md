@@ -1,3 +1,9 @@
+## 2026-09-26 — Regrade unresolved closed CFB signals (#110)
+
+- Production verification after #109 showed Northwestern +21 remained `EVENT_CLOSED` without `pick_result` because closed alternate-market records no longer entered the alternate refresh branch.
+- The poller now sends every unresolved `EVENT_CLOSED` CFB record through the completed-game scoreboard fallback directly, even when no exact saved Polymarket market remains.
+- Once WIN/LOSS/PUSH is persisted, later polls skip further grading work.
+- Added a regression test for a persisted Northwestern +21 closed signal being upgraded to WIN with its final score.
 ## 2026-09-26 — Finished-game grading fallback + capper hide/sell controls (#108)
 
 - Added a completed-game CFB grading fallback using ESPN final-score data when the exact original Polymarket market is no longer available, including legacy records that had previously rolled onto a later game.
