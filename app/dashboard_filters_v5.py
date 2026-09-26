@@ -22,13 +22,16 @@ def _d(value: Any, default: str = "0") -> Decimal:
 
 
 def _portfolio_value() -> str | None:
-    """Latest Polymarket portfolio value reported by the paired Termux executor."""
+    """Total wallet value = available USDC + current Polymarket position value."""
     try:
         state = metrics_base.remote._state()
-        value = state.get("portfolio_value")
-        if value is None or value == "":
+        cash_raw = state.get("usdc_balance")
+        positions_raw = state.get("portfolio_value")
+        if (cash_raw is None or cash_raw == "") and (positions_raw is None or positions_raw == ""):
             return None
-        return str(Decimal(str(value)).quantize(Decimal("0.01")))
+        cash = _d(cash_raw)
+        positions = _d(positions_raw)
+        return str((cash + positions).quantize(Decimal("0.01")))
     except Exception:
         return None
 
