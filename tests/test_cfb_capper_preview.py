@@ -440,6 +440,16 @@ class CfbLifecycleAndOddsTests(unittest.TestCase):
         event = SimpleNamespace(start_date="2026-09-26")
         self.assertIsNone(capper._precise_event_start(event))
 
+    def test_sports_kickoff_beats_generic_event_start_date(self):
+        event = SimpleNamespace(start_date="2026-09-26T00:00:00+00:00")
+        market = SimpleNamespace(
+            sports=SimpleNamespace(game_start_time="2026-09-26T19:30:00+00:00")
+        )
+        self.assertEqual(
+            capper._precise_event_start(event, market),
+            capper._parse_iso("2026-09-26T19:30:00+00:00"),
+        )
+
 
 class CfbPreviewSafetyTests(unittest.TestCase):
     def test_prepare_preview_enqueues_preview_never_buy(self):
