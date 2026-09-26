@@ -1,3 +1,14 @@
+## 2026-09-26 — Keep CFB signals actionable during live games (#92)
+
+- Matched CFB signals now transition from `MATCHED_PREGAME` to `MATCHED_LIVE` after kickoff while the matched Polymarket market remains open.
+- Live signals remain visible in a dedicated “Matched live picks” section and continue refreshing executable best-ask pricing and American-odds equivalents.
+- `BUY LIVE` remains available during the game while the matched market is still open; the click still refreshes the exact token’s current best ask/spread before queueing the order through Termux.
+- The dashboard shows `GAME LIVE` plus the current quote instead of treating kickoff as an expired signal.
+- During live games, the resolver also re-checks that the exact matched Polymarket market remains open. A confirmed absence of the exact open market or `accepting_orders=False` moves the record to `EVENT_CLOSED`.
+- Closed markets remain visible in counts but are no longer actionable.
+- Legacy `EVENT_STARTED` rows from the prior deployment are migrated automatically to `MATCHED_LIVE` on the next poll when the market is still open.
+- The 180-second Telegram freshness gate remains limited to unattended handling; it does not remove pregame or live manual actions.
+
 ## 2026-09-26 — Keep matched CFB picks pregame and show live odds (#90)
 
 - The 180-second CFB freshness window now gates only unattended preview/auto handling. It no longer labels a valid pregame pick as stale.
