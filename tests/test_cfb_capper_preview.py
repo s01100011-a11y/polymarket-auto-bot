@@ -357,6 +357,7 @@ class CfbDashboardPanelTests(unittest.TestCase):
         self.assertIn('OPEN MARKET', rendered)
         self.assertIn('Matched:', rendered)
         self.assertIn('Live BUY', rendered)
+        self.assertIn("status '+cfbEsc(item.status)", rendered)
         self.assertIn('manual pregame/live while market open', rendered)
         self.assertIn('scan ', rendered)
         self.assertIn('/api/cfb-cappers/manual-buy/', rendered)
