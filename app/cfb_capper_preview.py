@@ -628,7 +628,7 @@ function cfbPickList(title,items,kind){
  const rows=items.map(item=>{
   const meta=[];
   if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(cfbEsc(item.units)+'u');
-  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('\\u0024'+Number(item.stake_usdc).toFixed(2));
+  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('\u0024'+Number(item.stake_usdc).toFixed(2));
   if(item.posted_at)meta.push('posted '+cfbPickTime(item.posted_at));
   if(kind==='queued'&&item.market)meta.push(cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
   if(kind==='stale'&&item.reason)meta.push(cfbEsc(item.reason));
