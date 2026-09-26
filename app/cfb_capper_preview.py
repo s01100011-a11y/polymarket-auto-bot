@@ -456,6 +456,7 @@ def _resolve_market_match(pick: dict[str, Any], kind: str) -> dict[str, Any]:
         "event_slug": event_slug,
         "event_title": str(getattr(event, "title", "") or ""),
         "event_start_at": start_at.isoformat() if start_at is not None else None,
+        "event_start_checked_at": _now_iso(),
         "event_closed": bool(closed_value) if closed_value is not None else False,
         "market_accepting_orders": bool(accepting) if accepting is not None else None,
         "market": str(
@@ -489,6 +490,7 @@ def _saved_market_match(record: dict[str, Any] | None, kind: str | None = None) 
         "event_slug": event_slug,
         "event_title": record.get("event_title"),
         "event_start_at": record.get("event_start_at"),
+        "event_start_checked_at": record.get("event_start_checked_at"),
         "event_closed": record.get("event_closed"),
         "market_accepting_orders": record.get("market_accepting_orders"),
         "market": record.get("market"),
@@ -540,6 +542,19 @@ def _refresh_record_runtime(record: dict[str, Any]) -> bool:
         return False
 
     changed = False
+    if not record.get("event_start_checked_at"):
+        pick = record.get("pick")
+        kind = str(record.get("market_type") or "")
+        if isinstance(pick, dict) and kind:
+            try:
+                refreshed_match = _resolve_market_match(pick, kind)
+                if str(refreshed_match.get("asset_id") or "") == str(match.get("asset_id") or ""):
+                    record.update(refreshed_match)
+                    match = _saved_market_match(record) or match
+                    changed = True
+            except Exception as exc:
+                record["event_metadata_error"] = f"{type(exc).__name__}: {exc}"
+
     phase = _event_phase(record)
     if record.get("event_phase") != phase:
         record["event_phase"] = phase
@@ -1081,7 +1096,11 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 terminal = str(current.get("status") or "")
                 if terminal in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE", "EVENT_STARTED", "EVENT_CLOSED"}:
                     continue
-                if terminal != "IGNORED_STALE" and _saved_market_match(current) is not None:
+                if (
+                    terminal != "IGNORED_STALE"
+                    and _saved_market_match(current) is not None
+                    and current.get("event_start_checked_at")
+                ):
                     continue
 
             source_label = _source_label(pick)
@@ -1116,7 +1135,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
 
             try:
                 saved_match = _saved_market_match(record, kind)
-                if saved_match is None or not record.get("event_start_at"):
+                if saved_match is None or not record.get("event_start_checked_at"):
                     saved_match = await asyncio.to_thread(_resolve_market_match, pick, kind)
                     record.update(saved_match)
                 else:
