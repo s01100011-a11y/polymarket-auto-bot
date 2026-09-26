@@ -402,6 +402,13 @@ class CfbDashboardPanelTests(unittest.TestCase):
         self.assertIn('/api/cfb-cappers/manual-buy/', rendered)
         self.assertIn('/api/cfb-cappers/manual-buy-alternate/', rendered)
         self.assertIn('BETTER LINE', rendered)
+        self.assertIn("label:'PREGAME'", rendered)
+        self.assertIn("label:'LIVE'", rendered)
+        self.assertIn("label:'FINISHED'", rendered)
+        self.assertIn('#3b82f6', rendered)
+        self.assertIn('#22c55e', rendered)
+        self.assertIn('#94a3b8', rendered)
+        self.assertIn('GAME FINISHED', rendered)
 
     def test_injection_is_idempotent(self):
         html = '<style></style>\n  <div class="tabs"></div>\n<script></script>'
