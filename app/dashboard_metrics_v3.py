@@ -364,6 +364,8 @@ def _install_performance_and_paper_ui() -> None:
 
     performance_html = '''
   <div class="performance-strip">
+    <div class="performance-card"><div class="label">Portfolio value</div><div class="performance-value" id="performancePortfolio">—</div><div class="performance-sub">current Polymarket positions</div></div>
+    <div class="performance-card"><div class="label">Missed P/L · total</div><div class="performance-value" id="performanceMissedPnl">—</div><div class="performance-sub" id="performanceMissedCount">NFL + CFB untraded calls</div></div>
     <div class="performance-card"><div class="label">ROI · closed trades</div><div class="performance-value" id="performanceRoi">—</div></div>
     <div class="performance-card"><div class="label">Win / Loss</div><div class="performance-value" id="performanceWL">—</div><div class="performance-sub" id="performancePushes"></div></div>
     <div class="performance-card"><div class="label">Accuracy</div><div class="performance-value" id="performanceAccuracy">—</div><div class="performance-sub" id="performanceGraded"></div></div>
@@ -372,7 +374,7 @@ def _install_performance_and_paper_ui() -> None:
     html = html.replace('  <div class="tabs">', performance_html + '  <div class="tabs">', 1)
 
     css = '''
-.performance-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}.performance-card{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px}.performance-value{font-size:24px;font-weight:900;margin-top:6px}.performance-sub{font-size:10px;color:var(--muted);margin-top:4px}.paper-close-btn{border:1px solid #7c5b15;background:#33270c;color:#fde68a;border-radius:8px;padding:7px 11px;font-size:11px;font-weight:850;cursor:pointer;white-space:nowrap}.paper-close-btn:hover{background:#49350d}.paper-close-btn:disabled{opacity:.55;cursor:wait}@media(max-width:700px){.performance-strip{grid-template-columns:1fr 1fr}.performance-card:last-child{grid-column:1/-1}}
+.performance-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:18px 0}.performance-card{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px}.performance-value{font-size:24px;font-weight:900;margin-top:6px}.performance-sub{font-size:10px;color:var(--muted);margin-top:4px}.paper-close-btn{border:1px solid #7c5b15;background:#33270c;color:#fde68a;border-radius:8px;padding:7px 11px;font-size:11px;font-weight:850;cursor:pointer;white-space:nowrap}.paper-close-btn:hover{background:#49350d}.paper-close-btn:disabled{opacity:.55;cursor:wait}@media(max-width:1100px){.performance-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:700px){.performance-strip{grid-template-columns:1fr 1fr}.performance-card:last-child{grid-column:1/-1}}
 '''
     html = html.replace("</style>", css + "</style>", 1)
 
