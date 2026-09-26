@@ -480,6 +480,48 @@ def _find_spread_alternatives(
                     continue
                 selected = _spread_outcome_any_line(market, pick)
                 if selected is None:
+                    try:
+                        debug_outcomes = [
+                            str(label)
+                            for label, obj in nfl._outcomes(market)
+                            if obj is not None
+                        ]
+                        print(
+                            "CFB_SPREAD_CANDIDATE_UNRESOLVED "
+                            + json.dumps(
+                                {
+                                    "selection": pick.get("selection"),
+                                    "team_hint": pick.get("team_hint"),
+                                    "event_title": getattr(event, "title", None),
+                                    "event_slug": getattr(event, "slug", None),
+                                    "question": getattr(market, "question", None),
+                                    "slug": getattr(market, "slug", None),
+                                    "group_item_title": getattr(market, "group_item_title", None),
+                                    "sports_market_type": getattr(
+                                        getattr(market, "sports", None),
+                                        "sports_market_type",
+                                        None,
+                                    ),
+                                    "structured_line": getattr(
+                                        getattr(market, "sports", None),
+                                        "line",
+                                        None,
+                                    ),
+                                    "outcomes": debug_outcomes,
+                                    "accepting_orders": getattr(
+                                        getattr(market, "state", None),
+                                        "accepting_orders",
+                                        None,
+                                    ),
+                                },
+                                sort_keys=True,
+                                separators=(",", ":"),
+                                default=str,
+                            ),
+                            flush=True,
+                        )
+                    except Exception:
+                        pass
                     continue
                 label, obj, line = selected
                 if line == original:
