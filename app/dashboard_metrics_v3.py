@@ -364,7 +364,7 @@ def _install_performance_and_paper_ui() -> None:
 
     performance_html = '''
   <div class="performance-strip">
-    <div class="performance-card"><div class="label">Portfolio value</div><div class="performance-value" id="performancePortfolio">—</div><div class="performance-sub">current Polymarket positions</div></div>
+    <div class="performance-card"><div class="label">Portfolio value</div><div class="performance-value" id="performancePortfolio">—</div><div class="performance-sub">available USDC + positions</div></div>
     <div class="performance-card"><div class="label">Missed P/L · total</div><div class="performance-value" id="performanceMissedPnl">—</div><div class="performance-sub" id="performanceMissedCount">NFL + CFB untraded calls</div></div>
     <div class="performance-card"><div class="label">ROI · closed trades</div><div class="performance-value" id="performanceRoi">—</div></div>
     <div class="performance-card"><div class="label">Win / Loss</div><div class="performance-value" id="performanceWL">—</div><div class="performance-sub" id="performancePushes"></div></div>
