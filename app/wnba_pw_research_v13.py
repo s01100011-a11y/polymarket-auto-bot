@@ -2,6 +2,7 @@ from app import wnba_pw_strategy_test_v12 as base
 from app import pw_research_sync
 from app import pw_scalping_research
 from app import pw_market_research
+from app import pw_spread_capture
 from app import pw_game_reconstruction
 from app import pw_spread_backtest
 from app import nfl_capper_ingest
@@ -27,6 +28,14 @@ pw_scalping_research.install(
 )
 
 pw_market_research.install(
+    app=app,
+    history=history,
+    ingest=ingest,
+    dashboard=dashboard,
+    strategy=base,
+)
+
+pw_spread_capture.install(
     app=app,
     history=history,
     ingest=ingest,
