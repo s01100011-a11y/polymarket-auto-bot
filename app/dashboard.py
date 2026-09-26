@@ -81,7 +81,7 @@ if _saved_settings:
 _saved_auto_state = core._load(AUTO_TRADING_STATE_FILE)
 # Railway AUTO_TRADING is authoritative. Persisted dashboard state must never
 # turn automation off when the Railway variable enables it.
-if not core.auto_trading_enabled() and not core.LIVE_TRADING and "enabled" in _saved_auto_state:
+if not core.auto_trading_enabled() and not core.live_trading_enabled() and "enabled" in _saved_auto_state:
     core.AUTO_TRADING = bool(_saved_auto_state.get("enabled"))
 
 
@@ -199,7 +199,7 @@ def _dashboard_snapshot() -> dict:
             "ok": True,
             "version": DASHBOARD_VERSION,
             "version_date": DASHBOARD_VERSION_DATE,
-            "live_trading": core.LIVE_TRADING,
+            "live_trading": core.live_trading_enabled(),
             "auto_trading": core.auto_trading_enabled(),
             "block_political_auto": core.BLOCK_POLITICAL_AUTO,
             "uptime_seconds": int(time.time() - STARTED_AT),
@@ -237,7 +237,7 @@ def dashboard_settings_get():
     return {
         "editable": _current_settings(),
         "read_only": {
-            "live_trading": core.LIVE_TRADING,
+            "live_trading": core.live_trading_enabled(),
             "auto_trading": core.auto_trading_enabled(),
             "block_political_auto": core.BLOCK_POLITICAL_AUTO,
         },
@@ -258,15 +258,15 @@ def dashboard_settings_put(settings: DashboardSettings):
 def dashboard_auto_trading_get():
     return {
         "enabled": bool(core.auto_trading_enabled()),
-        "live_trading": bool(core.LIVE_TRADING),
-        "can_enable": not bool(core.LIVE_TRADING),
+        "live_trading": bool(core.live_trading_enabled()),
+        "can_enable": not bool(core.live_trading_enabled()),
         "scope": "paper_and_order_preparation",
     }
 
 
 @app.put("/api/dashboard/auto-trading", dependencies=[Depends(_auth)])
 def dashboard_auto_trading_put(state: AutoTradingState):
-    if state.enabled and core.LIVE_TRADING:
+    if state.enabled and core.live_trading_enabled():
         raise HTTPException(
             status_code=409,
             detail="Auto Trading can only be enabled for paper/order-preparation mode while live trading is active.",
@@ -276,8 +276,8 @@ def dashboard_auto_trading_put(state: AutoTradingState):
     return {
         "ok": True,
         "enabled": bool(core.AUTO_TRADING),
-        "live_trading": bool(core.LIVE_TRADING),
-        "can_enable": not bool(core.LIVE_TRADING),
+        "live_trading": bool(core.live_trading_enabled()),
+        "can_enable": not bool(core.live_trading_enabled()),
         "scope": "paper_and_order_preparation",
     }
 
