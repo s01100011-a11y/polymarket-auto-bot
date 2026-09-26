@@ -1,5 +1,14 @@
 # CHANGES
 
+## 2026-09-26 — CFB bridge-outage manual fallback (#125)
+
+- Added `CFB_CAPPER_MANUAL_PICKS_JSON` as an explicit fallback transport for user-verified Slam/Syndicate CFB picks when the Telegram bridge is unavailable.
+- Manual fallback picks use the existing source classification, Polymarket market matching, unit sizing, dashboard signal history, and existing live/auto triple gates; no trading safety setting is bypassed.
+- The worker continues to surface the Telegram bridge error while processing manual fallback picks.
+- Added semantic deduplication so the same wager is not processed again if Telegram later recovers and delivers it with a different post timestamp or posted odds.
+- Added tests for manual-source validation and semantic deduplication.
+
+
 ## 2026-09-26 — Consistent auto-live dashboard status
 
 - Standardized the NFL and CFB capper panels to the same state wording: `ENABLED · AUTO LIVE`, `ENABLED · AUTO OFF`, or `DISABLED`.
