@@ -1194,7 +1194,7 @@ function cfbPickList(title,items,kind){
   if(item.status)meta.push('status '+cfbEsc(item.status));
   if(item.reason&&['pregame','live','closed','unsupported','failed','signals'].includes(kind))meta.push(cfbEsc(item.reason));
   if(item.last_error&&['retrying','failed','signals'].includes(kind))meta.push(cfbEsc(item.last_error));
-  if(!item.buy_available&&item.match_status!=='MATCHED')meta.push('Polymarket match pending');
+  if(!item.buy_available&&!['MATCHED','ALTERNATE_AVAILABLE'].includes(String(item.match_status||'')))meta.push('Polymarket match pending');
   if(item.manual_buy_status)meta.push('manual BUY '+cfbEsc(item.manual_buy_status));
   if(item.manual_buy_error)meta.push(cfbEsc(item.manual_buy_error));
   const state=String(item.manual_buy_status||'').toUpperCase();
@@ -1523,6 +1523,31 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     )
                     record["reason"] = (
                         "exact original spread is unavailable; explicit current Polymarket alternatives are shown"
+                    )
+                    print(
+                        "CFB_CAPPER_ALTERNATES "
+                        + json.dumps(
+                            {
+                                "selection": record.get("selection"),
+                                "source": record.get("source"),
+                                "status": record.get("status"),
+                                "event_title": record.get("event_title"),
+                                "event_phase": record.get("event_phase"),
+                                "alternatives": [
+                                    {
+                                        "line": alt.get("spread_line"),
+                                        "best_ask": alt.get("best_ask"),
+                                        "odds": alt.get("live_odds_american"),
+                                        "relative": alt.get("relative_to_original"),
+                                    }
+                                    for alt in alternatives
+                                ],
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            default=str,
+                        ),
+                        flush=True,
                     )
                 else:
                     record["status"] = "RETRYING"
