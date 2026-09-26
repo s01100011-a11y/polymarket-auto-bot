@@ -256,6 +256,16 @@ def _narrow_one_team_events_by_posted_date(
     return [row for row in ranked if _event_key(row[1]) == best_key]
 
 
+def _full_game_market_type_matches(actual: str, kind: str) -> bool:
+    normalized = nfl._norm(actual)
+    allowed = {
+        "moneyline": {"moneyline"},
+        "spread": {"spread", "spreads"},
+        "total": {"total", "totals"},
+    }
+    return normalized in allowed.get(kind, set())
+
+
 def _select_outcome(market: Any, pick: dict[str, Any], kind: str) -> tuple[str, Any] | None:
     outcomes = [(label, obj) for label, obj in nfl._outcomes(market) if obj is not None]
     if len(outcomes) != 2:
@@ -273,15 +283,18 @@ def _select_outcome(market: Any, pick: dict[str, Any], kind: str) -> tuple[str, 
         return None
 
     if kind == "spread":
-        line = list(pick.get("spread_lines") or [None])[0]
-        if not nfl._line_matches(mtext, line, signed=True):
+        requested = list(pick.get("spread_lines") or [None])[0]
+        try:
+            requested_line = Decimal(str(requested))
+        except Exception:
             return None
-        for label, obj in outcomes:
-            if _contains_hint(label, team_hint) and nfl._line_matches(label + " " + mtext, line, signed=True):
-                return label, obj
-        if _contains_hint(mtext, team_hint) and nfl._norm(outcomes[0][0]) == "yes":
-            return outcomes[0]
-        return None
+        selected = _spread_outcome_any_line(market, pick)
+        if selected is None:
+            return None
+        label, obj, effective_line = selected
+        if effective_line != requested_line:
+            return None
+        return label, obj
 
     if kind == "total":
         side = str(pick.get("total_side") or "").upper()
@@ -339,7 +352,7 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
 
             for market in getattr(event, "markets", ()) or ():
                 actual = nfl._market_type(market)
-                if not nfl._type_matches(actual, kind):
+                if not _full_game_market_type_matches(actual, kind):
                     continue
                 outcome = _select_outcome(market, pick, kind)
                 if outcome is None:
@@ -393,7 +406,17 @@ def _spread_outcome_any_line(
     market: Any,
     pick: dict[str, Any],
 ) -> tuple[str, Any, Decimal] | None:
-    """Resolve the picked team on any explicit spread line without guessing."""
+    """Return selected team/outcome plus its effective full-game spread line.
+
+    Gamma encodes a market such as Indiana -20.5 as:
+      question = "Spread: Indiana (-20.5)"
+      outcomes = ["Indiana", "Northwestern"]
+      sports.line = -20.5
+
+    The second outcome is therefore the complementary Northwestern +20.5 side.
+    We only invert when the question subject maps unambiguously to the other
+    outcome; otherwise fail closed.
+    """
     outcomes = [(label, obj) for label, obj in nfl._outcomes(market) if obj is not None]
     if len(outcomes) != 2:
         return None
@@ -402,39 +425,52 @@ def _spread_outcome_any_line(
     if not team_hint:
         return None
 
-    raw_market = " ".join([
-        str(getattr(market, "question", "") or ""),
-        str(getattr(market, "slug", "") or ""),
-    ])
+    selected_indexes = [
+        i for i, (label, _) in enumerate(outcomes)
+        if _contains_hint(label, team_hint)
+    ]
+    if len(selected_indexes) != 1:
+        return None
+    selected_index = selected_indexes[0]
 
-    def signed_line(text: str) -> Decimal | None:
-        hits = re.findall(r"(?<!\d)([+-]\s*\d{1,2}(?:\.\d+)?)(?!\d)", str(text or ""))
-        values: list[Decimal] = []
-        for hit in hits:
-            try:
-                value = Decimal(hit.replace(" ", ""))
-            except Exception:
-                continue
-            if abs(value) <= Decimal("69.5"):
-                values.append(value)
-        unique = list(dict.fromkeys(values))
-        return unique[0] if len(unique) == 1 else None
+    question = str(getattr(market, "question", "") or "")
+    subject_match = re.search(
+        r"(?:^|\b)Spread:\s*(.+?)\s*\(\s*([+-]\d{1,2}(?:\.\d+)?)\s*\)\s*$",
+        question,
+        re.I,
+    )
+    if not subject_match:
+        return None
 
-    for label, obj in outcomes:
-        if not _contains_hint(label, team_hint):
-            continue
-        line = signed_line(label)
-        if line is None:
-            line = signed_line(raw_market)
-        if line is not None:
-            return label, obj, line
+    subject = subject_match.group(1).strip()
+    try:
+        question_line = Decimal(subject_match.group(2))
+    except Exception:
+        return None
 
-    if _contains_hint(raw_market, team_hint) and nfl._norm(outcomes[0][0]) == "yes":
-        line = signed_line(raw_market)
-        if line is not None:
-            return outcomes[0][0], outcomes[0][1], line
+    structured_raw = getattr(getattr(market, "sports", None), "line", None)
+    if structured_raw is not None:
+        try:
+            structured_line = Decimal(str(structured_raw))
+        except Exception:
+            return None
+        if structured_line != question_line:
+            return None
+        base_line = structured_line
+    else:
+        base_line = question_line
 
-    return None
+    subject_indexes = [
+        i for i, (label, _) in enumerate(outcomes)
+        if _contains_hint(label, subject)
+    ]
+    if len(subject_indexes) != 1:
+        return None
+    subject_index = subject_indexes[0]
+
+    effective_line = base_line if selected_index == subject_index else -base_line
+    label, obj = outcomes[selected_index]
+    return label, obj, effective_line
 
 
 def _find_spread_alternatives(
@@ -474,54 +510,12 @@ def _find_spread_alternatives(
                 continue
             for market in getattr(event, "markets", ()) or ():
                 actual = nfl._market_type(market)
-                if not nfl._type_matches(actual, "spread"):
+                if not _full_game_market_type_matches(actual, "spread"):
                     continue
                 if not getattr(getattr(market, "state", None), "accepting_orders", False):
                     continue
                 selected = _spread_outcome_any_line(market, pick)
                 if selected is None:
-                    try:
-                        debug_outcomes = [
-                            str(label)
-                            for label, obj in nfl._outcomes(market)
-                            if obj is not None
-                        ]
-                        print(
-                            "CFB_SPREAD_CANDIDATE_UNRESOLVED "
-                            + json.dumps(
-                                {
-                                    "selection": pick.get("selection"),
-                                    "team_hint": pick.get("team_hint"),
-                                    "event_title": getattr(event, "title", None),
-                                    "event_slug": getattr(event, "slug", None),
-                                    "question": getattr(market, "question", None),
-                                    "slug": getattr(market, "slug", None),
-                                    "group_item_title": getattr(market, "group_item_title", None),
-                                    "sports_market_type": getattr(
-                                        getattr(market, "sports", None),
-                                        "sports_market_type",
-                                        None,
-                                    ),
-                                    "structured_line": getattr(
-                                        getattr(market, "sports", None),
-                                        "line",
-                                        None,
-                                    ),
-                                    "outcomes": debug_outcomes,
-                                    "accepting_orders": getattr(
-                                        getattr(market, "state", None),
-                                        "accepting_orders",
-                                        None,
-                                    ),
-                                },
-                                sort_keys=True,
-                                separators=(",", ":"),
-                                default=str,
-                            ),
-                            flush=True,
-                        )
-                    except Exception:
-                        pass
                     continue
                 label, obj, line = selected
                 if line == original:

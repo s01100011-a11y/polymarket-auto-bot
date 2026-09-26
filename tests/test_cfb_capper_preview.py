@@ -538,23 +538,39 @@ class CfbLifecycleAndOddsTests(unittest.TestCase):
 
 class CfbSpreadAlternateTests(unittest.TestCase):
     @staticmethod
-    def _market(question, label, token, *, accepting=True):
-        yes = SimpleNamespace(label=label, token_id=token)
-        no = SimpleNamespace(label="Indiana", token_id=token + "-no")
+    def _market(
+        question,
+        yes_label,
+        no_label,
+        token,
+        *,
+        line,
+        market_type="spreads",
+        accepting=True,
+    ):
+        yes = SimpleNamespace(label=yes_label, token_id=token + "-yes")
+        no = SimpleNamespace(label=no_label, token_id=token + "-no")
         return SimpleNamespace(
             id=token + "-market",
             question=question,
             slug=token + "-spread",
-            sports=SimpleNamespace(sports_market_type="spread", line=None),
+            group_item_title=f"Spread {line}",
+            sports=SimpleNamespace(
+                sports_market_type=market_type,
+                line=line,
+                game_start_time="2020-01-01T00:00:00+00:00",
+            ),
             outcomes=SimpleNamespace(yes=yes, no=no),
             state=SimpleNamespace(accepting_orders=accepting),
         )
 
     def test_spread_outcome_any_line_reads_explicit_selected_team_line(self):
         market = self._market(
-            "Northwestern +21.5 vs Indiana",
+            "Spread: Indiana (-21.5)",
+            "Indiana",
             "Northwestern",
             "nw-215",
+            line=-21.5,
         )
         pick = _pick(
             selection="NORTHWESTERN 21",
@@ -566,6 +582,7 @@ class CfbSpreadAlternateTests(unittest.TestCase):
         selected = capper._spread_outcome_any_line(market, pick)
         self.assertIsNotNone(selected)
         self.assertEqual(selected[0], "Northwestern")
+        self.assertEqual(selected[1].token_id, "nw-215-no")
         self.assertEqual(str(selected[2]), "21.5")
 
     def test_find_spread_alternatives_prefers_better_equidistant_line(self):
@@ -575,8 +592,28 @@ class CfbSpreadAlternateTests(unittest.TestCase):
             title="Northwestern vs Indiana",
             start_time="2020-01-01T00:00:00+00:00",
             markets=[
-                self._market("Northwestern +20.5 vs Indiana", "Northwestern", "nw-205"),
-                self._market("Northwestern +21.5 vs Indiana", "Northwestern", "nw-215"),
+                self._market(
+                    "Spread: Indiana (-20.5)",
+                    "Indiana",
+                    "Northwestern",
+                    "nw-205",
+                    line=-20.5,
+                ),
+                self._market(
+                    "Spread: Indiana (-21.5)",
+                    "Indiana",
+                    "Northwestern",
+                    "nw-215",
+                    line=-21.5,
+                ),
+                self._market(
+                    "2H Spread: Indiana (-21.5)",
+                    "Indiana",
+                    "Northwestern",
+                    "nw-2h-215",
+                    line=-21.5,
+                    market_type="second_half_spreads",
+                ),
             ],
         )
 
@@ -597,11 +634,11 @@ class CfbSpreadAlternateTests(unittest.TestCase):
             spread_lines=["+21"],
         )
         quotes = {
-            "nw-205": {
+            "nw-205-no": {
                 "current_buy_price": "0.50", "best_ask": "0.51", "max_price": "0.51",
                 "spread": "0.02", "live_odds_american": "+96", "quote_updated_at": "now",
             },
-            "nw-215": {
+            "nw-215-no": {
                 "current_buy_price": "0.52", "best_ask": "0.53", "max_price": "0.53",
                 "spread": "0.02", "live_odds_american": "-113", "quote_updated_at": "now",
             },
@@ -616,6 +653,33 @@ class CfbSpreadAlternateTests(unittest.TestCase):
         self.assertEqual(alternatives[0]["relative_to_original"], "BETTER")
         self.assertEqual(alternatives[1]["relative_to_original"], "WORSE")
         self.assertEqual(alternatives[0]["event_phase"], "LIVE")
+
+    def test_exact_spread_selects_complementary_team_outcome(self):
+        market = self._market(
+            "Spread: Indiana (-21.5)",
+            "Indiana",
+            "Northwestern",
+            "nw-215",
+            line=-21.5,
+        )
+        pick = _pick(
+            selection="NORTHWESTERN +21.5",
+            team_hint="Northwestern",
+            event_hints=["Northwestern"],
+            bet_types=["spread"],
+            spread_lines=["+21.5"],
+        )
+        selected = capper._select_outcome(market, pick, "spread")
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected[0], "Northwestern")
+        self.assertEqual(selected[1].token_id, "nw-215-no")
+
+    def test_period_spread_type_is_not_full_game(self):
+        self.assertTrue(capper._full_game_market_type_matches("spreads", "spread"))
+        self.assertFalse(
+            capper._full_game_market_type_matches("second_half_spreads", "spread")
+        )
+        self.assertFalse(capper._full_game_market_type_matches("q3_spreads", "spread"))
 
     def test_manual_buy_can_use_explicit_alternate_but_keeps_original_pick_id(self):
         saved = {
