@@ -125,9 +125,31 @@ def _looks_basketball(text: str) -> bool:
     return _looks_wnba(text) or _looks_nba(text)
 
 
+def _basketball_team_mentions(text: str) -> list[str]:
+    found: list[str] = []
+    for team in _team_mentions(text) + _nba_team_mentions(text):
+        if team not in found:
+            found.append(team)
+    return found
+
+
+def _aliases_for_team(team: str | None) -> tuple[str, ...]:
+    if not team:
+        return ()
+    return WNBA_ALIASES.get(team) or NBA_ALIASES.get(team, ())
+
+
+def _league_for_team(team: str | None) -> str | None:
+    if team in WNBA_ALIASES:
+        return "wnba"
+    if team in NBA_ALIASES:
+        return "nba"
+    return None
+
+
 def _parse_alert(text: str) -> dict[str, Any]:
     norm = _norm_text(text)
-    teams = _team_mentions(text)
+    teams = _basketball_team_mentions(text)
 
     market_kind = "moneyline"
     selection: str | None = None
@@ -273,7 +295,7 @@ def _select_outcome(market: Any, parsed: dict[str, Any]) -> tuple[str, Any] | No
             return None
         for label, outcome in _outcome_candidates(market):
             lnorm = _norm_text(label)
-            if team and (team in lnorm or any(a in lnorm for a in WNBA_ALIASES.get(str(selection), ()) )):
+            if team and (team in lnorm or any(a in lnorm for a in _aliases_for_team(str(selection)))):
                 return label, outcome
         # Some spread questions encode the team in the question with YES/NO outcomes.
         if team and team in mtext:
@@ -283,10 +305,10 @@ def _select_outcome(market: Any, parsed: dict[str, Any]) -> tuple[str, Any] | No
     team = _norm_text(str(selection or ""))
     for label, outcome in _outcome_candidates(market):
         lnorm = _norm_text(label)
-        aliases = WNBA_ALIASES.get(str(selection), ())
+        aliases = _aliases_for_team(str(selection))
         if team and (team in lnorm or any(a in lnorm for a in aliases)):
             return label, outcome
-    if team and (team in mtext or any(a in mtext for a in WNBA_ALIASES.get(str(selection), ()))):
+    if team and (team in mtext or any(a in mtext for a in _aliases_for_team(str(selection)))):
         return _outcome_candidates(market)[0]
     return None
 
@@ -294,7 +316,7 @@ def _select_outcome(market: Any, parsed: dict[str, Any]) -> tuple[str, Any] | No
 def _find_market(parsed: dict[str, Any]) -> tuple[Any, Any, str, Any]:
     teams = parsed.get("teams") or []
     if not teams:
-        raise ValueError("No WNBA team found in alert")
+        raise ValueError("No NBA/WNBA team found in alert")
 
     query = teams[0]
     candidates: list[Any] = []
@@ -303,7 +325,7 @@ def _find_market(parsed: dict[str, Any]) -> tuple[Any, Any, str, Any]:
         page = paginator.first_page()
         for event in page.items:
             etext = _event_text(event)
-            if not any(alias in etext for team in teams for alias in WNBA_ALIASES.get(team, ())):
+            if not any(alias in etext for team in teams for alias in _aliases_for_team(team)):
                 continue
             candidates.append(event)
 
@@ -337,7 +359,7 @@ def _find_market(parsed: dict[str, Any]) -> tuple[Any, Any, str, Any]:
                 ranked.append((score, event, market, label, outcome_obj))
 
         if not ranked:
-            raise ValueError(f"Found WNBA event but no matching {kind} market")
+            raise ValueError(f"Found basketball event but no matching {kind} market")
         ranked.sort(key=lambda item: item[0], reverse=True)
         _, event, market, label, outcome_obj = ranked[0]
         return event, market, label, outcome_obj
@@ -387,7 +409,7 @@ def _paper_trade_from_alert(parsed: dict[str, Any], slack_event_id: str, slack_e
             "note": parsed.get("raw_text"),
         },
         "quote": {
-            "market": str(getattr(market, "question", None) or getattr(event, "title", "WNBA market")),
+            "market": str(getattr(market, "question", None) or getattr(event, "title", "basketball market")),
             "market_type": core._market_type(market),
             "market_url": market_url,
             "requested_outcome": parsed.get("selection"),
