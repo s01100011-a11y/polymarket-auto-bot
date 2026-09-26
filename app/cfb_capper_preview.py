@@ -148,6 +148,47 @@ def _resolved_signal_outcome(asset_id: str) -> dict[str, Any] | None:
     return None
 
 
+def _manual_fallback_picks(raw: str) -> list[dict[str, Any]]:
+    """Decode explicit user-verified CFB picks supplied during a bridge outage."""
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    payload = json.loads(text)
+    if isinstance(payload, dict):
+        payload = payload.get("picks")
+    if not isinstance(payload, list):
+        raise ValueError("CFB_CAPPER_MANUAL_PICKS_JSON must be a list or an object with a picks list")
+
+    picks: list[dict[str, Any]] = []
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            raise ValueError(f"manual CFB pick {index} is not an object")
+        pick = dict(item)
+        if _parse_iso(pick.get("posted_at")) is None:
+            raise ValueError(f"manual CFB pick {index} needs a valid posted_at timestamp")
+        if _source_label(pick) is None:
+            raise ValueError(f"manual CFB pick {index} is not from Slam or Syndicate")
+        pick["manual_fallback"] = True
+        picks.append(pick)
+    return picks
+
+
+def _semantic_fingerprint(pick: dict[str, Any]) -> str:
+    """Fingerprint wager identity without transport timestamp/odds for outage dedupe."""
+    canonical = {
+        "source": _source_label(pick) or _compact(pick.get("source_key") or pick.get("source")),
+        "team_hint": _compact(pick.get("team_hint")),
+        "event_hints": sorted(_compact(x) for x in (pick.get("event_hints") or []) if _compact(x)),
+        "bet_types": sorted(str(x).lower() for x in (pick.get("bet_types") or [])),
+        "period": str(pick.get("period") or ""),
+        "spread_lines": [str(x) for x in (pick.get("spread_lines") or [])],
+        "total_side": str(pick.get("total_side") or "").upper(),
+        "total_line": str(pick.get("total_line") if pick.get("total_line") is not None else ""),
+    }
+    raw = json.dumps(canonical, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def _fingerprint(pick: dict[str, Any]) -> str:
     canonical = {
         "source": str(pick.get("source") or ""),
@@ -2073,6 +2114,14 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     live_enabled = os.getenv("CFB_CAPPER_LIVE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
     test_preview_raw = os.getenv("CFB_CAPPER_TEST_PREVIEW_JSON", "").strip()
     test_preview_marker = core.DATA_DIR / "cfb_capper_test_preview.json"
+    manual_fallback_error: str | None = None
+    try:
+        manual_fallback_picks = _manual_fallback_picks(
+            os.getenv("CFB_CAPPER_MANUAL_PICKS_JSON", "")
+        )
+    except Exception as exc:
+        manual_fallback_picks = []
+        manual_fallback_error = f"{type(exc).__name__}: {exc}"
 
     def _load_signals() -> dict[str, Any]:
         data = core._load(signal_file)
@@ -2138,6 +2187,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 _save_signals(signals)
             return
 
+        bridge_error: str | None = None
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 response = await client.get(
@@ -2152,10 +2202,31 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 response.raise_for_status()
                 feed = response.json()
         except Exception as exc:
-            _STATUS["last_error"] = f"{type(exc).__name__}: {exc}"
-            if changed:
-                _save_signals(signals)
-            return
+            bridge_error = f"{type(exc).__name__}: {exc}"
+            if not manual_fallback_picks:
+                _STATUS["last_error"] = bridge_error
+                if changed:
+                    _save_signals(signals)
+                return
+            feed = {
+                "sport": "NCAAF",
+                "generated_at": _now_iso(),
+                "freshness": {"connected": False, "ready": False, "error": bridge_error},
+                "scanned_posts": 0,
+                "detected_posts": 0,
+                "detected_picks": 0,
+                "listener_connected": False,
+                "listener_ready": False,
+                "picks": [],
+            }
+
+        bridge_picks = [p for p in (feed.get("picks") or []) if isinstance(p, dict)]
+        manual_semantics = {_semantic_fingerprint(p) for p in manual_fallback_picks}
+        bridge_picks = [
+            p for p in bridge_picks
+            if _semantic_fingerprint(p) not in manual_semantics
+        ]
+        picks = [*bridge_picks, *[dict(p) for p in manual_fallback_picks]]
 
         core._save(last_feed_file, {
             "saved_at": _now_iso(),
@@ -2164,13 +2235,14 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             "freshness": feed.get("freshness"),
             "scanned_posts": feed.get("scanned_posts"),
             "detected_posts": feed.get("detected_posts"),
-            "detected_picks": feed.get("detected_picks"),
+            "detected_picks": len(picks),
             "listener_connected": feed.get("listener_connected"),
             "listener_ready": feed.get("listener_ready"),
-            "picks": feed.get("picks") or [],
+            "manual_fallback_count": len(manual_fallback_picks),
+            "bridge_error": bridge_error,
+            "picks": picks,
         })
 
-        picks = [p for p in (feed.get("picks") or []) if isinstance(p, dict)]
         picks.sort(key=lambda p: str(p.get("posted_at") or ""))
         now = datetime.now(timezone.utc)
 
@@ -2384,7 +2456,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             _save_signals(signals)
 
         _STATUS["last_success_at"] = _now_iso()
-        _STATUS["last_error"] = None
+        _STATUS["last_error"] = bridge_error or manual_fallback_error
         _STATUS["cycles"] = int(_STATUS.get("cycles") or 0) + 1
 
     async def _run_test_preview_once() -> None:
