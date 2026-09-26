@@ -523,6 +523,145 @@ class NflCapperStatsTests(unittest.TestCase):
         self.assertEqual(slam["roi_pct"], "80.0")
 
 
+class NflMissedPnlTests(unittest.TestCase):
+    def test_missed_pnl_counts_only_graded_untraded_calls(self):
+        signals = {
+            "slam-win": {
+                "id": "slam-win",
+                "source": "Slam - NFL",
+                "stake_usdc": "10",
+                "pick_result": "WIN",
+                "pick": _pick(decimal_odds=None, american_odds=None),
+            },
+            "slam-loss": {
+                "id": "slam-loss",
+                "source": "Slam - NFL",
+                "stake_usdc": "10",
+                "pick_result": "LOSS",
+                "pick": _pick(decimal_odds=None, american_odds=None),
+            },
+            "slam-traded-win": {
+                "id": "slam-traded-win",
+                "source": "Slam - NFL",
+                "stake_usdc": "10",
+                "pick_result": "WIN",
+                "pick": _pick(decimal_odds=2.0),
+            },
+            "slam-unresolved": {
+                "id": "slam-unresolved",
+                "source": "Slam - NFL",
+                "stake_usdc": "10",
+                "pick": _pick(decimal_odds=2.0),
+            },
+            "syndicate-win": {
+                "id": "syndicate-win",
+                "source": "Syndicate - NFL",
+                "stake_usdc": "20",
+                "pick_result": "WIN",
+                "pick": _pick(source="The Syndicate", units=2, decimal_odds=1.62),
+            },
+        }
+        executions = {
+            "real-trade": {
+                "id": "real-trade",
+                "strategy_pick_id": "slam-traded-win",
+                "strategy_source": "Slam - NFL",
+                "strategy_sport": "NFL",
+                "status": "SETTLED_WIN",
+                "paper": False,
+            }
+        }
+
+        stats = capper._missed_signal_stats(signals, executions)
+
+        self.assertEqual(stats["Slam - NFL"]["missed_graded"], 2)
+        self.assertEqual(stats["Slam - NFL"]["missed_wins"], 1)
+        self.assertEqual(stats["Slam - NFL"]["missed_losses"], 1)
+        self.assertEqual(stats["Slam - NFL"]["missed_pnl_usdc"], "-1.30")
+        self.assertEqual(stats["Syndicate - NFL"]["missed_graded"], 1)
+        self.assertEqual(stats["Syndicate - NFL"]["missed_pnl_usdc"], "12.40")
+
+    def test_paper_execution_does_not_hide_a_missed_real_trade(self):
+        signals = {
+            "paper-only": {
+                "id": "paper-only",
+                "source": "Slam - NFL",
+                "stake_usdc": "10",
+                "pick_result": "WIN",
+                "pick": _pick(decimal_odds=2.0),
+            }
+        }
+        executions = {
+            "paper": {
+                "id": "paper",
+                "strategy_pick_id": "paper-only",
+                "strategy_source": "Slam - NFL",
+                "strategy_sport": "NFL",
+                "status": "SETTLED_WIN",
+                "paper": True,
+            }
+        }
+
+        stats = capper._missed_signal_stats(signals, executions)
+
+        self.assertEqual(stats["Slam - NFL"]["missed_graded"], 1)
+        self.assertEqual(stats["Slam - NFL"]["missed_pnl_usdc"], "10.00")
+
+    def test_completed_nfl_spread_is_graded_from_final_score(self):
+        pick = _pick(
+            posted_at="2026-09-26T12:00:00+00:00",
+            selection="RAMS -6.5",
+            teams=["LAR"],
+            bet_types=["spread"],
+            spread_lines=["-6.5"],
+        )
+        payload = {
+            "events": [
+                {
+                    "id": "nfl-game-1",
+                    "name": "Los Angeles Rams at Seattle Seahawks",
+                    "competitions": [
+                        {
+                            "status": {"type": {"completed": True}},
+                            "competitors": [
+                                {
+                                    "score": "28",
+                                    "team": {
+                                        "abbreviation": "LAR",
+                                        "displayName": "Los Angeles Rams",
+                                        "shortDisplayName": "Rams",
+                                    },
+                                },
+                                {
+                                    "score": "20",
+                                    "team": {
+                                        "abbreviation": "SEA",
+                                        "displayName": "Seattle Seahawks",
+                                        "shortDisplayName": "Seahawks",
+                                    },
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+
+        class _Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return payload
+
+        with patch.object(capper.httpx, "get", return_value=_Response()):
+            result = capper._nfl_scoreboard_result_for_pick(pick)
+
+        self.assertEqual(result["pick_result"], "WIN")
+        self.assertEqual(result["result_source"], "espn_final_score")
+        self.assertIn("Rams 28", result["final_score"])
+
+
 class NflCapperPositionTests(unittest.TestCase):
     def test_open_position_is_sellable_and_finished_position_is_marked(self):
         executions = {
