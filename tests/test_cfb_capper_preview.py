@@ -1279,5 +1279,107 @@ class CfbPreviewSafetyTests(unittest.TestCase):
             )
 
 
+class CfbFinishedResultsAndPerformanceTests(unittest.TestCase):
+    def test_resolved_signal_outcome_uses_authoritative_token_resolution(self):
+        yes = SimpleNamespace(label="Clemson", token_id="clemson-token", price="1")
+        no = SimpleNamespace(label="Opponent", token_id="opp-token", price="0")
+        market = SimpleNamespace(
+            id="market-1",
+            slug="cfb-clemson-opponent-2026-09-26",
+            state=SimpleNamespace(closed=True),
+            resolution=SimpleNamespace(uma_resolution_status="resolved"),
+            outcomes=SimpleNamespace(yes=yes, no=no),
+        )
+
+        class _Markets:
+            def iter_items(self):
+                return iter([market])
+
+        class _Client:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def list_markets(self, **kwargs):
+                self.kwargs = kwargs
+                return _Markets()
+
+        with patch.object(capper, "PublicClient", return_value=_Client()):
+            result = capper._resolved_signal_outcome("clemson-token")
+
+        self.assertEqual(result["pick_result"], "WIN")
+        self.assertEqual(result["settlement_terminal_price"], "1")
+        self.assertEqual(result["settlement_market_slug"], "cfb-clemson-opponent-2026-09-26")
+
+    def test_closed_status_item_includes_actual_trade_result_and_pnl(self):
+        record = {
+            "id": "cfb-signal-1",
+            "status": "EVENT_CLOSED",
+            "selection": "CLEMSON ML -135",
+            "match_status": "MATCHED",
+            "market_type": "moneyline",
+            "market_url": "https://polymarket.com/sports/cfb/cfb-clemson-opponent-2026-09-26",
+            "event_slug": "cfb-clemson-opponent-2026-09-26",
+            "event_closed": True,
+            "outcome": "Clemson",
+            "asset_id": "clemson-token",
+            "pick_result": "WIN",
+        }
+        executions = {
+            "trade-1": {
+                "id": "trade-1",
+                "strategy_pick_id": "cfb-signal-1",
+                "strategy_source": "Slam - CFB",
+                "strategy_sport": "CFB",
+                "status": "SETTLED_WIN",
+                "actual_cost_usdc": "10",
+                "realized_pnl": "7.50",
+                "settlement": {"result": "WIN"},
+            }
+        }
+
+        item = capper._status_pick_item(record, executions)
+
+        self.assertEqual(item["event_phase"], "CLOSED")
+        self.assertEqual(item["pick_result"], "WIN")
+        self.assertTrue(item["trade_executed"])
+        self.assertEqual(item["trade_result"], "WIN")
+        self.assertEqual(item["trade_pnl_usdc"], "7.50")
+        self.assertEqual(item["trade_stake_usdc"], "10")
+
+    def test_closed_untraded_signal_keeps_result_without_fabricated_pnl(self):
+        record = {
+            "id": "cfb-signal-2",
+            "status": "EVENT_CLOSED",
+            "selection": "TEMPLE +3.5",
+            "match_status": "MATCHED",
+            "market_type": "spread",
+            "market_url": "https://polymarket.com/sports/cfb/cfb-temple-opponent-2026-09-26",
+            "event_slug": "cfb-temple-opponent-2026-09-26",
+            "event_closed": True,
+            "outcome": "Temple",
+            "asset_id": "temple-token",
+            "pick_result": "LOSS",
+        }
+
+        item = capper._status_pick_item(record, {})
+
+        self.assertEqual(item["pick_result"], "LOSS")
+        self.assertFalse(item["trade_executed"])
+        self.assertIsNone(item["trade_pnl_usdc"])
+
+    def test_dashboard_renders_performance_and_finished_result_styles(self):
+        html = '<style></style>\n  <div class="tabs"></div>\n<script></script>'
+        rendered = capper._inject_dashboard_panel(html)
+
+        self.assertIn("cfb-capper-performance", rendered)
+        self.assertIn("Trade P/L", rendered)
+        self.assertIn("label:'WIN'", rendered)
+        self.assertIn("label:'LOSS'", rendered)
+        self.assertIn("NOT TRADED", rendered)
+
+
 if __name__ == "__main__":
     unittest.main()
