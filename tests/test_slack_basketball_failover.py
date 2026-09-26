@@ -32,6 +32,23 @@ class SlackBasketballFailoverTests(unittest.TestCase):
         self.assertEqual(parsed["teams"], ["Boston Celtics", "New York Knicks"])
         self.assertEqual(parsed["quarter"], "Q4")
 
+
+    def test_direct_feed_predicted_winner_format_accepts_nba_and_builds_dedup_key(self):
+        parsed = slack_wnba._parse_alert(
+            "NBA PW Alert\n"
+            "Q4\n"
+            "Predicted Winner: *Boston Celtics* (82% win probability)\n"
+            "BK ML: -240\n"
+            "https://site.api.espn.com/gameId/401999999\n"
+            "2026-09-27 02:30:00 +08"
+        )
+        self.assertTrue(parsed["actionable"])
+        self.assertEqual(parsed["selection"], "Boston Celtics")
+        self.assertEqual(parsed["pw"]["game_id"], "401999999")
+        self.assertEqual(parsed["pw"]["quarter"], "Q4")
+        self.assertEqual(parsed["pw"]["win_probability"], 82)
+        self.assertIsNotNone(ingest._pw_signal_key(parsed))
+
     def test_predicted_winner_parser_keeps_wnba(self):
         parsed = slack_wnba._parse_alert(
             "Predicted Winner — Minnesota Lynx\n"
