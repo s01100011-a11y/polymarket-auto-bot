@@ -568,6 +568,55 @@ class CfbSpreadAlternateTests(unittest.TestCase):
         self.assertEqual(selected[0], "Northwestern")
         self.assertEqual(str(selected[2]), "21.5")
 
+    def test_find_spread_alternatives_prefers_better_equidistant_line(self):
+        event = SimpleNamespace(
+            id="nw-ind",
+            slug="cfb-nw-ind-2026-09-25",
+            title="Northwestern vs Indiana",
+            start_time="2020-01-01T00:00:00+00:00",
+            markets=[
+                self._market("Northwestern +20.5 vs Indiana", "Northwestern", "nw-205"),
+                self._market("Northwestern +21.5 vs Indiana", "Northwestern", "nw-215"),
+            ],
+        )
+
+        class _Result:
+            items = [event]
+
+        class _Client:
+            def __enter__(self): return self
+            def __exit__(self, exc_type, exc, tb): return False
+            def list_events(self, **kwargs): return SimpleNamespace(first_page=lambda: _Result())
+
+        pick = _pick(
+            selection="NORTHWESTERN 21",
+            posted_at="2026-09-25T22:32:01+00:00",
+            team_hint="Northwestern",
+            event_hints=["Northwestern"],
+            bet_types=["spread"],
+            spread_lines=["+21"],
+        )
+        quotes = {
+            "nw-205": {
+                "current_buy_price": "0.50", "best_ask": "0.51", "max_price": "0.51",
+                "spread": "0.02", "live_odds_american": "+96", "quote_updated_at": "now",
+            },
+            "nw-215": {
+                "current_buy_price": "0.52", "best_ask": "0.53", "max_price": "0.53",
+                "spread": "0.02", "live_odds_american": "-113", "quote_updated_at": "now",
+            },
+        }
+        with (
+            patch.object(capper, "PublicClient", return_value=_Client()),
+            patch.object(capper, "_read_live_buy_quote", side_effect=lambda asset: quotes[asset]),
+        ):
+            alternatives = capper._find_spread_alternatives(pick)
+
+        self.assertEqual([x["spread_line"] for x in alternatives], ["+21.5", "+20.5"])
+        self.assertEqual(alternatives[0]["relative_to_original"], "BETTER")
+        self.assertEqual(alternatives[1]["relative_to_original"], "WORSE")
+        self.assertEqual(alternatives[0]["event_phase"], "LIVE")
+
     def test_manual_buy_can_use_explicit_alternate_but_keeps_original_pick_id(self):
         saved = {
             "alternative_id": "alt-1",
