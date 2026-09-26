@@ -361,6 +361,8 @@ class CfbDashboardPanelTests(unittest.TestCase):
         self.assertIn('manual pregame/live while market open', rendered)
         self.assertIn('scan ', rendered)
         self.assertIn('/api/cfb-cappers/manual-buy/', rendered)
+        self.assertIn('/api/cfb-cappers/manual-buy-alternate/', rendered)
+        self.assertIn('BETTER LINE', rendered)
 
     def test_injection_is_idempotent(self):
         html = '<style></style>\n  <div class="tabs"></div>\n<script></script>'
@@ -532,6 +534,165 @@ class CfbLifecycleAndOddsTests(unittest.TestCase):
         self.assertEqual(record["status"], "MATCHED_LIVE")
         self.assertEqual(record["best_ask"], "0.62")
         self.assertEqual(record["live_odds_american"], "-163")
+
+
+class CfbSpreadAlternateTests(unittest.TestCase):
+    @staticmethod
+    def _market(question, label, token, *, accepting=True):
+        yes = SimpleNamespace(label=label, token_id=token)
+        no = SimpleNamespace(label="Indiana", token_id=token + "-no")
+        return SimpleNamespace(
+            id=token + "-market",
+            question=question,
+            slug=token + "-spread",
+            sports=SimpleNamespace(sports_market_type="spread", line=None),
+            outcomes=SimpleNamespace(yes=yes, no=no),
+            state=SimpleNamespace(accepting_orders=accepting),
+        )
+
+    def test_spread_outcome_any_line_reads_explicit_selected_team_line(self):
+        market = self._market(
+            "Northwestern +21.5 vs Indiana",
+            "Northwestern",
+            "nw-215",
+        )
+        pick = _pick(
+            selection="NORTHWESTERN 21",
+            team_hint="Northwestern",
+            event_hints=["Northwestern"],
+            bet_types=["spread"],
+            spread_lines=["+21"],
+        )
+        selected = capper._spread_outcome_any_line(market, pick)
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected[0], "Northwestern")
+        self.assertEqual(str(selected[2]), "21.5")
+
+    def test_find_spread_alternatives_prefers_better_equidistant_line(self):
+        event = SimpleNamespace(
+            id="nw-ind",
+            slug="cfb-nw-ind-2026-09-25",
+            title="Northwestern vs Indiana",
+            start_time="2020-01-01T00:00:00+00:00",
+            markets=[
+                self._market("Northwestern +20.5 vs Indiana", "Northwestern", "nw-205"),
+                self._market("Northwestern +21.5 vs Indiana", "Northwestern", "nw-215"),
+            ],
+        )
+
+        class _Result:
+            items = [event]
+
+        class _Client:
+            def __enter__(self): return self
+            def __exit__(self, exc_type, exc, tb): return False
+            def list_events(self, **kwargs): return SimpleNamespace(first_page=lambda: _Result())
+
+        pick = _pick(
+            selection="NORTHWESTERN 21",
+            posted_at="2026-09-25T22:32:01+00:00",
+            team_hint="Northwestern",
+            event_hints=["Northwestern"],
+            bet_types=["spread"],
+            spread_lines=["+21"],
+        )
+        quotes = {
+            "nw-205": {
+                "current_buy_price": "0.50", "best_ask": "0.51", "max_price": "0.51",
+                "spread": "0.02", "live_odds_american": "+96", "quote_updated_at": "now",
+            },
+            "nw-215": {
+                "current_buy_price": "0.52", "best_ask": "0.53", "max_price": "0.53",
+                "spread": "0.02", "live_odds_american": "-113", "quote_updated_at": "now",
+            },
+        }
+        with (
+            patch.object(capper, "PublicClient", return_value=_Client()),
+            patch.object(capper, "_read_live_buy_quote", side_effect=lambda asset: quotes[asset]),
+        ):
+            alternatives = capper._find_spread_alternatives(pick)
+
+        self.assertEqual([x["spread_line"] for x in alternatives], ["+21.5", "+20.5"])
+        self.assertEqual(alternatives[0]["relative_to_original"], "BETTER")
+        self.assertEqual(alternatives[1]["relative_to_original"], "WORSE")
+        self.assertEqual(alternatives[0]["event_phase"], "LIVE")
+
+    def test_manual_buy_can_use_explicit_alternate_but_keeps_original_pick_id(self):
+        saved = {
+            "alternative_id": "alt-1",
+            "match_status": "ALTERNATE",
+            "market_type": "spread",
+            "event_slug": "cfb-nw-ind-2026-09-25",
+            "event_title": "Northwestern vs Indiana",
+            "event_start_at": "2020-01-01T00:00:00+00:00",
+            "market_accepting_orders": True,
+            "market": "Northwestern +21.5",
+            "market_url": "https://polymarket.com/sports/cfb/cfb-nw-ind-2026-09-25",
+            "outcome": "Northwestern",
+            "asset_id": "nw-215",
+            "spread_line": "+21.5",
+        }
+
+        class _Book:
+            asks = [SimpleNamespace(price="0.52")]
+
+        class _Client:
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+            def get_price(self, **kwargs):
+                return "0.51"
+            def get_spread(self, **kwargs):
+                return "0.02"
+            def get_order_book(self, **kwargs):
+                return _Book()
+
+        core = SimpleNamespace(
+            MAX_AUTO_TRADE_USDC=Decimal("50"),
+            MAX_DAILY_BUDGET_USDC=Decimal("100"),
+            MAX_PRICE=Decimal("0.95"),
+            MAX_SPREAD=Decimal("0.08"),
+            EXECUTIONS_FILE=None,
+            _daily_budget_used=lambda: Decimal("0"),
+        )
+        calls = []
+        class _Remote:
+            def _queue_load(self): return {}
+            def _expire_stale_buys_persisted(self): return []
+            def _enqueue(self, action, payload):
+                calls.append((action, payload))
+                return {"id": "alt-buy"}
+
+        pick = _pick(
+            selection="Northwestern +21.5",
+            team_hint="Northwestern",
+            event_hints=["Northwestern"],
+            bet_types=["spread"],
+            spread_lines=["+21.5"],
+        )
+        with (
+            patch.object(capper.live_control, "_executor_ready", return_value=(True, {})),
+            patch.object(capper, "PublicClient", return_value=_Client()),
+            patch.object(capper.nfl, "_pending_auto_budget", return_value=Decimal("0")),
+        ):
+            result = capper._prepare_manual_buy(
+                pick,
+                core=core,
+                remote=_Remote(),
+                unit_usdc=Decimal("10"),
+                matched=saved,
+                strategy_pick_id="original-northwestern-signal",
+                strategy_selection="NORTHWESTERN 21",
+                strategy_alternate_line="+21.5",
+            )
+
+        self.assertEqual(result["best_ask"], "0.52")
+        self.assertEqual(calls[0][0], "BUY")
+        self.assertEqual(calls[0][1]["strategy_pick_id"], "original-northwestern-signal")
+        self.assertEqual(calls[0][1]["strategy_selection"], "NORTHWESTERN 21")
+        self.assertEqual(calls[0][1]["strategy_alternate_line"], "+21.5")
+        self.assertEqual(calls[0][1]["asset_id"], "nw-215")
 
 
 class CfbPreviewSafetyTests(unittest.TestCase):
