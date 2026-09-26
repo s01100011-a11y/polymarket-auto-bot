@@ -1423,6 +1423,36 @@ function cfbAge(seconds){
  if(s<3600)return Math.floor(s/60)+'m';
  return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
 }
+function cfbPhaseVisual(item){
+ const phase=String(item.event_phase||'').toUpperCase();
+ const status=String(item.status||'').toUpperCase();
+ if(phase==='LIVE'||status==='MATCHED_LIVE'||status==='MATCHED_LIVE_ALTERNATE'){
+  return {
+   label:'LIVE',
+   row:'background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.38);border-left:4px solid #22c55e;',
+   badge:'background:rgba(34,197,94,.18);border:1px solid rgba(34,197,94,.45);color:#86efac;'
+  };
+ }
+ if(phase==='CLOSED'||status==='EVENT_CLOSED'){
+  return {
+   label:'FINISHED',
+   row:'background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.24);border-left:4px solid #94a3b8;opacity:.82;',
+   badge:'background:rgba(148,163,184,.15);border:1px solid rgba(148,163,184,.32);color:#cbd5e1;'
+  };
+ }
+ if(phase==='PREGAME'||status==='MATCHED_PREGAME'||status==='MATCHED_PREGAME_ALTERNATE'){
+  return {
+   label:'PREGAME',
+   row:'background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.35);border-left:4px solid #3b82f6;',
+   badge:'background:rgba(59,130,246,.17);border:1px solid rgba(59,130,246,.42);color:#93c5fd;'
+  };
+ }
+ return {
+  label:'',
+  row:'border:1px solid rgba(255,255,255,.07);',
+  badge:''
+ };
+}
 function cfbPickList(title,items,kind){
  if(!Array.isArray(items)||!items.length)return '';
  const rows=items.map(item=>{
@@ -1432,6 +1462,7 @@ function cfbPickList(title,items,kind){
   if(item.posted_at)meta.push('posted '+cfbPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+cfbAge(item.signal_age_seconds):''));
   if(item.market)meta.push('Matched: '+cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
   if(item.event_phase==='LIVE')meta.push('GAME LIVE');
+  else if(item.event_phase==='CLOSED')meta.push('GAME FINISHED');
   else if(item.event_start_at)meta.push('starts '+cfbPickTime(item.event_start_at));
   if(item.best_ask!==null&&item.best_ask!==undefined&&item.best_ask!==''){
    const cents=(Number(item.best_ask)*100).toFixed(1).replace(/\.0$/,'');
@@ -1457,7 +1488,9 @@ function cfbPickList(title,items,kind){
   }).join('');
   const marketAction=(item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+cfbEsc(item.market_url)+'">OPEN MARKET</a>':'';
   const action=buyAction+altActions+marketAction;
-  return '<div style="margin-top:5px;padding-top:5px;border-top:1px solid rgba(255,255,255,.07)"><b>'+cfbEsc(item.selection||'Unknown selection')+'</b>'+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+(action?'<br>'+action:'')+'</div>';
+  const visual=cfbPhaseVisual(item);
+  const badge=visual.label?'<span style="display:inline-block;margin-left:7px;padding:2px 6px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.03em;vertical-align:1px;'+visual.badge+'">'+visual.label+'</span>':'';
+  return '<div style="margin-top:7px;padding:8px 9px;border-radius:8px;'+visual.row+'"><b>'+cfbEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+(action?'<br>'+action:'')+'</div>';
  }).join('');
  return '<div style="margin-top:8px"><b>'+cfbEsc(title)+'</b>'+rows+'</div>';
 }
