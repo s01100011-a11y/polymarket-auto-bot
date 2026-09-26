@@ -1,3 +1,13 @@
+## 2026-09-26 — Finished CFB lifecycle revalidation (#101)
+
+- Fixed finished games such as Temple remaining under Pregame.
+- Polymarket Gamma event lifecycle is now read from the SDK's real nested fields: `event.state.closed/ended/live`, `event.schedule.start_time/finished_at/closed_time`, and `event.sports.game_status`.
+- Exact matched signals now refresh the original stored event by its exact Gamma slug every poll, in both Pregame and Live states. The bot no longer waits for a signal to become Live before re-checking closure/final state.
+- Event refresh locates the exact stored outcome token on that same event, so lifecycle refresh cannot silently jump to another game.
+- `ended`, `closed`, a passed `finished_at`, a final game status, or a non-accepting market all classify the signal as Closed and remove manual BUY availability.
+- One-team picks now enforce posted-date proximity even when only one open candidate event exists. An old Temple pick cannot roll forward onto a later Temple game after its original event closes.
+- Full-game spread alternatives use the same one-team date protection.
+
 ## 2026-09-26 — Structured CFB spread-side resolution (#98)
 
 - Fixed live CFB spread matching for Polymarket Gamma markets where the selected team is the complementary outcome of the displayed spread.

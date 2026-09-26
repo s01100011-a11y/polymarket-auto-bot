@@ -288,7 +288,43 @@ class CfbMarketResolutionTests(unittest.TestCase):
             spread_lines=[],
         )
         with patch.object(capper, "PublicClient", return_value=_Client()):
-            with self.assertRaisesRegex(ValueError, "no unique nearby game"):
+            with self.assertRaisesRegex(ValueError, "No nearby dated"):
+                capper._find_market(pick, "moneyline")
+
+    def test_single_future_event_does_not_inherit_old_pick(self):
+        yes = SimpleNamespace(label="Temple", token_id="future-temple-yes")
+        no = SimpleNamespace(label="Opponent", token_id="future-temple-no")
+        market = SimpleNamespace(
+            id="future-temple-ml",
+            question="Temple moneyline",
+            slug="future-temple-ml",
+            sports=SimpleNamespace(sports_market_type="moneyline", line=None),
+            outcomes=SimpleNamespace(yes=yes, no=no),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        future = SimpleNamespace(
+            id="future-temple",
+            slug="cfb-temple-opponent-2026-10-03",
+            title="Temple vs Opponent",
+            markets=[market],
+        )
+
+        class _Client:
+            def __enter__(self): return self
+            def __exit__(self, exc_type, exc, tb): return False
+            def list_events(self, **kwargs):
+                return CfbMarketResolutionTests._result([future])
+
+        pick = _pick(
+            selection="TEMPLE ML",
+            posted_at="2026-09-25T19:46:30+00:00",
+            team_hint="Temple",
+            event_hints=["Temple"],
+            bet_types=["moneyline"],
+            spread_lines=[],
+        )
+        with patch.object(capper, "PublicClient", return_value=_Client()):
+            with self.assertRaisesRegex(ValueError, "No nearby dated"):
                 capper._find_market(pick, "moneyline")
 
     def test_multiple_matching_events_fail_closed(self):
@@ -310,7 +346,10 @@ class CfbMarketResolutionTests(unittest.TestCase):
                 markets=[market],
             )
 
-        events = [event("cfb-baylor-a"), event("cfb-baylor-b")]
+        events = [
+            event("cfb-baylor-a-2026-09-25"),
+            event("cfb-baylor-b-2026-09-25"),
+        ]
 
         class _Client:
             def __enter__(self):
@@ -466,6 +505,38 @@ class CfbLifecycleAndOddsTests(unittest.TestCase):
         self.assertEqual(capper._event_phase(future, now), "PREGAME")
         self.assertEqual(capper._event_phase(past, now), "LIVE")
 
+    def test_nested_gamma_schedule_and_state_drive_lifecycle(self):
+        event = SimpleNamespace(
+            schedule=SimpleNamespace(
+                start_time=capper._parse_iso("2026-09-25T23:00:00+00:00"),
+                finished_at=capper._parse_iso("2026-09-26T02:00:00+00:00"),
+                closed_time=None,
+            ),
+            state=SimpleNamespace(closed=False, ended=True, live=False),
+            sports=SimpleNamespace(game_status="Final"),
+        )
+        market = SimpleNamespace(
+            sports=SimpleNamespace(game_start_time=None),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        meta = capper._event_lifecycle_metadata(event, market)
+        self.assertEqual(meta["event_start_at"], "2026-09-25T23:00:00+00:00")
+        self.assertEqual(meta["event_finished_at"], "2026-09-26T02:00:00+00:00")
+        self.assertTrue(meta["event_ended"])
+        self.assertEqual(meta["game_status"], "Final")
+        self.assertEqual(
+            capper._event_phase(meta, capper._parse_iso("2026-09-26T02:30:00+00:00")),
+            "CLOSED",
+        )
+
+    def test_event_phase_closes_on_final_status_even_if_market_accepting(self):
+        record = {
+            "game_status": "Final",
+            "market_accepting_orders": True,
+            "event_start_at": "2026-09-25T23:00:00+00:00",
+        }
+        self.assertEqual(capper._event_phase(record), "CLOSED")
+
     def test_date_only_start_is_not_treated_as_midnight_kickoff(self):
         event = SimpleNamespace(start_date="2026-09-26")
         self.assertIsNone(capper._precise_event_start(event))
@@ -504,21 +575,18 @@ class CfbLifecycleAndOddsTests(unittest.TestCase):
             ),
         }
         refreshed = {
-            "match_status": "MATCHED",
-            "market_type": "moneyline",
-            "event_slug": "cfb-clemson-unc-2026-09-26",
             "event_title": "Clemson vs UNC",
             "event_start_at": "2020-01-01T00:00:00+00:00",
             "event_start_checked_at": "2026-09-26T01:00:00+00:00",
             "event_closed": False,
+            "event_ended": False,
+            "event_live": True,
+            "event_finished_at": None,
+            "game_status": "Live",
             "market_accepting_orders": True,
-            "market": "Clemson vs UNC",
-            "market_url": "https://polymarket.com/sports/cfb/cfb-clemson-unc-2026-09-26",
-            "outcome": "Clemson",
-            "asset_id": "clemson-token",
         }
         with (
-            patch.object(capper, "_resolve_market_match", return_value=refreshed),
+            patch.object(capper, "_refresh_saved_event_state", return_value=refreshed),
             patch.object(capper, "_read_live_buy_quote", return_value={
                 "current_buy_price": "0.61",
                 "best_ask": "0.62",
@@ -534,6 +602,94 @@ class CfbLifecycleAndOddsTests(unittest.TestCase):
         self.assertEqual(record["status"], "MATCHED_LIVE")
         self.assertEqual(record["best_ask"], "0.62")
         self.assertEqual(record["live_odds_american"], "-163")
+
+    def test_runtime_refresh_moves_finished_pregame_record_to_closed(self):
+        record = {
+            "id": "temple",
+            "status": "MATCHED_PREGAME",
+            "match_status": "MATCHED",
+            "market_type": "spread",
+            "event_slug": "cfb-temple-opponent-2026-09-25",
+            "event_title": "Temple vs Opponent",
+            "event_start_at": None,
+            "event_start_checked_at": "2026-09-25T19:50:00+00:00",
+            "market_accepting_orders": True,
+            "market_url": "https://polymarket.com/sports/cfb/cfb-temple-opponent-2026-09-25",
+            "outcome": "Temple",
+            "asset_id": "temple-token",
+            "pick": _pick(
+                selection="TEMPLE +3.5",
+                posted_at="2026-09-25T19:46:30+00:00",
+                team_hint="Temple",
+                event_hints=["Temple"],
+                bet_types=["spread"],
+                spread_lines=["+3.5"],
+            ),
+        }
+        refreshed = {
+            "event_title": "Temple vs Opponent",
+            "event_start_at": "2026-09-25T20:00:00+00:00",
+            "event_start_checked_at": "2026-09-26T02:30:00+00:00",
+            "event_finished_at": "2026-09-26T00:45:00+00:00",
+            "event_closed": False,
+            "event_ended": True,
+            "event_live": False,
+            "game_status": "Final",
+            "market_accepting_orders": True,
+        }
+        with (
+            patch.object(capper, "_refresh_saved_event_state", return_value=refreshed),
+            patch.object(capper, "_read_live_buy_quote", side_effect=AssertionError("closed game must not quote")),
+        ):
+            changed = capper._refresh_record_runtime(record)
+
+        self.assertTrue(changed)
+        self.assertEqual(record["status"], "EVENT_CLOSED")
+        self.assertEqual(record["event_phase"], "CLOSED")
+        self.assertEqual(record["game_status"], "Final")
+
+
+class CfbAlternateLifecycleTests(unittest.TestCase):
+    def test_finished_alternate_signal_moves_to_closed(self):
+        record = {
+            "status": "MATCHED_LIVE_ALTERNATE",
+            "event_phase": "LIVE",
+            "reason": "exact original spread is unavailable",
+            "pick": _pick(
+                selection="NORTHWESTERN 21",
+                posted_at="2026-09-25T22:32:01+00:00",
+                team_hint="Northwestern",
+                event_hints=["Northwestern"],
+                bet_types=["spread"],
+                spread_lines=["+21"],
+            ),
+            "live_alternatives": [
+                {
+                    "event_slug": "cfb-nw-ind-2026-09-25",
+                    "asset_id": "nw-215-no",
+                }
+            ],
+        }
+        with patch.object(
+            capper,
+            "_refresh_saved_event_state",
+            return_value={
+                "event_title": "Northwestern vs Indiana",
+                "event_start_at": "2026-09-25T23:00:00+00:00",
+                "event_start_checked_at": "2026-09-26T02:30:00+00:00",
+                "event_finished_at": "2026-09-26T02:00:00+00:00",
+                "event_closed": True,
+                "event_ended": True,
+                "event_live": False,
+                "game_status": "Final",
+                "market_accepting_orders": False,
+            },
+        ):
+            changed = capper._refresh_spread_alternatives(record)
+
+        self.assertTrue(changed)
+        self.assertEqual(record["status"], "EVENT_CLOSED")
+        self.assertEqual(record["event_phase"], "CLOSED")
 
 
 class CfbSpreadAlternateTests(unittest.TestCase):
