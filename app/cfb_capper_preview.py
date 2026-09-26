@@ -920,9 +920,7 @@ def _prepare_preview(
         "strategy_unit_usdc": str(unit_usdc),
         "strategy_pick_id": fp,
         "strategy_posted_at": pick.get("posted_at"),
-        "strategy_selection": strategy_selection or pick.get("selection"),
-        "strategy_execution_selection": pick.get("selection"),
-        "strategy_alternate_line": strategy_alternate_line,
+        "strategy_selection": pick.get("selection"),
         "strategy_telegram_source": pick.get("source"),
     }
     queued = remote._enqueue("PREVIEW", payload)
@@ -1042,7 +1040,9 @@ def _prepare_manual_buy(
         "strategy_unit_usdc": str(unit_usdc),
         "strategy_pick_id": fp,
         "strategy_posted_at": pick.get("posted_at"),
-        "strategy_selection": pick.get("selection"),
+        "strategy_selection": strategy_selection or pick.get("selection"),
+        "strategy_execution_selection": pick.get("selection"),
+        "strategy_alternate_line": strategy_alternate_line,
         "strategy_telegram_source": pick.get("source"),
     }
     queued = remote._enqueue("BUY", payload)
