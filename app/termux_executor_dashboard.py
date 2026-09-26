@@ -158,7 +158,7 @@ def executor_status():
         "geo_blocked": state.get("geo_blocked"),
         "worker_status": state.get("status"),
         "remote_max_usdc": str(core.MAX_AUTO_TRADE_USDC),
-        "railway_live_trading": core.LIVE_TRADING,
+        "railway_live_trading": core.live_trading_enabled(),
     }
 
 
