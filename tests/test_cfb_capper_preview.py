@@ -38,6 +38,33 @@ class CfbSourceAndSizingTests(unittest.TestCase):
         self.assertEqual(capper._stake_for_pick(_pick(units=2)), Decimal("20.00"))
         self.assertEqual(capper._stake_for_pick(_pick(units=None)), Decimal("10.00"))
 
+    def test_manual_fallback_is_marked_and_keeps_normal_source_mapping(self):
+        rows = capper._manual_fallback_picks(
+            '[{"source":"The Syndicate","posted_at":"2026-09-26T16:00:00+00:00",'
+            '"selection":"Tennessee +7.5","team_hint":"Tennessee",'
+            '"event_hints":["Tennessee"],"bet_types":["spread"],'
+            '"spread_lines":["+7.5"],"units":1.5,"status":"active"}]'
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["manual_fallback"])
+        self.assertEqual(capper._source_label(rows[0]), "Syndicate - CFB")
+
+    def test_manual_fallback_semantic_dedupe_ignores_timestamp_and_odds(self):
+        first = _pick(
+            source="The Syndicate",
+            posted_at="2026-09-26T16:00:00+00:00",
+            decimal_odds=1.67,
+        )
+        later = _pick(
+            source="The Syndicate",
+            posted_at="2026-09-26T16:05:00+00:00",
+            decimal_odds=1.70,
+        )
+        self.assertEqual(
+            capper._semantic_fingerprint(first),
+            capper._semantic_fingerprint(later),
+        )
+
     def test_period_and_team_total_fail_closed(self):
         kind, reason = capper._classify_pick(
             _pick(period="1H", bet_types=["spread", "period"])
