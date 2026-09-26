@@ -253,6 +253,8 @@ class CfbDashboardPanelTests(unittest.TestCase):
         self.assertIn('stale_items', rendered)
         self.assertIn('Queued picks', rendered)
         self.assertIn('Stale picks', rendered)
+        self.assertIn('BUY LIVE', rendered)
+        self.assertIn('/api/cfb-cappers/manual-buy/', rendered)
 
     def test_injection_is_idempotent(self):
         html = '<style></style>\n  <div class="tabs"></div>\n<script></script>'
@@ -381,6 +383,83 @@ class CfbPreviewSafetyTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["budget_usdc"], "20.00")
         self.assertTrue(calls[0][1]["trade_id"].startswith("cfb-capper-"))
         self.assertFalse(calls[0][1]["auto"])
+
+
+    def test_prepare_manual_buy_queues_buy_without_auto_trading(self):
+        outcome = SimpleNamespace(label="Baylor", token_id="baylor-token")
+        market = SimpleNamespace(question="Baylor vs TCU")
+        event = SimpleNamespace(slug="cfb-baylor-tcu-2026-09-26", title="Baylor vs TCU")
+
+        class _Book:
+            asks = [SimpleNamespace(price="0.47")]
+
+        class _Client:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def get_price(self, **kwargs):
+                return "0.46"
+
+            def get_spread(self, **kwargs):
+                return "0.02"
+
+            def get_order_book(self, **kwargs):
+                return _Book()
+
+        core = SimpleNamespace(
+            MAX_AUTO_TRADE_USDC=Decimal("50"),
+            MAX_DAILY_BUDGET_USDC=Decimal("100"),
+            MAX_PRICE=Decimal("0.95"),
+            MAX_SPREAD=Decimal("0.08"),
+            EXECUTIONS_FILE=None,
+            _daily_budget_used=lambda: Decimal("0"),
+            auto_trading_enabled=lambda: False,
+        )
+        calls = []
+
+        class _Remote:
+            def _queue_load(self):
+                return {}
+
+            def _expire_stale_buys_persisted(self):
+                return []
+
+            def _enqueue(self, action, payload):
+                calls.append((action, payload))
+                return {"id": "cfb-buy-1"}
+
+        pick = _pick(
+            selection="BAYLOR +7",
+            team_hint="Baylor",
+            event_hints=["Baylor", "TCU"],
+            bet_types=["spread"],
+            spread_lines=["+7"],
+        )
+
+        with (
+            patch.object(capper.live_control, "_executor_ready", return_value=(True, {})),
+            patch.object(capper, "_find_market", return_value=(event, market, "Baylor", outcome)),
+            patch.object(capper, "PublicClient", return_value=_Client()),
+            patch.object(capper.nfl, "_pending_auto_budget", return_value=Decimal("0")),
+        ):
+            result = capper._prepare_manual_buy(
+                pick,
+                core=core,
+                remote=_Remote(),
+                unit_usdc=Decimal("10"),
+            )
+
+        self.assertEqual(result["status"], "MANUAL_BUY_QUEUED")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], "BUY")
+        self.assertFalse(calls[0][1]["auto"])
+        self.assertTrue(calls[0][1]["manual"])
+        self.assertEqual(calls[0][1]["source"], "cfb_capper_manual")
+        self.assertEqual(calls[0][1]["asset_id"], "baylor-token")
+        self.assertEqual(calls[0][1]["max_price"], "0.47")
 
     def test_prepare_preview_respects_global_auto_trading_gate(self):
         core = SimpleNamespace(
