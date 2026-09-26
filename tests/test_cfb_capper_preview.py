@@ -456,7 +456,7 @@ class CfbLifecycleAndOddsTests(unittest.TestCase):
     def test_runtime_refresh_keeps_started_open_market_live(self):
         record = {
             "id": "clemson",
-            "status": "MATCHED_PREGAME",
+            "status": "EVENT_STARTED",
             "match_status": "MATCHED",
             "market_type": "moneyline",
             "event_slug": "cfb-clemson-unc-2026-09-26",
