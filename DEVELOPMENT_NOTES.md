@@ -1,3 +1,19 @@
+## 2026-09-26 — Forward executable PW spread capture (#15)
+
+- Added `app/pw_spread_capture.py` as a research/shadow-only forward recorder; it has no order-placement, sizing, routing, or position-management path.
+- Every genuine persisted PW alert now gets a parallel spread-capture pass after the existing alert handlers. The recorder resolves the same WNBA event and enumerates every open full-game Polymarket spread token that can be mapped unambiguously to the PW-selected team.
+- Spread-line decoding reuses the existing fail-closed signed-line logic used by the CFB sports resolver, including inversion for the complementary team side.
+- Each watch stores the PW event/game/team/quarter/score/timestamp, BK moneyline and BK spread, same-side call number, Polymarket event/market/condition/token identifiers, selected signed Polymarket line, and outcome label.
+- New durable SQLite tables `pw_spread_watches` and `pw_spread_ticks` store natural live captures separately from historical/proxy research.
+- Active spread tokens are sampled at `PW_SPREAD_CAPTURE_SAMPLE_SECONDS` (default 1 second) for `PW_SPREAD_CAPTURE_WINDOW_SECONDS` (default 300 seconds).
+- Every sample records executable BUY/SELL prices, midpoint, CLOB spread, best bid/ask and sizes, total visible bid/ask depth, plus latest quarter/clock/score context.
+- Added authenticated `/api/pw-spread-capture/status` for recorder health/coverage and `/api/pw-spread-capture/forward` for forward paper diagnostics.
+- Forward diagnostics separate first PW calls from repeats and also provide a one-position-per-game/team view. The one-position view takes the first PW call for that side and selects the captured Polymarket line closest to the stored BK spread, breaking ties on lower first executable ask.
+- Forward paper entry is explicitly the first observed natural executable best ask after the PW call; settled spread results use the stored final game score plus the captured signed line. These are forward paper diagnostics, not live orders.
+- Added regression tests for selected-team signed spread mapping, complementary-line inversion, and rejecting closed spread markets.
+- Environment controls: `PW_SPREAD_CAPTURE_ENABLED=true`, `PW_SPREAD_CAPTURE_SAMPLE_SECONDS=1`, `PW_SPREAD_CAPTURE_WINDOW_SECONDS=300`.
+- Natural sample counts will accumulate only when genuine future PW alerts arrive; no synthetic alert is injected into the live pipeline for validation.
+
 ## 2026-09-26 — Top portfolio value + total missed P/L stats (#114)
 
 - Added two account-level cards to the top performance strip: `Portfolio value` and `Missed P/L · total`.
