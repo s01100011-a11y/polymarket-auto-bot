@@ -1,3 +1,13 @@
+## 2026-09-26 — CFB status tabs and current-slate recovery (#94)
+
+- Each Slam/Syndicate CFB card now exposes viewable tabs for Signals, Queued, Done, Failed, Retrying, Pregame, Live, Closed, and Unsupported instead of flattening all status counts into one block.
+- Every tab has its own item list; the Signals tab shows the most recent records across all states and preserves each record's status.
+- The selected tab is preserved while the dashboard refreshes, so a 10-second status refresh does not kick the user back to Signals.
+- Existing BUY LIVE / OPEN MARKET actions continue to render inside Pregame and Live tabs when the record is actionable.
+- The CFB bridge lookup window is now configurable with `CFB_CAPPER_FEED_WINDOW_MINUTES` and defaults to 1440 minutes (24 hours), with a 300-post request limit.
+- The 24-hour scan window is separate from the 180-second unattended auto freshness gate. Older same-slate picks can therefore be recovered and shown pregame/live without becoming unattended auto entries.
+- Dashboard metadata now shows the active scan window.
+
 ## 2026-09-26 — Keep CFB signals actionable during live games (#92)
 
 - Matched CFB signals now transition from `MATCHED_PREGAME` to `MATCHED_LIVE` after kickoff while the matched Polymarket market remains open.

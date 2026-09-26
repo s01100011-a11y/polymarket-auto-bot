@@ -342,18 +342,24 @@ class CfbDashboardPanelTests(unittest.TestCase):
         self.assertIn('Syndicate - CFB', rendered)
         self.assertIn('/api/cfb-cappers/status', rendered)
         self.assertIn('preview_queued', rendered)
+        self.assertIn('all_items', rendered)
         self.assertIn('queued_items', rendered)
+        self.assertIn('done_items', rendered)
         self.assertIn('pregame_items', rendered)
-        self.assertIn('Queued picks', rendered)
-        self.assertIn('Matched pregame picks', rendered)
-        self.assertIn('Matched live picks', rendered)
+        self.assertIn('closed_items', rendered)
+        self.assertIn('unsupported_items', rendered)
+        self.assertIn("['signals','Signals'", rendered)
+        self.assertIn("['queued','Queued'", rendered)
+        self.assertIn("['done','Done'", rendered)
+        self.assertIn("['live','Live'", rendered)
         self.assertIn('GAME LIVE', rendered)
-        self.assertIn('Previewed picks', rendered)
         self.assertIn('BUY LIVE', rendered)
         self.assertIn('OPEN MARKET', rendered)
         self.assertIn('Matched:', rendered)
         self.assertIn('Live BUY', rendered)
+        self.assertIn("status '+cfbEsc(item.status)", rendered)
         self.assertIn('manual pregame/live while market open', rendered)
+        self.assertIn('scan ', rendered)
         self.assertIn('/api/cfb-cappers/manual-buy/', rendered)
 
     def test_injection_is_idempotent(self):
@@ -392,6 +398,26 @@ class CfbDashboardPanelTests(unittest.TestCase):
         self.assertEqual([item["selection"] for item in items], ["NAVY -6.5", "TEXAS ML"])
         self.assertEqual(items[0]["stake_usdc"], "20.00")
         self.assertEqual(items[0]["market"], "Navy vs Air Force")
+
+    def test_all_items_keep_status_for_tab_view(self):
+        rows = [
+            {
+                "id": "done",
+                "status": "PREVIEW_DONE",
+                "selection": "DONE PICK",
+                "updated_at": "2026-09-26T01:00:00+00:00",
+            },
+            {
+                "id": "live",
+                "status": "MATCHED_LIVE",
+                "selection": "LIVE PICK",
+                "updated_at": "2026-09-26T02:00:00+00:00",
+            },
+        ]
+        items = capper._recent_all_items(rows)
+        self.assertEqual([item["selection"] for item in items], ["LIVE PICK", "DONE PICK"])
+        self.assertEqual(items[0]["status"], "MATCHED_LIVE")
+        self.assertEqual(items[1]["status"], "PREVIEW_DONE")
 
     def test_status_pick_items_include_pregame_live_odds(self):
         rows = [
