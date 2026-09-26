@@ -1046,7 +1046,6 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 core=core,
                 remote=remote,
                 unit_usdc=unit_usdc,
-                matched=saved_match,
             )
             marker = {
                 "trigger_hash": trigger_hash,
@@ -1191,7 +1190,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         if pick is None:
             raise HTTPException(
                 status_code=409,
-                detail="Original CFB pick details are no longer available to safely re-resolve the live market",
+                detail="Original CFB pick details are no longer available to submit the matched market",
             )
 
         try:
