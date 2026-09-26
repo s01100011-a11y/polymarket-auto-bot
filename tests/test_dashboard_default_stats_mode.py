@@ -24,6 +24,8 @@ def test_top_stats_include_portfolio_value_and_total_missed_pnl():
     assert "Missed P/L · total" in metrics_source
 
     assert "def _portfolio_value()" in stats_source
+    assert 'state.get("usdc_balance")' in stats_source
+    assert 'state.get("portfolio_value")' in stats_source
     assert "def _total_missed_pnl(" in stats_source
     assert '"nfl_capper_signals.json"' in stats_source
     assert '"cfb_capper_preview_signals.json"' in stats_source
