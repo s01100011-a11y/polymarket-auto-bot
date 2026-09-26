@@ -1,3 +1,13 @@
+## 2026-09-26 — Match CFB picks before exposing BUY (#88)
+
+- Tracked Slam/Syndicate CFB picks now resolve to an exact Polymarket event, market, outcome, and token before the dashboard exposes a live-buy action.
+- Supported stale picks are matched first and only then marked stale, so stale/manual rows already know their exact Polymarket event.
+- Persisted match metadata includes the event slug/title, market URL/question, outcome, market type, and exact asset token.
+- Manual BUY uses the persisted token/event and refreshes only the executable price, spread, and order book at click time; it does not rediscover the game on click.
+- Dashboard rows show the matched market/outcome plus an OPEN MARKET link. BUY LIVE is shown only when a safe persisted match exists.
+- Matched signals whose preview path is retrying (for example because the automatic-preview gate is unavailable) remain manually actionable.
+- Existing old stale records without match metadata are backfilled on the next CFB poll instead of being permanently skipped.
+
 ## 2026-09-26 — Resolve one-team CFB manual buys to the correct dated game (#86)
 
 - Fixed `BUY LIVE` for one-team CFB signals such as Clemson when Polymarket exposes more than one open/future event for that team.
