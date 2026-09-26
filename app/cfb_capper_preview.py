@@ -8,7 +8,7 @@ import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 import httpx
@@ -380,6 +380,62 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
     return best[1], best[2], best[3], best[4]
 
 
+def _precise_event_start(event: Any, market: Any | None = None) -> datetime | None:
+    """Return an actual kickoff timestamp; reject date-only metadata."""
+    sports = getattr(market, "sports", None) if market is not None else None
+    sources = (sports, event)
+    # Sports-specific kickoff fields are more reliable than generic event dates.
+    for attrs in (
+        (
+            "event_start_time", "eventStartTime",
+            "game_start_time", "gameStartTime",
+            "start_time", "startTime",
+            "scheduled_at", "scheduledAt",
+        ),
+        ("start_date", "startDate"),
+    ):
+        for source in sources:
+            if source is None:
+                continue
+            for attr in attrs:
+                value = getattr(source, attr, None)
+                if value is None:
+                    continue
+                text = str(value).strip()
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+                    continue
+                parsed = _parse_iso(value)
+                if parsed is not None:
+                    return parsed
+    return None
+
+
+def _event_phase(record: dict[str, Any], now: datetime | None = None) -> str:
+    if bool(record.get("event_closed")):
+        return "CLOSED"
+    if record.get("market_accepting_orders") is False:
+        return "CLOSED"
+    start = _parse_iso(record.get("event_start_at"))
+    if start is not None and (now or datetime.now(timezone.utc)) >= start:
+        return "STARTED"
+    return "PREGAME"
+
+
+def _american_odds_from_price(value: Any) -> str | None:
+    try:
+        price = Decimal(str(value))
+    except Exception:
+        return None
+    if price <= 0 or price >= 1:
+        return None
+    if price >= Decimal("0.5"):
+        raw = -(Decimal("100") * price / (Decimal("1") - price))
+    else:
+        raw = Decimal("100") * (Decimal("1") - price) / price
+    rounded = int(raw.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return f"+{rounded}" if rounded > 0 else str(rounded)
+
+
 def _resolve_market_match(pick: dict[str, Any], kind: str) -> dict[str, Any]:
     """Resolve and persist the exact Polymarket event/market before any BUY action."""
     event, market, outcome_label, outcome_obj = _find_market(pick, kind)
@@ -395,12 +451,19 @@ def _resolve_market_match(pick: dict[str, Any], kind: str) -> dict[str, Any]:
     if not event_slug.startswith("cfb-"):
         raise RuntimeError("Matched event is not a CFB Polymarket event")
 
+    start_at = _precise_event_start(event, market)
+    accepting = getattr(getattr(market, "state", None), "accepting_orders", None)
+    closed_value = getattr(event, "closed", None)
     return {
         "match_status": "MATCHED",
         "matched_at": _now_iso(),
         "market_type": kind,
         "event_slug": event_slug,
         "event_title": str(getattr(event, "title", "") or ""),
+        "event_start_at": start_at.isoformat() if start_at is not None else None,
+        "event_start_checked_at": _now_iso(),
+        "event_closed": bool(closed_value) if closed_value is not None else False,
+        "market_accepting_orders": bool(accepting) if accepting is not None else None,
         "market": str(
             getattr(market, "question", "")
             or getattr(event, "title", "CFB market")
@@ -431,6 +494,10 @@ def _saved_market_match(record: dict[str, Any] | None, kind: str | None = None) 
         "market_type": market_type,
         "event_slug": event_slug,
         "event_title": record.get("event_title"),
+        "event_start_at": record.get("event_start_at"),
+        "event_start_checked_at": record.get("event_start_checked_at"),
+        "event_closed": record.get("event_closed"),
+        "market_accepting_orders": record.get("market_accepting_orders"),
         "market": record.get("market"),
         "market_url": market_url,
         "outcome": outcome,
@@ -438,8 +505,8 @@ def _saved_market_match(record: dict[str, Any] | None, kind: str | None = None) 
     }
 
 
-def _refresh_live_buy_quote(asset_id: str, core: Any) -> dict[str, str]:
-    """Refresh executable BUY data for an already matched outcome token."""
+def _read_live_buy_quote(asset_id: str) -> dict[str, str]:
+    """Read current executable BUY data without applying trade-entry limits."""
     with PublicClient() as client:
         buy_price = Decimal(str(client.get_price(asset_id=asset_id, side="BUY")))
         spread = Decimal(str(client.get_spread(asset_id=asset_id)))
@@ -449,18 +516,90 @@ def _refresh_live_buy_quote(asset_id: str, core: Any) -> dict[str, str]:
     best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
     if buy_price <= 0 or buy_price >= 1:
         raise RuntimeError(f"Invalid current BUY price {buy_price}")
-    if best_ask is None:
-        raise RuntimeError("No current ask is available")
-    if best_ask > core.MAX_PRICE:
-        raise RuntimeError(f"Current best ask {best_ask} exceeds MAX_PRICE={core.MAX_PRICE}")
-    if spread > core.MAX_SPREAD:
-        raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
+    if best_ask is None or best_ask <= 0 or best_ask >= 1:
+        raise RuntimeError("No valid current ask is available")
     return {
         "current_buy_price": str(buy_price),
         "best_ask": str(best_ask),
         "max_price": str(best_ask),
         "spread": str(spread),
+        "live_odds_american": _american_odds_from_price(best_ask),
+        "quote_updated_at": _now_iso(),
     }
+
+
+def _refresh_live_buy_quote(asset_id: str, core: Any) -> dict[str, str]:
+    """Refresh executable BUY data and enforce live trading limits."""
+    quote = _read_live_buy_quote(asset_id)
+    best_ask = Decimal(quote["best_ask"])
+    spread = Decimal(quote["spread"])
+    if best_ask > core.MAX_PRICE:
+        raise RuntimeError(f"Current best ask {best_ask} exceeds MAX_PRICE={core.MAX_PRICE}")
+    if spread > core.MAX_SPREAD:
+        raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
+    return quote
+
+
+def _refresh_record_runtime(record: dict[str, Any]) -> bool:
+    """Refresh pregame lifecycle and dashboard odds for one matched signal."""
+    match = _saved_market_match(record)
+    if match is None:
+        return False
+
+    changed = False
+    if not record.get("event_start_checked_at"):
+        pick = record.get("pick")
+        kind = str(record.get("market_type") or "")
+        if isinstance(pick, dict) and kind:
+            try:
+                refreshed_match = _resolve_market_match(pick, kind)
+                if str(refreshed_match.get("asset_id") or "") == str(match.get("asset_id") or ""):
+                    record.update(refreshed_match)
+                    match = _saved_market_match(record) or match
+                    changed = True
+            except Exception as exc:
+                record["event_metadata_error"] = f"{type(exc).__name__}: {exc}"
+
+    phase = _event_phase(record)
+    if record.get("event_phase") != phase:
+        record["event_phase"] = phase
+        changed = True
+
+    if phase == "STARTED":
+        if record.get("status") != "EVENT_STARTED":
+            record["status"] = "EVENT_STARTED"
+            record["reason"] = "matched Polymarket event has started"
+            changed = True
+        return changed
+    if phase == "CLOSED":
+        if record.get("status") != "EVENT_CLOSED":
+            record["status"] = "EVENT_CLOSED"
+            record["reason"] = "matched Polymarket event/market is closed"
+            changed = True
+        return changed
+
+    if record.get("status") == "IGNORED_STALE":
+        record["status"] = "MATCHED_PREGAME"
+        record["reason"] = "outside auto-trade freshness window; manual BUY remains available until event start"
+        changed = True
+
+    try:
+        quote = _read_live_buy_quote(str(match["asset_id"]))
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        if record.get("live_quote_error") != error:
+            record["live_quote_error"] = error
+            changed = True
+        return changed
+
+    for key, value in quote.items():
+        if record.get(key) != value:
+            record[key] = value
+            changed = True
+    if record.get("live_quote_error") is not None:
+        record["live_quote_error"] = None
+        changed = True
+    return changed
 
 
 def _prepare_preview(
@@ -586,6 +725,8 @@ def _prepare_manual_buy(
     kind, reason = _classify_pick(pick)
     if kind is None:
         raise RuntimeError(reason or "unsupported CFB pick")
+    if matched is not None and _event_phase(matched) != "PREGAME":
+        raise RuntimeError("Matched CFB event has already started or closed")
 
     ready, executor_state = live_control._executor_ready()
     if not ready:
@@ -658,10 +799,16 @@ def _prepare_manual_buy(
 
 def _status_pick_item(record: dict[str, Any]) -> dict[str, Any]:
     saved_match = _saved_market_match(record)
+    phase = _event_phase(record) if saved_match else None
+    posted = _parse_iso(record.get("posted_at"))
+    age_seconds = None
+    if posted is not None:
+        age_seconds = max(0, int((datetime.now(timezone.utc) - posted).total_seconds()))
     return {
         "selection": record.get("selection"),
         "posted_at": record.get("posted_at"),
         "updated_at": record.get("updated_at"),
+        "signal_age_seconds": age_seconds,
         "units": record.get("units"),
         "stake_usdc": record.get("stake_usdc"),
         "match_status": "MATCHED" if saved_match else record.get("match_status"),
@@ -669,17 +816,26 @@ def _status_pick_item(record: dict[str, Any]) -> dict[str, Any]:
         "market": record.get("market"),
         "market_url": record.get("market_url"),
         "event_title": record.get("event_title"),
+        "event_start_at": record.get("event_start_at"),
+        "event_phase": phase,
         "outcome": record.get("outcome"),
         "asset_id": record.get("asset_id"),
+        "current_buy_price": record.get("current_buy_price"),
+        "best_ask": record.get("best_ask"),
+        "spread": record.get("spread"),
+        "live_odds_american": record.get("live_odds_american"),
+        "quote_updated_at": record.get("quote_updated_at"),
+        "live_quote_error": record.get("live_quote_error"),
         "reason": record.get("reason"),
         "last_error": record.get("last_error"),
         "request_id": record.get("request_id"),
         "signal_id": record.get("id"),
         "buy_available": bool(
             saved_match
+            and phase == "PREGAME"
             and record.get("status") in {
                 "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
-                "IGNORED_STALE", "RETRYING"
+                "MATCHED_PREGAME", "RETRYING"
             }
         ),
         "manual_buy_request_id": record.get("manual_buy_request_id"),
@@ -731,15 +887,28 @@ function cfbPickTime(v){
  const d=new Date(v);
  return Number.isNaN(d.getTime())?cfbEsc(v):cfbEsc(d.toLocaleString());
 }
+function cfbAge(seconds){
+ if(seconds===null||seconds===undefined)return '';
+ const s=Math.max(0,Number(seconds)||0);
+ if(s<60)return Math.floor(s)+'s';
+ if(s<3600)return Math.floor(s/60)+'m';
+ return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
+}
 function cfbPickList(title,items,kind){
  if(!Array.isArray(items)||!items.length)return '';
  const rows=items.map(item=>{
   const meta=[];
   if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(cfbEsc(item.units)+'u');
   if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('\u0024'+Number(item.stake_usdc).toFixed(2));
-  if(item.posted_at)meta.push('posted '+cfbPickTime(item.posted_at));
+  if(item.posted_at)meta.push('posted '+cfbPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+cfbAge(item.signal_age_seconds):''));
   if(item.market)meta.push('Matched: '+cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
-  if(kind==='stale'&&item.reason)meta.push(cfbEsc(item.reason));
+  if(item.event_start_at)meta.push('starts '+cfbPickTime(item.event_start_at));
+  if(item.best_ask!==null&&item.best_ask!==undefined&&item.best_ask!==''){
+   const cents=(Number(item.best_ask)*100).toFixed(1).replace(/\.0$/,'');
+   meta.push('Live BUY '+cents+'¢'+(item.live_odds_american?' ('+cfbEsc(item.live_odds_american)+')':''));
+  }
+  if(item.live_quote_error)meta.push('live odds unavailable');
+  if(kind==='pregame'&&item.reason)meta.push(cfbEsc(item.reason));
   if(kind==='retrying'&&item.last_error)meta.push(cfbEsc(item.last_error));
   if(!item.buy_available&&item.match_status!=='MATCHED')meta.push('Polymarket match pending');
   if(item.manual_buy_status)meta.push('manual BUY '+cfbEsc(item.manual_buy_status));
@@ -772,8 +941,8 @@ async function cfbManualBuy(signalId,btn){
 }
 function cfbCapperLine(x){
  if(!x)return 'No tracked signals yet';
- const base='Signals '+(x.signals||0)+' · Queued '+(x.preview_queued||0)+' · Done '+(x.preview_done||0)+' · Failed '+(x.preview_failed||0)+'<br>Retrying '+(x.retrying||0)+' · Stale '+(x.stale||0)+' · Unsupported '+(x.unsupported||0);
- return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Previewed picks',x.previewed_items,'previewed')+cfbPickList('Matched / retrying picks',x.retrying_items,'retrying')+cfbPickList('Matched / preview failed',x.failed_items,'failed')+cfbPickList('Stale picks',x.stale_items,'stale');
+ const base='Signals '+(x.signals||0)+' · Queued '+(x.preview_queued||0)+' · Done '+(x.preview_done||0)+' · Failed '+(x.preview_failed||0)+'<br>Retrying '+(x.retrying||0)+' · Pregame '+(x.pregame||0)+' · Started '+(x.started||0)+' · Closed '+(x.closed||0)+' · Unsupported '+(x.unsupported||0);
+ return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Previewed picks',x.previewed_items,'previewed')+cfbPickList('Matched pregame picks',x.pregame_items,'pregame')+cfbPickList('Matched / retrying picks',x.retrying_items,'retrying')+cfbPickList('Matched / preview failed',x.failed_items,'failed');
 }
 async function loadCfbCapperStats(){
  try{
@@ -782,7 +951,7 @@ async function loadCfbCapperStats(){
   const state=document.getElementById('cfbCapperState'),meta=document.getElementById('cfbCapperMeta');
   let mode=' · '+String(d.mode||'').replaceAll('_',' ');
   if(state)state.textContent=(d.enabled?'ENABLED':'DISABLED')+(d.enabled?mode:'');
-  if(meta)meta.textContent='1u = \u0024'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · poll '+(d.poll_seconds||0)+'s';
+  if(meta)meta.textContent='1u = \u0024'+Number(d.unit_usdc||10).toFixed(2)+' · auto fresh ≤ '+(d.max_pick_age_seconds||0)+'s · manual until event start · odds refresh '+(d.poll_seconds||0)+'s';
   const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
   if(s)s.innerHTML=cfbCapperLine((d.sources||{})['Slam - CFB']);
   if(y)y.innerHTML=cfbCapperLine((d.sources||{})['Syndicate - CFB']);
@@ -908,6 +1077,16 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         picks.sort(key=lambda p: str(p.get("posted_at") or ""))
         now = datetime.now(timezone.utc)
 
+        # Refresh current odds/lifecycle for every already matched active signal,
+        # including older signals that may no longer be in the bridge feed.
+        for existing in signals.values():
+            if existing.get("status") in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE", "EVENT_CLOSED"}:
+                continue
+            if _saved_market_match(existing) is not None:
+                if await asyncio.to_thread(_refresh_record_runtime, existing):
+                    existing["updated_at"] = _now_iso()
+                    changed = True
+
         for pick in picks:
             fp = _fingerprint(pick)
             current = signals.get(fp)
@@ -916,12 +1095,17 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 changed = True
             if current and current.get("status") in {
                 "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
+                "MATCHED_PREGAME", "EVENT_STARTED", "EVENT_CLOSED",
                 "IGNORED_STALE", "IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE",
             }:
                 terminal = str(current.get("status") or "")
-                if terminal in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE"}:
+                if terminal in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE", "EVENT_STARTED", "EVENT_CLOSED"}:
                     continue
-                if _saved_market_match(current) is not None:
+                if (
+                    terminal != "IGNORED_STALE"
+                    and _saved_market_match(current) is not None
+                    and current.get("event_start_checked_at")
+                ):
                     continue
 
             source_label = _source_label(pick)
@@ -956,7 +1140,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
 
             try:
                 saved_match = _saved_market_match(record, kind)
-                if saved_match is None:
+                if saved_match is None or not record.get("event_start_checked_at"):
                     saved_match = await asyncio.to_thread(_resolve_market_match, pick, kind)
                     record.update(saved_match)
                 else:
@@ -975,8 +1159,27 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             posted = _parse_iso(pick.get("posted_at"))
             age = (now - posted).total_seconds() if posted else float("inf")
             if age > max_age_seconds:
-                record["status"] = "IGNORED_STALE"
-                record["reason"] = f"pick age exceeds {max_age_seconds}s freshness limit"
+                record["event_phase"] = _event_phase(record, now)
+                if record["event_phase"] == "STARTED":
+                    record["status"] = "EVENT_STARTED"
+                    record["reason"] = "matched Polymarket event has started"
+                elif record["event_phase"] == "CLOSED":
+                    record["status"] = "EVENT_CLOSED"
+                    record["reason"] = "matched Polymarket event/market is closed"
+                else:
+                    record["status"] = "MATCHED_PREGAME"
+                    record["reason"] = (
+                        f"outside {max_age_seconds}s auto-trade freshness window; "
+                        "manual BUY remains available until event start"
+                    )
+                    try:
+                        record.update(await asyncio.to_thread(
+                            _read_live_buy_quote,
+                            str(record["asset_id"]),
+                        ))
+                        record["live_quote_error"] = None
+                    except Exception as exc:
+                        record["live_quote_error"] = f"{type(exc).__name__}: {exc}"
                 record["updated_at"] = _now_iso()
                 signals[fp] = record
                 changed = True
@@ -1140,7 +1343,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "preview_failed": sum(1 for r in rows if r.get("status") == "PREVIEW_FAILED"),
                 "preview_queued": sum(1 for r in rows if r.get("status") == "PREVIEW_QUEUED"),
                 "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
-                "stale": sum(1 for r in rows if r.get("status") == "IGNORED_STALE"),
+                "pregame": sum(1 for r in rows if r.get("status") == "MATCHED_PREGAME"),
+                "started": sum(1 for r in rows if r.get("status") == "EVENT_STARTED"),
+                "closed": sum(1 for r in rows if r.get("status") == "EVENT_CLOSED"),
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
                 "queued_items": _recent_status_items(rows, "PREVIEW_QUEUED"),
                 "previewed_items": _recent_status_items(rows, "PREVIEW_DONE"),
@@ -1152,7 +1357,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     [r for r in rows if _saved_market_match(r) is not None],
                     "PREVIEW_FAILED",
                 ),
-                "stale_items": _recent_status_items(rows, "IGNORED_STALE"),
+                "pregame_items": _recent_status_items(rows, "MATCHED_PREGAME"),
             }
         return {
             "enabled": enabled,
@@ -1174,7 +1379,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         if record.get("source") not in SOURCE_LABELS:
             raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
         if record.get("status") not in {
-            "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED", "IGNORED_STALE", "RETRYING"
+            "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED", "MATCHED_PREGAME", "RETRYING"
         }:
             raise HTTPException(
                 status_code=409,
@@ -1185,6 +1390,12 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             raise HTTPException(
                 status_code=409,
                 detail="CFB signal has not been safely matched to a Polymarket event yet",
+            )
+        phase = _event_phase(record)
+        if phase != "PREGAME":
+            raise HTTPException(
+                status_code=409,
+                detail=f"CFB event is {phase.lower()}; pregame BUY is no longer available",
             )
 
         pick = record.get("pick") if isinstance(record.get("pick"), dict) else None

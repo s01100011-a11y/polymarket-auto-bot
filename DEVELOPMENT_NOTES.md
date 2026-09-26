@@ -1,3 +1,14 @@
+## 2026-09-26 — Keep matched CFB picks pregame and show live odds (#90)
+
+- The 180-second CFB freshness window now gates only unattended preview/auto handling. It no longer labels a valid pregame pick as stale.
+- Older matched picks move to `MATCHED_PREGAME` and remain manually actionable until the matched event start time or market closure.
+- The dashboard now shows signal age separately instead of using “stale” as a game-status label.
+- Active matched CFB rows refresh the Polymarket executable BUY quote every poll cycle, including current best ask, spread, and an American-odds equivalent.
+- Dashboard rows show live odds in the form `Live BUY 58¢ (-138)`.
+- Exact event start metadata is persisted when Polymarket provides a timestamp; date-only metadata is deliberately not treated as midnight kickoff.
+- Manual BUY is blocked once the matched event has started or closed, including a second lifecycle check at click time.
+- Older stored `IGNORED_STALE` records are migrated to matched pregame on the next runtime refresh when the event is still pregame.
+
 ## 2026-09-26 — Match CFB picks before exposing BUY (#88)
 
 - Tracked Slam/Syndicate CFB picks now resolve to an exact Polymarket event, market, outcome, and token before the dashboard exposes a live-buy action.
