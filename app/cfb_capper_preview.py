@@ -678,7 +678,8 @@ def _status_pick_item(record: dict[str, Any]) -> dict[str, Any]:
         "buy_available": bool(
             saved_match
             and record.get("status") in {
-                "PREVIEW_QUEUED", "PREVIEW_DONE", "IGNORED_STALE", "RETRYING"
+                "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
+                "IGNORED_STALE", "RETRYING"
             }
         ),
         "manual_buy_request_id": record.get("manual_buy_request_id"),
@@ -772,7 +773,7 @@ async function cfbManualBuy(signalId,btn){
 function cfbCapperLine(x){
  if(!x)return 'No tracked signals yet';
  const base='Signals '+(x.signals||0)+' · Queued '+(x.preview_queued||0)+' · Done '+(x.preview_done||0)+' · Failed '+(x.preview_failed||0)+'<br>Retrying '+(x.retrying||0)+' · Stale '+(x.stale||0)+' · Unsupported '+(x.unsupported||0);
- return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Previewed picks',x.previewed_items,'previewed')+cfbPickList('Matched / retrying picks',x.retrying_items,'retrying')+cfbPickList('Stale picks',x.stale_items,'stale');
+ return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Previewed picks',x.previewed_items,'previewed')+cfbPickList('Matched / retrying picks',x.retrying_items,'retrying')+cfbPickList('Matched / preview failed',x.failed_items,'failed')+cfbPickList('Stale picks',x.stale_items,'stale');
 }
 async function loadCfbCapperStats(){
  try{
@@ -1147,6 +1148,10 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     [r for r in rows if _saved_market_match(r) is not None],
                     "RETRYING",
                 ),
+                "failed_items": _recent_status_items(
+                    [r for r in rows if _saved_market_match(r) is not None],
+                    "PREVIEW_FAILED",
+                ),
                 "stale_items": _recent_status_items(rows, "IGNORED_STALE"),
             }
         return {
@@ -1168,7 +1173,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             raise HTTPException(status_code=404, detail="Unknown CFB signal")
         if record.get("source") not in SOURCE_LABELS:
             raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
-        if record.get("status") not in {"PREVIEW_QUEUED", "PREVIEW_DONE", "IGNORED_STALE", "RETRYING"}:
+        if record.get("status") not in {
+            "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED", "IGNORED_STALE", "RETRYING"
+        }:
             raise HTTPException(
                 status_code=409,
                 detail=f"CFB signal is {record.get('status')}; BUY LIVE requires a matched actionable signal",
