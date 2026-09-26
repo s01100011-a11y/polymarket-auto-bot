@@ -51,6 +51,39 @@ WNBA_ALIASES: dict[str, tuple[str, ...]] = {
     "Washington Mystics": ("washington mystics", "mystics", "was", "washington"),
 }
 
+NBA_ALIASES: dict[str, tuple[str, ...]] = {
+    "Atlanta Hawks": ("atlanta hawks", "hawks"),
+    "Boston Celtics": ("boston celtics", "celtics"),
+    "Brooklyn Nets": ("brooklyn nets", "nets"),
+    "Charlotte Hornets": ("charlotte hornets", "hornets"),
+    "Chicago Bulls": ("chicago bulls", "bulls"),
+    "Cleveland Cavaliers": ("cleveland cavaliers", "cavaliers", "cavs"),
+    "Dallas Mavericks": ("dallas mavericks", "mavericks", "mavs"),
+    "Denver Nuggets": ("denver nuggets", "nuggets"),
+    "Detroit Pistons": ("detroit pistons", "pistons"),
+    "Golden State Warriors": ("golden state warriors", "warriors", "gsw"),
+    "Houston Rockets": ("houston rockets", "rockets"),
+    "Indiana Pacers": ("indiana pacers", "pacers"),
+    "LA Clippers": ("la clippers", "clippers", "lac"),
+    "Los Angeles Lakers": ("los angeles lakers", "lakers", "lal"),
+    "Memphis Grizzlies": ("memphis grizzlies", "grizzlies", "grizz"),
+    "Miami Heat": ("miami heat", "heat"),
+    "Milwaukee Bucks": ("milwaukee bucks", "bucks"),
+    "Minnesota Timberwolves": ("minnesota timberwolves", "timberwolves", "wolves", "twolves"),
+    "New Orleans Pelicans": ("new orleans pelicans", "pelicans", "pels"),
+    "New York Knicks": ("new york knicks", "knicks", "nyk"),
+    "Oklahoma City Thunder": ("oklahoma city thunder", "thunder", "okc"),
+    "Orlando Magic": ("orlando magic", "magic"),
+    "Philadelphia 76ers": ("philadelphia 76ers", "76ers", "sixers", "philly"),
+    "Phoenix Suns": ("phoenix suns", "suns"),
+    "Portland Trail Blazers": ("portland trail blazers", "trail blazers", "blazers"),
+    "Sacramento Kings": ("sacramento kings", "kings"),
+    "San Antonio Spurs": ("san antonio spurs", "spurs"),
+    "Toronto Raptors": ("toronto raptors", "raptors"),
+    "Utah Jazz": ("utah jazz", "jazz"),
+    "Washington Wizards": ("washington wizards", "wizards"),
+}
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -69,9 +102,27 @@ def _team_mentions(text: str) -> list[str]:
     return found
 
 
+def _nba_team_mentions(text: str) -> list[str]:
+    norm = _norm_text(text)
+    found: list[str] = []
+    for team, aliases in NBA_ALIASES.items():
+        if any(re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", norm) for alias in aliases):
+            found.append(team)
+    return found
+
+
 def _looks_wnba(text: str) -> bool:
     norm = _norm_text(text)
     return "wnba" in norm or bool(_team_mentions(text))
+
+
+def _looks_nba(text: str) -> bool:
+    norm = _norm_text(text)
+    return "nba" in norm or bool(_nba_team_mentions(text))
+
+
+def _looks_basketball(text: str) -> bool:
+    return _looks_wnba(text) or _looks_nba(text)
 
 
 def _parse_alert(text: str) -> dict[str, Any]:
@@ -818,8 +869,8 @@ async def slack_events(request: Request):
     text = str(event.get("text") or "").strip()
     if not text:
         return {"ok": True, "ignored": "empty message"}
-    if SLACK_REQUIRE_WNBA and not _looks_wnba(text):
-        return {"ok": True, "ignored": "not WNBA"}
+    if SLACK_REQUIRE_WNBA and not _looks_basketball(text):
+        return {"ok": True, "ignored": "not WNBA/NBA"}
 
     event_id = str(body.get("event_id") or event.get("client_msg_id") or event.get("ts") or uuid.uuid4().hex)
     alerts = core._load(SLACK_ALERTS_FILE)

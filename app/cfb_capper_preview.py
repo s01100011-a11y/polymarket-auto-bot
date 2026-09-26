@@ -1419,6 +1419,86 @@ def _prepare_preview(
     }
 
 
+def _prepare_pick(
+    pick: dict[str, Any],
+    *,
+    core: Any,
+    remote: Any,
+    unit_usdc: Decimal,
+    matched: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Prepare a live CFB BUY order — mirrors _prepare_preview but enqueues a real BUY."""
+    kind, reason = _classify_pick(pick)
+    if kind is None:
+        return {"status": "IGNORED_UNSUPPORTED", "reason": reason}
+
+    if not core.auto_trading_enabled():
+        raise RuntimeError("AUTO_TRADING is disabled")
+
+    ready, executor_state = live_control._executor_ready()
+    if not ready:
+        if executor_state.get("geo_blocked"):
+            raise RuntimeError("Termux executor is geoblocked")
+        raise RuntimeError("Termux executor is offline")
+
+    units = _units_for_pick(pick)
+    stake = _stake_for_pick(pick, unit_usdc)
+    if stake > core.MAX_AUTO_TRADE_USDC:
+        raise RuntimeError(
+            f"Requested {units}u = ${stake} exceeds MAX_AUTO_TRADE_USDC=${core.MAX_AUTO_TRADE_USDC}"
+        )
+
+    used = core._daily_budget_used()
+    pending = nfl._pending_auto_budget(remote)
+    if used + pending + stake > core.MAX_DAILY_BUDGET_USDC:
+        raise RuntimeError(
+            "Daily auto budget guard would be exceeded: "
+            f"used=${used}, pending=${pending}, requested=${stake}, "
+            f"limit=${core.MAX_DAILY_BUDGET_USDC}"
+        )
+
+    match = _saved_market_match(matched, kind) or _resolve_market_match(pick, kind)
+    asset_id = str(match["asset_id"])
+    quote = _refresh_live_buy_quote(asset_id, core)
+    best_ask = Decimal(quote["best_ask"])
+
+    source_label = _source_label(pick)
+    fp = _fingerprint(pick)
+    trade_id = f"cfb-capper-{fp[:18]}"
+    payload = {
+        "market_url": match["market_url"],
+        "outcome": match["outcome"],
+        "market_type": kind,
+        "asset_id": asset_id,
+        "max_price": str(best_ask),
+        "budget_usdc": str(stake),
+        "trade_id": trade_id,
+        "max_spread": str(core.MAX_SPREAD),
+        "max_price_global": str(core.MAX_PRICE),
+        "source": "cfb_capper_live",
+        "auto": True,
+        "strategy_source": source_label,
+        "strategy_sport": "CFB",
+        "strategy_units": str(units),
+        "strategy_unit_usdc": str(unit_usdc),
+        "strategy_pick_id": fp,
+        "strategy_posted_at": pick.get("posted_at"),
+        "strategy_selection": pick.get("selection"),
+        "strategy_telegram_source": pick.get("source"),
+    }
+    queued = remote._enqueue("BUY", payload)
+    return {
+        "status": "QUEUED",
+        "request_id": queued["id"],
+        "trade_id": trade_id,
+        "strategy_source": source_label,
+        **match,
+        "units": str(units),
+        "stake_usdc": str(stake),
+        **quote,
+    }
+
+
 def _existing_manual_buy(core: Any, remote: Any, fingerprint: str) -> dict[str, Any] | None:
     try:
         remote._expire_stale_buys_persisted()
@@ -1623,6 +1703,7 @@ def _status_pick_item(
             and phase in {"PREGAME", "LIVE"}
             and record.get("status") in {
                 "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
+                "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED",
                 "MATCHED_PREGAME", "MATCHED_LIVE", "RETRYING"
             }
         ),
@@ -1647,12 +1728,13 @@ def _status_pick_item(
 
 def _recent_status_items(
     rows: list[dict[str, Any]],
-    status: str,
+    status: str | set[str],
     *,
     limit: int = 30,
     executions: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    matching = [row for row in rows if row.get("status") == status]
+    statuses = status if isinstance(status, set) else {status}
+    matching = [row for row in rows if row.get("status") in statuses]
     matching.sort(
         key=lambda row: str(
             row.get("updated_at")
@@ -1989,6 +2071,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         min(4320, int(os.getenv("CFB_CAPPER_FEED_WINDOW_MINUTES", "1440"))),
     )
     unit_usdc = Decimal(os.getenv("CFB_CAPPER_UNIT_USDC", "10"))
+    live_enabled = os.getenv("CFB_CAPPER_LIVE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
     test_preview_raw = os.getenv("CFB_CAPPER_TEST_PREVIEW_JSON", "").strip()
     test_preview_marker = core.DATA_DIR / "cfb_capper_test_preview.json"
 
@@ -2025,19 +2108,21 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     if manual_result is not None and rec.get("manual_buy_result") != manual_result:
                         rec["manual_buy_result"] = manual_result
                         changed = True
-            if rec.get("status") != "PREVIEW_QUEUED" or not rec.get("request_id"):
+            current_status = rec.get("status")
+            if current_status not in {"PREVIEW_QUEUED", "QUEUED"} or not rec.get("request_id"):
                 continue
             queued = queue.get(str(rec.get("request_id")))
             if not queued:
                 continue
             qstatus = str(queued.get("status") or "")
+            is_live = current_status == "QUEUED"
             if qstatus == "DONE":
-                rec["status"] = "PREVIEW_DONE"
+                rec["status"] = "EXECUTOR_DONE" if is_live else "PREVIEW_DONE"
                 rec["completed_at"] = queued.get("updated_at") or _now_iso()
                 rec["result"] = queued.get("result")
                 changed = True
             elif qstatus == "FAILED":
-                rec["status"] = "PREVIEW_FAILED"
+                rec["status"] = "EXECUTOR_FAILED" if is_live else "PREVIEW_FAILED"
                 rec["last_error"] = queued.get("error")
                 rec["completed_at"] = queued.get("updated_at") or _now_iso()
                 changed = True
@@ -2118,6 +2203,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 changed = True
             if current and current.get("status") in {
                 "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
+                "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED",
                 "MATCHED_PREGAME", "MATCHED_LIVE",
                 "MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE", "EVENT_CLOSED",
                 "IGNORED_STALE", "IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE",
@@ -2268,8 +2354,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 continue
 
             try:
+                prepare_fn = _prepare_pick if live_enabled else _prepare_preview
                 prepared = await asyncio.to_thread(
-                    _prepare_preview,
+                    prepare_fn,
                     pick,
                     core=core,
                     remote=remote,
@@ -2280,8 +2367,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 record["updated_at"] = _now_iso()
                 signals[fp] = record
                 changed = True
+                log_label = "CFB_CAPPER_LIVE" if live_enabled else "CFB_CAPPER_PREVIEW"
                 print(
-                    "CFB_CAPPER_PREVIEW "
+                    f"{log_label} "
                     + json.dumps(record, sort_keys=True, separators=(",", ":"), default=str),
                     flush=True,
                 )
@@ -2326,8 +2414,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     raise RuntimeError("Termux executor is geoblocked")
                 await asyncio.sleep(2)
 
+            test_prepare_fn = _prepare_pick if live_enabled else _prepare_preview
             result = await asyncio.to_thread(
-                _prepare_preview,
+                test_prepare_fn,
                 pick,
                 core=core,
                 remote=remote,
@@ -2439,9 +2528,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             counts[label] = {
                 "signals": len(rows),
                 "performance": performance.get(label, {}),
-                "preview_done": sum(1 for r in rows if r.get("status") == "PREVIEW_DONE"),
-                "preview_failed": sum(1 for r in rows if r.get("status") == "PREVIEW_FAILED"),
-                "preview_queued": sum(1 for r in rows if r.get("status") == "PREVIEW_QUEUED"),
+                "preview_done": sum(1 for r in rows if r.get("status") in {"PREVIEW_DONE", "EXECUTOR_DONE"}),
+                "preview_failed": sum(1 for r in rows if r.get("status") in {"PREVIEW_FAILED", "EXECUTOR_FAILED"}),
+                "preview_queued": sum(1 for r in rows if r.get("status") in {"PREVIEW_QUEUED", "QUEUED"}),
                 "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
                 "pregame": sum(
                     1 for r in rows
@@ -2454,11 +2543,11 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "closed": sum(1 for r in rows if r.get("status") == "EVENT_CLOSED"),
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
                 "all_items": _recent_all_items(rows, executions=executions),
-                "queued_items": _recent_status_items(rows, "PREVIEW_QUEUED", executions=executions),
-                "done_items": _recent_status_items(rows, "PREVIEW_DONE", executions=executions),
-                "previewed_items": _recent_status_items(rows, "PREVIEW_DONE", executions=executions),
+                "queued_items": _recent_status_items(rows, {"PREVIEW_QUEUED", "QUEUED"}, executions=executions),
+                "done_items": _recent_status_items(rows, {"PREVIEW_DONE", "EXECUTOR_DONE"}, executions=executions),
+                "previewed_items": _recent_status_items(rows, {"PREVIEW_DONE", "EXECUTOR_DONE"}, executions=executions),
                 "retrying_items": _recent_status_items(rows, "RETRYING", executions=executions),
-                "failed_items": _recent_status_items(rows, "PREVIEW_FAILED", executions=executions),
+                "failed_items": _recent_status_items(rows, {"PREVIEW_FAILED", "EXECUTOR_FAILED"}, executions=executions),
                 "pregame_items": _recent_all_items([
                     r for r in rows
                     if r.get("status") in {"MATCHED_PREGAME", "MATCHED_PREGAME_ALTERNATE"}
@@ -2472,7 +2561,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             }
         return {
             "enabled": enabled,
-            "mode": "PREVIEW_ONLY",
+            "mode": "LIVE" if live_enabled else "PREVIEW_ONLY",
             "poll_seconds": poll_seconds,
             "max_pick_age_seconds": max_age_seconds,
             "feed_window_minutes": feed_window_minutes,
@@ -2569,6 +2658,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
         if record.get("status") not in {
             "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
+            "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED",
             "MATCHED_PREGAME", "MATCHED_LIVE", "RETRYING"
         }:
             raise HTTPException(

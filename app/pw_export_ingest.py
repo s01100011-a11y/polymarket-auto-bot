@@ -295,7 +295,43 @@ def _team_name(value: Any, history: Any) -> str | None:
         "WASHINGTON": "Washington Mystics",
         "MYSTICS": "Washington Mystics",
     }
-    return aliases.get(upper)
+    result = aliases.get(upper)
+    if result:
+        return result
+
+    nba_aliases = {
+        "ATLANTA HAWKS": "Atlanta Hawks", "HAWKS": "Atlanta Hawks",
+        "BOSTON CELTICS": "Boston Celtics", "CELTICS": "Boston Celtics",
+        "BROOKLYN NETS": "Brooklyn Nets", "NETS": "Brooklyn Nets",
+        "CHARLOTTE HORNETS": "Charlotte Hornets", "HORNETS": "Charlotte Hornets",
+        "CHICAGO BULLS": "Chicago Bulls", "BULLS": "Chicago Bulls",
+        "CLEVELAND CAVALIERS": "Cleveland Cavaliers", "CAVALIERS": "Cleveland Cavaliers", "CAVS": "Cleveland Cavaliers",
+        "DALLAS MAVERICKS": "Dallas Mavericks", "MAVERICKS": "Dallas Mavericks", "MAVS": "Dallas Mavericks",
+        "DENVER NUGGETS": "Denver Nuggets", "NUGGETS": "Denver Nuggets",
+        "DETROIT PISTONS": "Detroit Pistons", "PISTONS": "Detroit Pistons",
+        "GOLDEN STATE WARRIORS": "Golden State Warriors", "WARRIORS": "Golden State Warriors",
+        "HOUSTON ROCKETS": "Houston Rockets", "ROCKETS": "Houston Rockets",
+        "INDIANA PACERS": "Indiana Pacers", "PACERS": "Indiana Pacers",
+        "LA CLIPPERS": "LA Clippers", "CLIPPERS": "LA Clippers",
+        "LOS ANGELES LAKERS": "Los Angeles Lakers", "LAKERS": "Los Angeles Lakers",
+        "MEMPHIS GRIZZLIES": "Memphis Grizzlies", "GRIZZLIES": "Memphis Grizzlies",
+        "MIAMI HEAT": "Miami Heat", "HEAT": "Miami Heat",
+        "MILWAUKEE BUCKS": "Milwaukee Bucks", "BUCKS": "Milwaukee Bucks",
+        "MINNESOTA TIMBERWOLVES": "Minnesota Timberwolves", "TIMBERWOLVES": "Minnesota Timberwolves",
+        "NEW ORLEANS PELICANS": "New Orleans Pelicans", "PELICANS": "New Orleans Pelicans",
+        "NEW YORK KNICKS": "New York Knicks", "KNICKS": "New York Knicks",
+        "OKLAHOMA CITY THUNDER": "Oklahoma City Thunder", "THUNDER": "Oklahoma City Thunder",
+        "ORLANDO MAGIC": "Orlando Magic", "MAGIC": "Orlando Magic",
+        "PHILADELPHIA 76ERS": "Philadelphia 76ers", "76ERS": "Philadelphia 76ers", "SIXERS": "Philadelphia 76ers",
+        "PHOENIX SUNS": "Phoenix Suns", "SUNS": "Phoenix Suns",
+        "PORTLAND TRAIL BLAZERS": "Portland Trail Blazers", "TRAIL BLAZERS": "Portland Trail Blazers", "BLAZERS": "Portland Trail Blazers",
+        "SACRAMENTO KINGS": "Sacramento Kings", "KINGS": "Sacramento Kings",
+        "SAN ANTONIO SPURS": "San Antonio Spurs", "SPURS": "San Antonio Spurs",
+        "TORONTO RAPTORS": "Toronto Raptors", "RAPTORS": "Toronto Raptors",
+        "UTAH JAZZ": "Utah Jazz", "JAZZ": "Utah Jazz",
+        "WASHINGTON WIZARDS": "Washington Wizards", "WIZARDS": "Washington Wizards",
+    }
+    return nba_aliases.get(upper)
 
 
 def _normalize_quarter(value: Any) -> str | None:
@@ -306,7 +342,7 @@ def _normalize_quarter(value: Any) -> str | None:
     return f"Q{m.group(1)}" if m else None
 
 
-def _synth_text(row: dict[str, Any], history: Any) -> tuple[str | None, dict[str, Any]]:
+def _synth_text(row: dict[str, Any], history: Any, *, sport: str = "WNBA") -> tuple[str | None, dict[str, Any]]:
     existing = _first(row, "text", "message", "raw_text", "alert_text")
     game_id = _first(row, "game_id", "gameId", "espn_game_id", "espnGameId")
     pick = _team_name(
@@ -388,7 +424,7 @@ def _synth_text(row: dict[str, Any], history: Any) -> tuple[str | None, dict[str
     if not game_id or not pick:
         return None, meta
 
-    lines = ["WNBA PW Alert"]
+    lines = [f"{sport} PW Alert"]
     if quarter:
         lines.append(quarter)
     if probability is not None:
@@ -421,14 +457,18 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
     lookback_days = max(0, int(os.getenv("PW_EXPORT_POLL_LOOKBACK_DAYS", "1")))
     source = os.getenv("PW_EXPORT_SOURCE", "live").strip() or "live"
     include_suppressed = os.getenv("PW_EXPORT_INCLUDE_SUPPRESSED", "0").strip() or "0"
-    url = os.getenv(
+    wnba_url = os.getenv(
         "PW_WNBA_EXPORT_URL",
         "https://bob-mbp-ubuntu.taila35415.ts.net:8445/api/pw-export",
     ).strip()
+    nba_url = os.getenv("PW_NBA_EXPORT_URL", "").strip()
+    # Backward compat: 'url' still references WNBA for existing callers
+    url = wnba_url
     proxy = os.getenv("PW_EXPORT_SOCKS_PROXY", "socks5://127.0.0.1:1055").strip()
     tailnet_peer = os.getenv("PW_TAILNET_PEER", "100.81.244.65").strip()
     ts_socket = os.getenv("TS_SOCKET", "/tmp/tailscale/tailscaled.sock").strip()
     state_file = core.DATA_DIR / "pw_export_ingest_state.json"
+    nba_state_file = core.DATA_DIR / "pw_nba_export_ingest_state.json"
     stop = threading.Event()
 
     def load_state() -> dict[str, Any]:
@@ -475,7 +515,7 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
                 flush=True,
             )
 
-    def fetch_rows() -> tuple[list[dict[str, Any]], Any, str]:
+    def fetch_rows(feed_url: str | None = None) -> tuple[list[dict[str, Any]], Any, str]:
         params = {
             "source": source,
             "since": query_since(),
@@ -483,10 +523,11 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
         }
         ensure_tailnet_ready()
         last_exc: Exception | None = None
+        target_url = feed_url or url
         for attempt in range(3):
             try:
                 payload, route = _tailnet_https_json(
-                    url,
+                    target_url,
                     params,
                     proxy,
                     tailnet_peer,
@@ -507,8 +548,8 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
         merged = list(dict.fromkeys([*existing, *ids]))
         state["seen"] = merged[-10000:]
 
-    def process(row: dict[str, Any], rec_id: str) -> tuple[str, str | None]:
-        text, meta = _synth_text(row, history)
+    def process(row: dict[str, Any], rec_id: str, *, sport: str = "WNBA") -> tuple[str, str | None]:
+        text, meta = _synth_text(row, history, sport=sport)
         if not text:
             return "INVALID", "missing game_id or recognized predicted_winner"
 
@@ -570,23 +611,133 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
         ingest._save_alert(event_id, alert)
         return str(alert["status"]), str(alert.get("error") or "") or None
 
-    def loop() -> None:
-        state = load_state()
+    def _init_state(st: dict[str, Any]) -> dict[str, Any]:
         identity_version = 2
-        if int(state.get("identity_version") or 0) != identity_version:
-            # Identity logic changed after inspecting the live export schema.
-            # Re-bootstrap safely so existing calls can never become "new".
-            state["bootstrapped"] = False
-            state["seen"] = []
-            state["identity_version"] = identity_version
-            state["identity_migrated_at"] = datetime.now(timezone.utc).isoformat()
+        if int(st.get("identity_version") or 0) != identity_version:
+            st["bootstrapped"] = False
+            st["seen"] = []
+            st["identity_version"] = identity_version
+            st["identity_migrated_at"] = datetime.now(timezone.utc).isoformat()
+        st.setdefault("processed", 0)
+        st.setdefault("successful_polls", 0)
+        st.setdefault("trade_actions", 0)
+        st.setdefault("no_trade", 0)
+        st.setdefault("invalid", 0)
+        st.setdefault("errors", 0)
+        return st
 
-        state.setdefault("processed", 0)
-        state.setdefault("successful_polls", 0)
-        state.setdefault("trade_actions", 0)
-        state.setdefault("no_trade", 0)
-        state.setdefault("invalid", 0)
-        state.setdefault("errors", 0)
+    def _poll_feed(
+        feed_url: str,
+        st: dict[str, Any],
+        st_file: Any,
+        sport: str,
+    ) -> None:
+        def _save(s: dict[str, Any]) -> None:
+            s["updated_at"] = datetime.now(timezone.utc).isoformat()
+            core._save(st_file, s)
+
+        try:
+            rows, payload, route = fetch_rows(feed_url)
+            ids = [_identity(r) for r in rows]
+            st["last_poll_at"] = datetime.now(timezone.utc).isoformat()
+            st["last_poll_records"] = len(rows)
+            st["last_http_status"] = 200
+            st["last_error"] = None
+            st["successful_polls"] = int(st.get("successful_polls") or 0) + 1
+            st["consecutive_errors"] = 0
+            st["last_success_at"] = datetime.now(timezone.utc).isoformat()
+            st["last_route"] = route
+
+            schema_key = f"schema_logged_{sport.lower()}"
+            if not st.get(schema_key) and rows:
+                print(
+                    f"PW_EXPORT_SCHEMA sport={sport} "
+                    f"top={type(payload).__name__} "
+                    f"record_keys={','.join(sorted(rows[0].keys()))}",
+                    flush=True,
+                )
+                st[schema_key] = True
+
+            if not st.get("bootstrapped"):
+                mark_seen(st, ids)
+                st["bootstrapped"] = True
+                st["bootstrapped_at"] = datetime.now(timezone.utc).isoformat()
+                st["bootstrap_records"] = len(rows)
+                parseable = sum(1 for r in rows if _synth_text(r, history, sport=sport)[0])
+                st["bootstrap_parseable"] = parseable
+                _save(st)
+                print(
+                    f"PW_EXPORT_BOOTSTRAP sport={sport} records={len(rows)} parseable={parseable} action=cursor_only",
+                    flush=True,
+                )
+            else:
+                seen = set(str(x) for x in (st.get("seen") or []))
+                fresh = [(r, i) for r, i in zip(rows, ids) if i not in seen]
+                fresh.sort(key=lambda pair: _row_dt(pair[0]) or datetime.now(timezone.utc))
+
+                for row, rec_id in fresh:
+                    if bool(_first(row, "_suppressed", "suppressed", "is_suppressed", "isSuppressed")):
+                        mark_seen(st, [rec_id])
+                        continue
+
+                    row_dt = _row_dt(row)
+                    if row_dt is not None:
+                        age = (datetime.now(timezone.utc) - row_dt).total_seconds()
+                        if age > max_age_seconds:
+                            mark_seen(st, [rec_id])
+                            print(
+                                f"PW_EXPORT_SKIP sport={sport} id={rec_id} reason=stale age_seconds={int(age)}",
+                                flush=True,
+                            )
+                            continue
+
+                    status, error = process(row, rec_id, sport=sport)
+                    mark_seen(st, [rec_id])
+                    st["processed"] = int(st.get("processed") or 0) + 1
+                    if status in {"LIVE_TRADE_QUEUED", "LIVE_TRADE_PREPARED", "LIVE_TRADE_CREATED", "PAPER_TRADE_CREATED"}:
+                        st["trade_actions"] = int(st.get("trade_actions") or 0) + 1
+                    elif status == "INVALID":
+                        st["invalid"] = int(st.get("invalid") or 0) + 1
+                    else:
+                        st["no_trade"] = int(st.get("no_trade") or 0) + 1
+                    st["last_record_id"] = rec_id
+                    st["last_record_status"] = status
+                    st["last_record_at"] = datetime.now(timezone.utc).isoformat()
+                    st["last_record_error"] = error
+                    _save(st)
+                    print(
+                        f"PW_EXPORT_RECORD sport={sport} id={rec_id} status={status}"
+                        + (f" error={error}" if error else ""),
+                        flush=True,
+                    )
+
+                if not fresh:
+                    _save(st)
+                    print(
+                        f"PW_EXPORT_POLL_OK sport={sport} records={len(rows)} fresh=0 poll={st.get('successful_polls')} route={route}",
+                        flush=True,
+                    )
+
+        except Exception as exc:
+            st["errors"] = int(st.get("errors") or 0) + 1
+            st["consecutive_errors"] = int(st.get("consecutive_errors") or 0) + 1
+            st["last_error"] = f"{type(exc).__name__}: {exc}"
+            st["last_error_at"] = datetime.now(timezone.utc).isoformat()
+            try:
+                _save(st)
+            except Exception:
+                pass
+            print(
+                f"PW_EXPORT_POLL_ERROR sport={sport} error={type(exc).__name__}:{exc}",
+                flush=True,
+            )
+
+    def loop() -> None:
+        state = _init_state(load_state())
+        nba_state = _init_state(
+            (core._load(nba_state_file) if nba_state_file.exists() else {})
+            if nba_url else {}
+        )
 
         # Give tailscaled/control-plane state a brief settling window after
         # container startup; Railway /health is already available independently.
@@ -594,114 +745,19 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
 
         while not stop.is_set():
             started = time.time()
-            try:
-                rows, payload, route = fetch_rows()
-                ids = [_identity(r) for r in rows]
-                state["last_poll_at"] = datetime.now(timezone.utc).isoformat()
-                state["last_poll_records"] = len(rows)
-                state["last_http_status"] = 200
-                state["last_error"] = None
-                state["successful_polls"] = int(state.get("successful_polls") or 0) + 1
-                state["consecutive_errors"] = 0
-                state["last_success_at"] = datetime.now(timezone.utc).isoformat()
-                state["last_route"] = route
-
-                if not state.get("schema_logged") and rows:
-                    print(
-                        "PW_EXPORT_SCHEMA "
-                        f"top={type(payload).__name__} "
-                        f"record_keys={','.join(sorted(rows[0].keys()))}",
-                        flush=True,
-                    )
-                    state["schema_logged"] = True
-
-                if not state.get("bootstrapped"):
-                    # Critical safety invariant: the first successful sync establishes
-                    # the cursor only. Existing/historical records are NEVER executed.
-                    mark_seen(state, ids)
-                    state["bootstrapped"] = True
-                    state["bootstrapped_at"] = datetime.now(timezone.utc).isoformat()
-                    state["bootstrap_records"] = len(rows)
-                    parseable = sum(1 for r in rows if _synth_text(r, history)[0])
-                    state["bootstrap_parseable"] = parseable
-                    save_state(state)
-                    print(
-                        f"PW_EXPORT_BOOTSTRAP records={len(rows)} parseable={parseable} action=cursor_only",
-                        flush=True,
-                    )
-                else:
-                    seen = set(str(x) for x in (state.get("seen") or []))
-                    fresh = [(r, i) for r, i in zip(rows, ids) if i not in seen]
-                    fresh.sort(key=lambda pair: _row_dt(pair[0]) or datetime.now(timezone.utc))
-
-                    for row, rec_id in fresh:
-                        # Respect an explicit suppression marker even if the API was
-                        # configured to include suppressed rows for diagnostics.
-                        if bool(_first(row, "_suppressed", "suppressed", "is_suppressed", "isSuppressed")):
-                            mark_seen(state, [rec_id])
-                            continue
-
-                        row_dt = _row_dt(row)
-                        if row_dt is not None:
-                            age = (datetime.now(timezone.utc) - row_dt).total_seconds()
-                            if age > max_age_seconds:
-                                mark_seen(state, [rec_id])
-                                print(
-                                    f"PW_EXPORT_SKIP id={rec_id} reason=stale age_seconds={int(age)}",
-                                    flush=True,
-                                )
-                                continue
-
-                        status, error = process(row, rec_id)
-                        mark_seen(state, [rec_id])
-                        state["processed"] = int(state.get("processed") or 0) + 1
-                        if status in {"LIVE_TRADE_QUEUED", "LIVE_TRADE_PREPARED", "LIVE_TRADE_CREATED", "PAPER_TRADE_CREATED"}:
-                            state["trade_actions"] = int(state.get("trade_actions") or 0) + 1
-                        elif status == "INVALID":
-                            state["invalid"] = int(state.get("invalid") or 0) + 1
-                        else:
-                            state["no_trade"] = int(state.get("no_trade") or 0) + 1
-                        state["last_record_id"] = rec_id
-                        state["last_record_status"] = status
-                        state["last_record_at"] = datetime.now(timezone.utc).isoformat()
-                        state["last_record_error"] = error
-                        save_state(state)
-                        print(
-                            f"PW_EXPORT_RECORD id={rec_id} status={status}"
-                            + (f" error={error}" if error else ""),
-                            flush=True,
-                        )
-
-                    if not fresh:
-                        save_state(state)
-                        print(
-                            f"PW_EXPORT_POLL_OK records={len(rows)} fresh=0 poll={state.get('successful_polls')} route={route}",
-                            flush=True,
-                        )
-
-            except Exception as exc:
-                state["errors"] = int(state.get("errors") or 0) + 1
-                state["consecutive_errors"] = int(state.get("consecutive_errors") or 0) + 1
-                state["last_error"] = f"{type(exc).__name__}: {exc}"
-                state["last_error_at"] = datetime.now(timezone.utc).isoformat()
-                try:
-                    save_state(state)
-                except Exception:
-                    pass
-                print(
-                    f"PW_EXPORT_POLL_ERROR error={type(exc).__name__}:{exc}",
-                    flush=True,
-                )
-
+            _poll_feed(url, state, state_file, "WNBA")
+            if nba_url:
+                _poll_feed(nba_url, nba_state, nba_state_file, "NBA")
             elapsed = time.time() - started
             stop.wait(max(0.5, poll_seconds - elapsed))
 
     @app.get("/api/pw-export/status", dependencies=[Depends(dashboard._auth)])
     def pw_export_status():
         state = load_state()
-        return {
+        result = {
             "enabled": enabled,
             "url_configured": bool(url),
+            "nba_url_configured": bool(nba_url),
             "source": source,
             "poll_seconds": poll_seconds,
             "max_age_seconds": max_age_seconds,
@@ -710,12 +766,19 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
             "auto_trading": bool(core.auto_trading_enabled()),
             **state,
         }
+        if nba_url:
+            nba_st = core._load(nba_state_file) if nba_state_file.exists() else {}
+            result["nba"] = nba_st if isinstance(nba_st, dict) else {}
+        return result
 
     if enabled:
         _THREAD = threading.Thread(target=loop, name="pw-export-poller", daemon=True)
         _THREAD.start()
+        feeds = "WNBA"
+        if nba_url:
+            feeds += "+NBA"
         print(
-            f"PW_EXPORT_INGEST_READY enabled=true poll_seconds={poll_seconds:g} "
+            f"PW_EXPORT_INGEST_READY enabled=true feeds={feeds} poll_seconds={poll_seconds:g} "
             f"source={source} bootstrap_only_first_sync=true",
             flush=True,
         )
