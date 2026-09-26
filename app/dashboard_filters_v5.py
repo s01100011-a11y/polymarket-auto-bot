@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from decimal import Decimal
 from typing import Any
 
@@ -18,6 +19,66 @@ def _d(value: Any, default: str = "0") -> Decimal:
         return Decimal(str(value))
     except Exception:
         return Decimal(default)
+
+
+def _portfolio_value() -> str | None:
+    """Total wallet value = available USDC + current Polymarket position value."""
+    try:
+        state = metrics_base.remote._state()
+        cash_raw = state.get("usdc_balance")
+        positions_raw = state.get("portfolio_value")
+        if (cash_raw is None or cash_raw == "") and (positions_raw is None or positions_raw == ""):
+            return None
+        cash = _d(cash_raw)
+        positions = _d(positions_raw)
+        return str((cash + positions).quantize(Decimal("0.01")))
+    except Exception:
+        return None
+
+
+def _total_missed_pnl(executions: dict[str, Any]) -> dict[str, Any]:
+    """Aggregate missed Telegram-call P/L across NFL + CFB and both cappers."""
+    try:
+        from app import nfl_capper_ingest as capper
+    except Exception:
+        return {"missed_graded": 0, "missed_pnl_usdc": "0.00"}
+
+    specs = (
+        (
+            core.DATA_DIR / "nfl_capper_signals.json",
+            ("Slam - NFL", "Syndicate - NFL"),
+            "NFL",
+            Decimal(os.getenv("NFL_CAPPER_UNIT_USDC", "10")),
+        ),
+        (
+            core.DATA_DIR / "cfb_capper_preview_signals.json",
+            ("Slam - CFB", "Syndicate - CFB"),
+            "CFB",
+            Decimal(os.getenv("CFB_CAPPER_UNIT_USDC", "10")),
+        ),
+    )
+    total_pnl = Decimal("0")
+    total_graded = 0
+    for path, labels, sport, unit_usdc in specs:
+        signals = core._load(path)
+        if not isinstance(signals, dict):
+            signals = {}
+        stats = capper._missed_signal_stats(
+            signals,
+            executions,
+            labels=labels,
+            sport=sport,
+            unit_usdc=unit_usdc,
+        )
+        for label in labels:
+            row = stats.get(label) or {}
+            total_graded += int(row.get("missed_graded") or 0)
+            total_pnl += _d(row.get("missed_pnl_usdc"))
+
+    return {
+        "missed_graded": total_graded,
+        "missed_pnl_usdc": str(total_pnl.quantize(Decimal("0.01"))),
+    }
 
 
 def _trade_bucket(rec: dict[str, Any]) -> str | None:
@@ -83,6 +144,7 @@ def _performance(mode: str) -> dict[str, Any]:
     accuracy = (Decimal(wins) / Decimal(decided) * Decimal("100")) if decided else None
     roi = (realized_total / stake_total * Decimal("100")) if stake_total > 0 else None
 
+    total_missed = _total_missed_pnl(executions)
     return {
         "mode": mode,
         "wins": wins,
@@ -94,6 +156,9 @@ def _performance(mode: str) -> dict[str, Any]:
         "realized_pnl": str(realized_total.quantize(Decimal("0.01"))),
         "accuracy_pct": str(accuracy.quantize(Decimal("0.1"))) if accuracy is not None else None,
         "roi_pct": str(roi.quantize(Decimal("0.1"))) if roi is not None else None,
+        "portfolio_value_usdc": _portfolio_value(),
+        "missed_graded_total": total_missed["missed_graded"],
+        "missed_pnl_total_usdc": total_missed["missed_pnl_usdc"],
     }
 
 
@@ -183,11 +248,24 @@ async function refreshFilteredStats(){
   const r=await fetch('/api/dashboard/performance?mode='+encodeURIComponent(dashboardStatsFilter),{cache:'no-store'});
   const s=await r.json();
   if(!r.ok)throw new Error(s.detail||'Stats filter failed');
+  const portfolio=document.getElementById('performancePortfolio');
+  const missed=document.getElementById('performanceMissedPnl');
+  const missedCount=document.getElementById('performanceMissedCount');
   const roi=document.getElementById('performanceRoi');
   const wl=document.getElementById('performanceWL');
   const acc=document.getElementById('performanceAccuracy');
   const push=document.getElementById('performancePushes');
   const graded=document.getElementById('performanceGraded');
+  if(portfolio){
+   portfolio.textContent=s.portfolio_value_usdc===null||s.portfolio_value_usdc===undefined?'—':'$'+Number(s.portfolio_value_usdc).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+   portfolio.className='performance-value';
+  }
+  if(missed){
+   const m=Number(s.missed_pnl_total_usdc||0);
+   missed.textContent=(m>0?'+':'')+'$'+m.toFixed(2);
+   missed.className='performance-value '+(m>0?'green':m<0?'red':'');
+  }
+  if(missedCount)missedCount.textContent=String(s.missed_graded_total||0)+' graded missed calls · NFL + CFB';
   if(roi){
    const n=Number(s.roi_pct);
    roi.textContent=s.roi_pct===null||s.roi_pct===undefined?'—':n.toFixed(1)+'%';

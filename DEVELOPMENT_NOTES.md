@@ -1,3 +1,12 @@
+## 2026-09-26 — Top portfolio value + total missed P/L stats (#114)
+
+- Added two account-level cards to the top performance strip: `Portfolio value` and `Missed P/L · total`.
+- Portfolio value is total wallet value: latest available USDC plus current Polymarket position value reported by the paired Termux executor heartbeat.
+- Total missed P/L aggregates the existing missed-call accounting across Slam + Syndicate for both NFL and CFB. The card also shows the number of graded missed calls.
+- These two cards are account/total metrics and intentionally do not change when the BOTH/PAPER/LIVE trade-performance filter changes.
+- Positive missed P/L is green, negative missed P/L is red, and portfolio value remains neutral.
+- Expanded the performance strip to five cards with responsive 5-column / 3-column / 2-column layouts.
+- No execution, sizing, settlement, auto-trading, or risk-control logic changed.
 ## 2026-09-26 — Capper missed P/L tracking (#112)
 
 - Added `Missed P/L` to every Slam/Syndicate NFL and CFB capper performance card.
