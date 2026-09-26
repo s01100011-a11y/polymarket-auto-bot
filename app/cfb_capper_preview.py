@@ -417,7 +417,7 @@ def _event_phase(record: dict[str, Any], now: datetime | None = None) -> str:
         return "CLOSED"
     start = _parse_iso(record.get("event_start_at"))
     if start is not None and (now or datetime.now(timezone.utc)) >= start:
-        return "STARTED"
+        return "LIVE"
     return "PREGAME"
 
 
@@ -561,16 +561,35 @@ def _refresh_record_runtime(record: dict[str, Any]) -> bool:
                 record["event_metadata_error"] = f"{type(exc).__name__}: {exc}"
 
     phase = _event_phase(record)
+
+    # Once kickoff has passed, refresh the matched market state as well as odds.
+    # If the exact event/market remains open, keep the signal actionable as LIVE.
+    if phase == "LIVE":
+        pick = record.get("pick")
+        kind = str(record.get("market_type") or "")
+        if isinstance(pick, dict) and kind:
+            try:
+                refreshed_match = _resolve_market_match(pick, kind)
+                if str(refreshed_match.get("asset_id") or "") == str(match.get("asset_id") or ""):
+                    record.update(refreshed_match)
+                    match = _saved_market_match(record) or match
+                    phase = _event_phase(record)
+                    changed = True
+            except ValueError as exc:
+                if "No exact open Polymarket CFB" in str(exc):
+                    record["event_closed"] = True
+                    record["market_accepting_orders"] = False
+                    phase = "CLOSED"
+                    changed = True
+                else:
+                    record["event_metadata_error"] = f"{type(exc).__name__}: {exc}"
+            except Exception as exc:
+                record["event_metadata_error"] = f"{type(exc).__name__}: {exc}"
+
     if record.get("event_phase") != phase:
         record["event_phase"] = phase
         changed = True
 
-    if phase == "STARTED":
-        if record.get("status") != "EVENT_STARTED":
-            record["status"] = "EVENT_STARTED"
-            record["reason"] = "matched Polymarket event has started"
-            changed = True
-        return changed
     if phase == "CLOSED":
         if record.get("status") != "EVENT_CLOSED":
             record["status"] = "EVENT_CLOSED"
@@ -578,9 +597,14 @@ def _refresh_record_runtime(record: dict[str, Any]) -> bool:
             changed = True
         return changed
 
-    if record.get("status") == "IGNORED_STALE":
+    if phase == "LIVE":
+        if record.get("status") != "MATCHED_LIVE":
+            record["status"] = "MATCHED_LIVE"
+            record["reason"] = "game is live; matched Polymarket market remains open"
+            changed = True
+    elif record.get("status") == "IGNORED_STALE":
         record["status"] = "MATCHED_PREGAME"
-        record["reason"] = "outside auto-trade freshness window; manual BUY remains available until event start"
+        record["reason"] = "outside auto-trade freshness window; manual BUY remains available while market is open"
         changed = True
 
     try:
@@ -725,8 +749,8 @@ def _prepare_manual_buy(
     kind, reason = _classify_pick(pick)
     if kind is None:
         raise RuntimeError(reason or "unsupported CFB pick")
-    if matched is not None and _event_phase(matched) != "PREGAME":
-        raise RuntimeError("Matched CFB event has already started or closed")
+    if matched is not None and _event_phase(matched) == "CLOSED":
+        raise RuntimeError("Matched CFB market is closed")
 
     ready, executor_state = live_control._executor_ready()
     if not ready:
@@ -775,6 +799,7 @@ def _prepare_manual_buy(
         "auto": False,
         "manual": True,
         "strategy_execution_mode": "manual",
+        "strategy_event_phase": _event_phase(match),
         "strategy_source": source_label,
         "strategy_sport": "CFB",
         "strategy_units": str(units),
@@ -832,10 +857,10 @@ def _status_pick_item(record: dict[str, Any]) -> dict[str, Any]:
         "signal_id": record.get("id"),
         "buy_available": bool(
             saved_match
-            and phase == "PREGAME"
+            and phase in {"PREGAME", "LIVE"}
             and record.get("status") in {
                 "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
-                "MATCHED_PREGAME", "RETRYING"
+                "MATCHED_PREGAME", "MATCHED_LIVE", "RETRYING"
             }
         ),
         "manual_buy_request_id": record.get("manual_buy_request_id"),
@@ -902,13 +927,14 @@ function cfbPickList(title,items,kind){
   if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('\u0024'+Number(item.stake_usdc).toFixed(2));
   if(item.posted_at)meta.push('posted '+cfbPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+cfbAge(item.signal_age_seconds):''));
   if(item.market)meta.push('Matched: '+cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
-  if(item.event_start_at)meta.push('starts '+cfbPickTime(item.event_start_at));
+  if(item.event_phase==='LIVE')meta.push('GAME LIVE');
+  else if(item.event_start_at)meta.push('starts '+cfbPickTime(item.event_start_at));
   if(item.best_ask!==null&&item.best_ask!==undefined&&item.best_ask!==''){
    const cents=(Number(item.best_ask)*100).toFixed(1).replace(/\.0$/,'');
    meta.push('Live BUY '+cents+'¢'+(item.live_odds_american?' ('+cfbEsc(item.live_odds_american)+')':''));
   }
   if(item.live_quote_error)meta.push('live odds unavailable');
-  if(kind==='pregame'&&item.reason)meta.push(cfbEsc(item.reason));
+  if((kind==='pregame'||kind==='live')&&item.reason)meta.push(cfbEsc(item.reason));
   if(kind==='retrying'&&item.last_error)meta.push(cfbEsc(item.last_error));
   if(!item.buy_available&&item.match_status!=='MATCHED')meta.push('Polymarket match pending');
   if(item.manual_buy_status)meta.push('manual BUY '+cfbEsc(item.manual_buy_status));
@@ -941,8 +967,8 @@ async function cfbManualBuy(signalId,btn){
 }
 function cfbCapperLine(x){
  if(!x)return 'No tracked signals yet';
- const base='Signals '+(x.signals||0)+' · Queued '+(x.preview_queued||0)+' · Done '+(x.preview_done||0)+' · Failed '+(x.preview_failed||0)+'<br>Retrying '+(x.retrying||0)+' · Pregame '+(x.pregame||0)+' · Started '+(x.started||0)+' · Closed '+(x.closed||0)+' · Unsupported '+(x.unsupported||0);
- return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Previewed picks',x.previewed_items,'previewed')+cfbPickList('Matched pregame picks',x.pregame_items,'pregame')+cfbPickList('Matched / retrying picks',x.retrying_items,'retrying')+cfbPickList('Matched / preview failed',x.failed_items,'failed');
+ const base='Signals '+(x.signals||0)+' · Queued '+(x.preview_queued||0)+' · Done '+(x.preview_done||0)+' · Failed '+(x.preview_failed||0)+'<br>Retrying '+(x.retrying||0)+' · Pregame '+(x.pregame||0)+' · Live '+(x.live||0)+' · Closed '+(x.closed||0)+' · Unsupported '+(x.unsupported||0);
+ return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Previewed picks',x.previewed_items,'previewed')+cfbPickList('Matched pregame picks',x.pregame_items,'pregame')+cfbPickList('Matched live picks',x.live_items,'live')+cfbPickList('Matched / retrying picks',x.retrying_items,'retrying')+cfbPickList('Matched / preview failed',x.failed_items,'failed');
 }
 async function loadCfbCapperStats(){
  try{
@@ -951,7 +977,7 @@ async function loadCfbCapperStats(){
   const state=document.getElementById('cfbCapperState'),meta=document.getElementById('cfbCapperMeta');
   let mode=' · '+String(d.mode||'').replaceAll('_',' ');
   if(state)state.textContent=(d.enabled?'ENABLED':'DISABLED')+(d.enabled?mode:'');
-  if(meta)meta.textContent='1u = \u0024'+Number(d.unit_usdc||10).toFixed(2)+' · auto fresh ≤ '+(d.max_pick_age_seconds||0)+'s · manual until event start · odds refresh '+(d.poll_seconds||0)+'s';
+  if(meta)meta.textContent='1u = \u0024'+Number(d.unit_usdc||10).toFixed(2)+' · auto fresh ≤ '+(d.max_pick_age_seconds||0)+'s · manual pregame/live while market open · odds refresh '+(d.poll_seconds||0)+'s';
   const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
   if(s)s.innerHTML=cfbCapperLine((d.sources||{})['Slam - CFB']);
   if(y)y.innerHTML=cfbCapperLine((d.sources||{})['Syndicate - CFB']);
@@ -1095,11 +1121,11 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 changed = True
             if current and current.get("status") in {
                 "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
-                "MATCHED_PREGAME", "EVENT_STARTED", "EVENT_CLOSED",
+                "MATCHED_PREGAME", "MATCHED_LIVE", "EVENT_CLOSED",
                 "IGNORED_STALE", "IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE",
             }:
                 terminal = str(current.get("status") or "")
-                if terminal in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE", "EVENT_STARTED", "EVENT_CLOSED"}:
+                if terminal in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE", "EVENT_CLOSED"}:
                     continue
                 if (
                     terminal != "IGNORED_STALE"
@@ -1160,9 +1186,17 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             age = (now - posted).total_seconds() if posted else float("inf")
             if age > max_age_seconds:
                 record["event_phase"] = _event_phase(record, now)
-                if record["event_phase"] == "STARTED":
-                    record["status"] = "EVENT_STARTED"
-                    record["reason"] = "matched Polymarket event has started"
+                if record["event_phase"] == "LIVE":
+                    record["status"] = "MATCHED_LIVE"
+                    record["reason"] = "game is live; matched Polymarket market remains open"
+                    try:
+                        record.update(await asyncio.to_thread(
+                            _read_live_buy_quote,
+                            str(record["asset_id"]),
+                        ))
+                        record["live_quote_error"] = None
+                    except Exception as exc:
+                        record["live_quote_error"] = f"{type(exc).__name__}: {exc}"
                 elif record["event_phase"] == "CLOSED":
                     record["status"] = "EVENT_CLOSED"
                     record["reason"] = "matched Polymarket event/market is closed"
@@ -1170,7 +1204,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     record["status"] = "MATCHED_PREGAME"
                     record["reason"] = (
                         f"outside {max_age_seconds}s auto-trade freshness window; "
-                        "manual BUY remains available until event start"
+                        "manual BUY remains available while market is open"
                     )
                     try:
                         record.update(await asyncio.to_thread(
@@ -1344,7 +1378,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "preview_queued": sum(1 for r in rows if r.get("status") == "PREVIEW_QUEUED"),
                 "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
                 "pregame": sum(1 for r in rows if r.get("status") == "MATCHED_PREGAME"),
-                "started": sum(1 for r in rows if r.get("status") == "EVENT_STARTED"),
+                "live": sum(1 for r in rows if r.get("status") == "MATCHED_LIVE"),
                 "closed": sum(1 for r in rows if r.get("status") == "EVENT_CLOSED"),
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
                 "queued_items": _recent_status_items(rows, "PREVIEW_QUEUED"),
@@ -1358,6 +1392,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     "PREVIEW_FAILED",
                 ),
                 "pregame_items": _recent_status_items(rows, "MATCHED_PREGAME"),
+                "live_items": _recent_status_items(rows, "MATCHED_LIVE"),
             }
         return {
             "enabled": enabled,
@@ -1379,7 +1414,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         if record.get("source") not in SOURCE_LABELS:
             raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
         if record.get("status") not in {
-            "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED", "MATCHED_PREGAME", "RETRYING"
+            "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
+            "MATCHED_PREGAME", "MATCHED_LIVE", "RETRYING"
         }:
             raise HTTPException(
                 status_code=409,
@@ -1392,10 +1428,10 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 detail="CFB signal has not been safely matched to a Polymarket event yet",
             )
         phase = _event_phase(record)
-        if phase != "PREGAME":
+        if phase == "CLOSED":
             raise HTTPException(
                 status_code=409,
-                detail=f"CFB event is {phase.lower()}; pregame BUY is no longer available",
+                detail="CFB market is closed; BUY LIVE is no longer available",
             )
 
         pick = record.get("pick") if isinstance(record.get("pick"), dict) else None
