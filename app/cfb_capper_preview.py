@@ -380,6 +380,237 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
     return best[1], best[2], best[3], best[4]
 
 
+def _format_signed_line(value: Decimal) -> str:
+    number = value.normalize()
+    body = format(abs(number), "f")
+    if "." in body:
+        body = body.rstrip("0").rstrip(".")
+    sign = "+" if number >= 0 else "-"
+    return f"{sign}{body}"
+
+
+def _spread_outcome_any_line(
+    market: Any,
+    pick: dict[str, Any],
+) -> tuple[str, Any, Decimal] | None:
+    """Resolve the picked team on any explicit spread line without guessing."""
+    outcomes = [(label, obj) for label, obj in nfl._outcomes(market) if obj is not None]
+    if len(outcomes) != 2:
+        return None
+
+    team_hint = str(pick.get("team_hint") or "").strip()
+    if not team_hint:
+        return None
+
+    raw_market = " ".join([
+        str(getattr(market, "question", "") or ""),
+        str(getattr(market, "slug", "") or ""),
+    ])
+
+    def signed_line(text: str) -> Decimal | None:
+        hits = re.findall(r"(?<!\d)([+-]\s*\d{1,2}(?:\.\d+)?)(?!\d)", str(text or ""))
+        values: list[Decimal] = []
+        for hit in hits:
+            try:
+                value = Decimal(hit.replace(" ", ""))
+            except Exception:
+                continue
+            if abs(value) <= Decimal("69.5"):
+                values.append(value)
+        unique = list(dict.fromkeys(values))
+        return unique[0] if len(unique) == 1 else None
+
+    for label, obj in outcomes:
+        if not _contains_hint(label, team_hint):
+            continue
+        line = signed_line(label)
+        if line is None:
+            line = signed_line(raw_market)
+        if line is not None:
+            return label, obj, line
+
+    if _contains_hint(raw_market, team_hint) and nfl._norm(outcomes[0][0]) == "yes":
+        line = signed_line(raw_market)
+        if line is not None:
+            return outcomes[0][0], outcomes[0][1], line
+
+    return None
+
+
+def _find_spread_alternatives(
+    pick: dict[str, Any],
+    *,
+    limit: int = 4,
+) -> list[dict[str, Any]]:
+    """Find explicit nearby spread lines for the same picked team/event."""
+    hints = _event_hints_for_pick(pick, "spread")
+    if not hints:
+        return []
+
+    try:
+        original = Decimal(str(list(pick.get("spread_lines") or [None])[0]))
+    except Exception:
+        return []
+
+    rows: list[tuple[int, Any, Any, str, Any, Decimal]] = []
+    with PublicClient() as client:
+        events_by_key: dict[str, Any] = {}
+        for query in hints:
+            result = client.list_events(title_search=query, closed=False, page_size=30).first_page()
+            for event in result.items:
+                key = _event_key(event)
+                if key:
+                    events_by_key[key] = event
+
+        for event in events_by_key.values():
+            slug = nfl._norm(getattr(event, "slug", ""))
+            if not slug.startswith("cfb-"):
+                continue
+            etext = " ".join([
+                str(getattr(event, "title", "") or ""),
+                str(getattr(event, "slug", "") or ""),
+            ])
+            if not all(_contains_hint(etext, hint) for hint in hints):
+                continue
+            for market in getattr(event, "markets", ()) or ():
+                actual = nfl._market_type(market)
+                if not nfl._type_matches(actual, "spread"):
+                    continue
+                if not getattr(getattr(market, "state", None), "accepting_orders", False):
+                    continue
+                selected = _spread_outcome_any_line(market, pick)
+                if selected is None:
+                    continue
+                label, obj, line = selected
+                if line == original:
+                    continue
+                distance = abs(line - original)
+                rows.append((int(distance * 100), event, market, label, obj, line))
+
+    if not rows:
+        return []
+
+    event_keys = {_event_key(row[1]) for row in rows}
+    event_keys.discard("")
+    if len(event_keys) != 1 and len(hints) == 1:
+        narrowed = _narrow_one_team_events_by_posted_date(rows, pick)
+        event_keys = {_event_key(row[1]) for row in narrowed}
+        event_keys.discard("")
+        rows = narrowed
+    if len(event_keys) != 1:
+        return []
+
+    # For equal distance, prefer the more favorable spread for the selected team
+    # (numerically larger: +21.5 over +20.5, -6 over -6.5).
+    rows.sort(key=lambda row: (row[0], 0 if row[5] >= original else 1, -row[5]))
+
+    alternatives: list[dict[str, Any]] = []
+    seen_lines: set[str] = set()
+    for _, event, market, label, obj, line in rows:
+        line_text = _format_signed_line(line)
+        if line_text in seen_lines:
+            continue
+        seen_lines.add(line_text)
+        asset_id = str(
+            getattr(obj, "token_id", None)
+            or getattr(obj, "position_id", None)
+            or ""
+        )
+        if not asset_id:
+            continue
+        try:
+            quote = _read_live_buy_quote(asset_id)
+        except Exception:
+            continue
+
+        event_slug = str(getattr(event, "slug", "") or "")
+        if not event_slug.startswith("cfb-"):
+            continue
+        start_at = _precise_event_start(event, market)
+        accepting = getattr(getattr(market, "state", None), "accepting_orders", None)
+        closed_value = getattr(event, "closed", None)
+        alt_id = hashlib.sha256(f"{asset_id}|{line_text}".encode("utf-8")).hexdigest()[:16]
+        relative = "BETTER" if line > original else "WORSE"
+        if line == original:
+            relative = "SAME"
+        match = {
+            "alternative_id": alt_id,
+            "match_status": "ALTERNATE",
+            "market_type": "spread",
+            "event_slug": event_slug,
+            "event_title": str(getattr(event, "title", "") or ""),
+            "event_start_at": start_at.isoformat() if start_at is not None else None,
+            "event_start_checked_at": _now_iso(),
+            "event_closed": bool(closed_value) if closed_value is not None else False,
+            "market_accepting_orders": bool(accepting) if accepting is not None else None,
+            "market": str(
+                getattr(market, "question", "")
+                or getattr(event, "title", "CFB spread")
+            ),
+            "market_url": f"https://polymarket.com/sports/cfb/{event_slug}",
+            "outcome": label,
+            "asset_id": asset_id,
+            "spread_line": line_text,
+            "original_spread_line": _format_signed_line(original),
+            "relative_to_original": relative,
+            **quote,
+        }
+        match["event_phase"] = _event_phase(match)
+        alternatives.append(match)
+        if len(alternatives) >= max(1, limit):
+            break
+
+    return alternatives
+
+
+def _refresh_spread_alternatives(record: dict[str, Any]) -> bool:
+    pick = record.get("pick")
+    if not isinstance(pick, dict):
+        return False
+    try:
+        alternatives = _find_spread_alternatives(pick)
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        if record.get("alternate_error") != error:
+            record["alternate_error"] = error
+            return True
+        return False
+
+    changed = record.get("live_alternatives") != alternatives
+    record["live_alternatives"] = alternatives
+    record["alternate_error"] = None
+    if not alternatives:
+        if record.get("status") in {"MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE"}:
+            record["status"] = "RETRYING"
+            record["reason"] = "exact spread unavailable and no current explicit alternate spread is open"
+            changed = True
+        return changed
+
+    phase = str(alternatives[0].get("event_phase") or "PREGAME")
+    status = "MATCHED_LIVE_ALTERNATE" if phase == "LIVE" else "MATCHED_PREGAME_ALTERNATE"
+    reason = (
+        "exact original spread is unavailable; explicit current Polymarket alternatives are shown"
+    )
+    for key in ("event_title", "event_start_at", "market_url"):
+        value = alternatives[0].get(key)
+        if record.get(key) != value:
+            record[key] = value
+            changed = True
+    if record.get("event_phase") != phase:
+        record["event_phase"] = phase
+        changed = True
+    if record.get("status") != status:
+        record["status"] = status
+        changed = True
+    if record.get("match_status") != "ALTERNATE_AVAILABLE":
+        record["match_status"] = "ALTERNATE_AVAILABLE"
+        changed = True
+    if record.get("reason") != reason:
+        record["reason"] = reason
+        changed = True
+    return changed
+
+
 def _precise_event_start(event: Any, market: Any | None = None) -> datetime | None:
     """Return an actual kickoff timestamp; reject date-only metadata."""
     sports = getattr(market, "sports", None) if market is not None else None
@@ -689,7 +920,9 @@ def _prepare_preview(
         "strategy_unit_usdc": str(unit_usdc),
         "strategy_pick_id": fp,
         "strategy_posted_at": pick.get("posted_at"),
-        "strategy_selection": pick.get("selection"),
+        "strategy_selection": strategy_selection or pick.get("selection"),
+        "strategy_execution_selection": pick.get("selection"),
+        "strategy_alternate_line": strategy_alternate_line,
         "strategy_telegram_source": pick.get("source"),
     }
     queued = remote._enqueue("PREVIEW", payload)
@@ -744,6 +977,9 @@ def _prepare_manual_buy(
     remote: Any,
     unit_usdc: Decimal,
     matched: dict[str, Any] | None = None,
+    strategy_pick_id: str | None = None,
+    strategy_selection: str | None = None,
+    strategy_alternate_line: str | None = None,
 ) -> dict[str, Any]:
     """Queue one user-authorized CFB BUY after refreshing the live market."""
     kind, reason = _classify_pick(pick)
@@ -765,7 +1001,7 @@ def _prepare_manual_buy(
             f"Requested {units}u = ${stake} exceeds MAX_AUTO_TRADE_USDC=${core.MAX_AUTO_TRADE_USDC}"
         )
 
-    fp = _fingerprint(pick)
+    fp = str(strategy_pick_id or _fingerprint(pick))
     if _existing_manual_buy(core, remote, fp) is not None:
         raise RuntimeError("A live CFB BUY for this signal is already queued or open")
 
@@ -852,6 +1088,8 @@ def _status_pick_item(record: dict[str, Any]) -> dict[str, Any]:
         "live_odds_american": record.get("live_odds_american"),
         "quote_updated_at": record.get("quote_updated_at"),
         "live_quote_error": record.get("live_quote_error"),
+        "live_alternatives": record.get("live_alternatives") or [],
+        "alternate_error": record.get("alternate_error"),
         "reason": record.get("reason"),
         "last_error": record.get("last_error"),
         "request_id": record.get("request_id"),
@@ -963,8 +1201,15 @@ function cfbPickList(title,items,kind){
   const locked=['PENDING','LEASED','DONE'].includes(state);
   const label=state==='DONE'?'BOUGHT':(state==='PENDING'||state==='LEASED'?'BUY '+state:'BUY LIVE');
   const buyAction=(item.signal_id&&item.buy_available)?'<button type="button" style="margin-top:6px" data-signal-id="'+cfbEsc(item.signal_id)+'" onclick="cfbManualBuy(this.dataset.signalId,this)"'+(locked?' disabled':'')+'>'+label+'</button>':'';
+  const alternatives=Array.isArray(item.live_alternatives)?item.live_alternatives:[];
+  const altActions=alternatives.map(alt=>{
+   const cents=(Number(alt.best_ask)*100).toFixed(1).replace(/\.0$/,'');
+   const relative=alt.relative_to_original==='BETTER'?' BETTER LINE':(alt.relative_to_original==='WORSE'?' WORSE LINE':'');
+   const odds=alt.live_odds_american?' ('+cfbEsc(alt.live_odds_american)+')':'';
+   return '<button type="button" style="margin-top:6px;margin-right:6px" data-signal-id="'+cfbEsc(item.signal_id)+'" data-alt-id="'+cfbEsc(alt.alternative_id)+'" onclick="cfbManualAltBuy(this.dataset.signalId,this.dataset.altId,this)"'+(locked?' disabled':'')+'>BUY '+cfbEsc(alt.spread_line)+' @ '+cents+'¢'+odds+relative+'</button>';
+  }).join('');
   const marketAction=(item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+cfbEsc(item.market_url)+'">OPEN MARKET</a>':'';
-  const action=buyAction+marketAction;
+  const action=buyAction+altActions+marketAction;
   return '<div style="margin-top:5px;padding-top:5px;border-top:1px solid rgba(255,255,255,.07)"><b>'+cfbEsc(item.selection||'Unknown selection')+'</b>'+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+(action?'<br>'+action:'')+'</div>';
  }).join('');
  return '<div style="margin-top:8px"><b>'+cfbEsc(title)+'</b>'+rows+'</div>';
@@ -977,6 +1222,22 @@ async function cfbManualBuy(signalId,btn){
   const r=await fetch('/api/cfb-cappers/manual-buy/'+encodeURIComponent(signalId),{method:'POST'});
   const d=await r.json();
   if(!r.ok)throw new Error(d.detail||'Manual CFB BUY failed');
+  btn.textContent='QUEUED';
+  await loadCfbCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function cfbManualAltBuy(signalId,altId,btn){
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='RE-CHECKING…';
+ try{
+  const r=await fetch('/api/cfb-cappers/manual-buy-alternate/'+encodeURIComponent(signalId)+'/'+encodeURIComponent(altId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual alternate CFB BUY failed');
   btn.textContent='QUEUED';
   await loadCfbCapperStats();
  }catch(e){
@@ -1166,6 +1427,11 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         for existing in signals.values():
             if existing.get("status") in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE", "EVENT_CLOSED"}:
                 continue
+            if existing.get("status") in {"MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE"}:
+                if await asyncio.to_thread(_refresh_spread_alternatives, existing):
+                    existing["updated_at"] = _now_iso()
+                    changed = True
+                continue
             if _saved_market_match(existing) is not None:
                 if await asyncio.to_thread(_refresh_record_runtime, existing):
                     existing["updated_at"] = _now_iso()
@@ -1179,11 +1445,14 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 changed = True
             if current and current.get("status") in {
                 "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
-                "MATCHED_PREGAME", "MATCHED_LIVE", "EVENT_CLOSED",
+                "MATCHED_PREGAME", "MATCHED_LIVE",
+                "MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE", "EVENT_CLOSED",
                 "IGNORED_STALE", "IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE",
             }:
                 terminal = str(current.get("status") or "")
                 if terminal in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE", "EVENT_CLOSED"}:
+                    continue
+                if terminal in {"MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE"}:
                     continue
                 if (
                     terminal != "IGNORED_STALE"
@@ -1231,10 +1500,33 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     record["match_status"] = "MATCHED"
                 record["match_error"] = None
             except Exception as exc:
-                record["status"] = "RETRYING"
-                record["match_status"] = "UNRESOLVED"
                 record["match_error"] = f"{type(exc).__name__}: {exc}"
                 record["last_error"] = record["match_error"]
+                alternatives = []
+                if kind == "spread":
+                    try:
+                        alternatives = await asyncio.to_thread(_find_spread_alternatives, pick)
+                    except Exception as alt_exc:
+                        record["alternate_error"] = f"{type(alt_exc).__name__}: {alt_exc}"
+                if alternatives:
+                    record["live_alternatives"] = alternatives
+                    record["alternate_error"] = None
+                    record["match_status"] = "ALTERNATE_AVAILABLE"
+                    record["event_title"] = alternatives[0].get("event_title")
+                    record["event_start_at"] = alternatives[0].get("event_start_at")
+                    record["event_phase"] = alternatives[0].get("event_phase")
+                    record["market_url"] = alternatives[0].get("market_url")
+                    record["status"] = (
+                        "MATCHED_LIVE_ALTERNATE"
+                        if alternatives[0].get("event_phase") == "LIVE"
+                        else "MATCHED_PREGAME_ALTERNATE"
+                    )
+                    record["reason"] = (
+                        "exact original spread is unavailable; explicit current Polymarket alternatives are shown"
+                    )
+                else:
+                    record["status"] = "RETRYING"
+                    record["match_status"] = "UNRESOLVED"
                 record["updated_at"] = _now_iso()
                 signals[fp] = record
                 changed = True
@@ -1435,8 +1727,14 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "preview_failed": sum(1 for r in rows if r.get("status") == "PREVIEW_FAILED"),
                 "preview_queued": sum(1 for r in rows if r.get("status") == "PREVIEW_QUEUED"),
                 "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
-                "pregame": sum(1 for r in rows if r.get("status") == "MATCHED_PREGAME"),
-                "live": sum(1 for r in rows if r.get("status") == "MATCHED_LIVE"),
+                "pregame": sum(
+                    1 for r in rows
+                    if r.get("status") in {"MATCHED_PREGAME", "MATCHED_PREGAME_ALTERNATE"}
+                ),
+                "live": sum(
+                    1 for r in rows
+                    if r.get("status") in {"MATCHED_LIVE", "MATCHED_LIVE_ALTERNATE"}
+                ),
                 "closed": sum(1 for r in rows if r.get("status") == "EVENT_CLOSED"),
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
                 "all_items": _recent_all_items(rows),
@@ -1451,8 +1749,14 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     [r for r in rows if _saved_market_match(r) is not None],
                     "PREVIEW_FAILED",
                 ),
-                "pregame_items": _recent_status_items(rows, "MATCHED_PREGAME"),
-                "live_items": _recent_status_items(rows, "MATCHED_LIVE"),
+                "pregame_items": _recent_all_items([
+                    r for r in rows
+                    if r.get("status") in {"MATCHED_PREGAME", "MATCHED_PREGAME_ALTERNATE"}
+                ], limit=30),
+                "live_items": _recent_all_items([
+                    r for r in rows
+                    if r.get("status") in {"MATCHED_LIVE", "MATCHED_LIVE_ALTERNATE"}
+                ], limit=30),
                 "closed_items": _recent_status_items(rows, "EVENT_CLOSED"),
                 "unsupported_items": _recent_status_items(rows, "IGNORED_UNSUPPORTED"),
             }
@@ -1465,6 +1769,83 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             "unit_usdc": str(unit_usdc),
             "sources": counts,
             "status": dict(_STATUS),
+        }
+
+
+    @app.post(
+        "/api/cfb-cappers/manual-buy-alternate/{signal_id}/{alternative_id}",
+        dependencies=[Depends(dashboard._auth)],
+    )
+    def cfb_capper_manual_buy_alternate(signal_id: str, alternative_id: str) -> dict[str, Any]:
+        signals = _load_signals()
+        record = signals.get(signal_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Unknown CFB signal")
+        if record.get("source") not in SOURCE_LABELS:
+            raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
+
+        pick = record.get("pick") if isinstance(record.get("pick"), dict) else None
+        if pick is None:
+            raise HTTPException(status_code=409, detail="Original CFB pick details are unavailable")
+        kind, _ = _classify_pick(pick)
+        if kind != "spread":
+            raise HTTPException(status_code=409, detail="Alternate live-line BUY is only for spread signals")
+
+        try:
+            alternatives = _find_spread_alternatives(pick, limit=8)
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=f"Could not refresh live spread alternatives: {exc}") from exc
+        selected = next(
+            (alt for alt in alternatives if str(alt.get("alternative_id") or "") == alternative_id),
+            None,
+        )
+        if selected is None:
+            raise HTTPException(
+                status_code=409,
+                detail="That live spread is no longer available; refresh the dashboard and choose a current line",
+            )
+        if _event_phase(selected) == "CLOSED":
+            raise HTTPException(status_code=409, detail="Selected Polymarket spread market is closed")
+
+        execution_pick = dict(pick)
+        execution_pick["spread_lines"] = [selected["spread_line"]]
+        execution_pick["selection"] = (
+            f"{pick.get('team_hint') or pick.get('selection')} {selected['spread_line']}"
+        )
+        try:
+            result = _prepare_manual_buy(
+                execution_pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+                matched=selected,
+                strategy_pick_id=signal_id,
+                strategy_selection=str(record.get("selection") or pick.get("selection") or ""),
+                strategy_alternate_line=str(selected["spread_line"]),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        record["manual_buy_request_id"] = result["request_id"]
+        record["manual_buy_trade_id"] = result["trade_id"]
+        record["manual_buy_status"] = "PENDING"
+        record["manual_buy_error"] = None
+        record["manual_buy_at"] = _now_iso()
+        record["manual_buy_alternate_line"] = selected["spread_line"]
+        record["manual_buy_alternative_id"] = alternative_id
+        record["live_alternatives"] = alternatives
+        record["updated_at"] = _now_iso()
+        signals[signal_id] = record
+        _save_signals(signals)
+        return {
+            "ok": True,
+            "signal_id": signal_id,
+            "original_selection": record.get("selection"),
+            "selected_live_line": selected["spread_line"],
+            "request_id": result["request_id"],
+            "trade_id": result["trade_id"],
+            "best_ask": result.get("best_ask"),
+            "live_odds_american": result.get("live_odds_american"),
         }
 
 
