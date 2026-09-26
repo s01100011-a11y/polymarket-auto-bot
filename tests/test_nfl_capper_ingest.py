@@ -523,5 +523,54 @@ class NflCapperStatsTests(unittest.TestCase):
         self.assertEqual(slam["roi_pct"], "80.0")
 
 
+class NflCapperPositionTests(unittest.TestCase):
+    def test_open_position_is_sellable_and_finished_position_is_marked(self):
+        executions = {
+            "open": {
+                "id": "open",
+                "strategy_source": "Slam - NFL",
+                "strategy_sport": "NFL",
+                "strategy_selection": "RAMS -6.5",
+                "status": "ORDER_SUBMITTED",
+                "budget_usdc": "10",
+                "quote": {
+                    "market": "Rams spread",
+                    "market_url": "https://polymarket.com/event/rams",
+                    "resolved_outcome": "Rams",
+                },
+            },
+            "win": {
+                "id": "win",
+                "strategy_source": "Slam - NFL",
+                "strategy_sport": "NFL",
+                "strategy_selection": "BILLS ML",
+                "status": "SETTLED_WIN",
+                "budget_usdc": "10",
+                "realized_pnl": "8.25",
+                "settlement": {"result": "WIN"},
+                "quote": {"resolved_outcome": "Bills"},
+            },
+            "wrong-sport": {
+                "id": "wrong-sport",
+                "strategy_source": "Slam - NFL",
+                "strategy_sport": "CFB",
+                "strategy_selection": "ARMY ML",
+                "status": "ORDER_SUBMITTED",
+                "budget_usdc": "10",
+            },
+        }
+
+        items = capper._position_items(executions, "Slam - NFL", sport="NFL")
+        by_id = {item["trade_id"]: item for item in items}
+
+        self.assertEqual(set(by_id), {"open", "win"})
+        self.assertTrue(by_id["open"]["sell_available"])
+        self.assertFalse(by_id["open"]["finished"])
+        self.assertFalse(by_id["win"]["sell_available"])
+        self.assertTrue(by_id["win"]["finished"])
+        self.assertEqual(by_id["win"]["result"], "WIN")
+        self.assertEqual(by_id["win"]["realized_pnl_usdc"], "8.25")
+
+
 if __name__ == "__main__":
     unittest.main()
