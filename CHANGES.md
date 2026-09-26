@@ -1,5 +1,13 @@
 # CHANGES
 
+## 2026-09-26 — Consistent auto-live dashboard status
+
+- Standardized the NFL and CFB capper panels to the same state wording: `ENABLED · AUTO LIVE`, `ENABLED · AUTO OFF`, or `DISABLED`.
+- NFL now reports AUTO LIVE only when both Railway master gates (`LIVE_TRADING` and `AUTO_TRADING`) are active.
+- CFB reports AUTO LIVE only when both master gates plus `CFB_CAPPER_LIVE_ENABLED` are active.
+- Renamed the CFB panel heading from “CFB capper status” to “CFB capper auto-trading” to match NFL.
+- Kept the existing CFB `mode` field for backward compatibility while adding explicit `auto_trading`, `live_trading`, `sport_live_enabled`, and `auto_live` status fields.
+
 ## 2026-09-26 — Full auto-trading across all four sports (#121)
 
 - **CFB live trading**: Promoted from preview-only to live auto-trading.
