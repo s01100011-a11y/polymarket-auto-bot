@@ -52,7 +52,7 @@ def live_test_preview(req: live_trading.LiveTestBuy):
         "requested_shares": str(shares),
         "budget_usdc": str(req.budget_usdc),
         "max_price": str(req.max_price),
-        "live_trading": core.LIVE_TRADING,
+        "live_trading": core.live_trading_enabled(),
         "test_max_usdc": str(live_trading.LIVE_TEST_MAX_USDC),
     }
 
