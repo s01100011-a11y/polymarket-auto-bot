@@ -1060,7 +1060,7 @@ def _prepare_manual_buy(
 
 def _status_pick_item(record: dict[str, Any]) -> dict[str, Any]:
     saved_match = _saved_market_match(record)
-    phase = _event_phase(record) if saved_match else None
+    phase = _event_phase(record) if saved_match else record.get("event_phase")
     posted = _parse_iso(record.get("posted_at"))
     age_seconds = None
     if posted is not None:
@@ -1741,14 +1741,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "queued_items": _recent_status_items(rows, "PREVIEW_QUEUED"),
                 "done_items": _recent_status_items(rows, "PREVIEW_DONE"),
                 "previewed_items": _recent_status_items(rows, "PREVIEW_DONE"),
-                "retrying_items": _recent_status_items(
-                    [r for r in rows if _saved_market_match(r) is not None],
-                    "RETRYING",
-                ),
-                "failed_items": _recent_status_items(
-                    [r for r in rows if _saved_market_match(r) is not None],
-                    "PREVIEW_FAILED",
-                ),
+                "retrying_items": _recent_status_items(rows, "RETRYING"),
+                "failed_items": _recent_status_items(rows, "PREVIEW_FAILED"),
                 "pregame_items": _recent_all_items([
                     r for r in rows
                     if r.get("status") in {"MATCHED_PREGAME", "MATCHED_PREGAME_ALTERNATE"}
