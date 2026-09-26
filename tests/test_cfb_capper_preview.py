@@ -346,7 +346,10 @@ class CfbMarketResolutionTests(unittest.TestCase):
                 markets=[market],
             )
 
-        events = [event("cfb-baylor-a"), event("cfb-baylor-b")]
+        events = [
+            event("cfb-baylor-a-2026-09-25"),
+            event("cfb-baylor-b-2026-09-25"),
+        ]
 
         class _Client:
             def __enter__(self):
