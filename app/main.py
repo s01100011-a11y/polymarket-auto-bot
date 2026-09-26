@@ -478,14 +478,39 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Polymarket Auto Bot", version="0.3.0", lifespan=lifespan)
 
 
+def _watch_health_snapshot(now: datetime | None = None) -> dict:
+    current = now or _now()
+    snapshot = dict(WATCH_HEALTH)
+    threshold_seconds = AUTO_POLL_SECONDS * 3
+    reference_raw = snapshot.get("last_completed_at") or snapshot.get("last_started_at")
+    age_seconds = None
+    stale = False
+    if reference_raw:
+        try:
+            reference = datetime.fromisoformat(str(reference_raw).replace("Z", "+00:00"))
+            if reference.tzinfo is None:
+                reference = reference.replace(tzinfo=timezone.utc)
+            age_seconds = max(0.0, (current - reference.astimezone(timezone.utc)).total_seconds())
+            stale = age_seconds > threshold_seconds
+        except (TypeError, ValueError):
+            stale = True
+    snapshot["healthy"] = not stale
+    snapshot["stale"] = stale
+    snapshot["age_seconds"] = round(age_seconds, 3) if age_seconds is not None else None
+    snapshot["stale_after_seconds"] = threshold_seconds
+    return snapshot
+
+
 @app.get("/health")
 def health():
+    watch_health = _watch_health_snapshot()
     return {
-        "ok": True,
+        "ok": bool(watch_health["healthy"]),
         "version": "0.3.0",
         "live_trading": live_trading_enabled(),
         "auto_trading": auto_trading_enabled(),
-        "watch_loop": dict(WATCH_HEALTH),
+        "watch_loop_healthy": bool(watch_health["healthy"]),
+        "watch_loop": watch_health,
         "poll_seconds": AUTO_POLL_SECONDS,
         "max_trade_usdc": str(MAX_TRADE_USDC),
         "max_auto_trade_usdc": str(MAX_AUTO_TRADE_USDC),
