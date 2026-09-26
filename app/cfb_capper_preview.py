@@ -100,6 +100,54 @@ def _stake_for_pick(pick: dict[str, Any], unit_usdc: Decimal = Decimal("10")) ->
     return nfl._stake_for_pick(pick, unit_usdc)
 
 
+def _resolved_signal_outcome(asset_id: str) -> dict[str, Any] | None:
+    """Return authoritative Polymarket resolution for a matched CFB outcome token."""
+    if not asset_id:
+        return None
+    with PublicClient() as client:
+        markets = list(
+            client.list_markets(
+                clob_token_ids=[asset_id],
+                closed=True,
+                page_size=5,
+            ).iter_items()
+        )
+
+    for market in markets:
+        state = getattr(market, "state", None)
+        resolution = getattr(market, "resolution", None)
+        status = str(getattr(resolution, "uma_resolution_status", "") or "").lower()
+        if not bool(getattr(state, "closed", False)) or status not in {"resolved", "settled"}:
+            continue
+        outcomes = getattr(market, "outcomes", None)
+        for outcome in (
+            getattr(outcomes, "yes", None),
+            getattr(outcomes, "no", None),
+        ):
+            if outcome is None or str(getattr(outcome, "token_id", "")) != str(asset_id):
+                continue
+            try:
+                price = Decimal(str(getattr(outcome, "price", "")))
+            except Exception:
+                return None
+            if price >= Decimal("0.9999"):
+                result, terminal = "WIN", Decimal("1")
+            elif price <= Decimal("0.0001"):
+                result, terminal = "LOSS", Decimal("0")
+            elif abs(price - Decimal("0.5")) <= Decimal("0.0001"):
+                result, terminal = "PUSH", Decimal("0.5")
+            else:
+                return None
+            return {
+                "pick_result": result,
+                "settlement_terminal_price": str(terminal),
+                "settlement_market_id": str(getattr(market, "id", "") or ""),
+                "settlement_market_slug": str(getattr(market, "slug", "") or ""),
+                "settlement_checked_at": _now_iso(),
+            }
+    return None
+
+
 def _fingerprint(pick: dict[str, Any]) -> str:
     canonical = {
         "source": str(pick.get("source") or ""),
@@ -1073,6 +1121,22 @@ def _refresh_record_runtime(record: dict[str, Any]) -> bool:
             record["status"] = "EVENT_CLOSED"
             record["reason"] = "matched Polymarket event/market is closed"
             changed = True
+        if str(record.get("pick_result") or "").upper() not in {"WIN", "LOSS", "PUSH"}:
+            try:
+                resolved = _resolved_signal_outcome(str(match["asset_id"]))
+                if resolved:
+                    for key, value in resolved.items():
+                        if record.get(key) != value:
+                            record[key] = value
+                            changed = True
+                    if record.get("settlement_error") is not None:
+                        record["settlement_error"] = None
+                        changed = True
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+                if record.get("settlement_error") != error:
+                    record["settlement_error"] = error
+                    changed = True
         return changed
 
     if phase == "LIVE":
@@ -1305,13 +1369,50 @@ def _prepare_manual_buy(
     }
 
 
-def _status_pick_item(record: dict[str, Any]) -> dict[str, Any]:
+def _execution_for_signal(
+    record: dict[str, Any],
+    executions: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(executions, dict):
+        return None
+    signal_id = str(record.get("id") or "")
+    manual_trade_id = str(record.get("manual_buy_trade_id") or "")
+    matches: list[dict[str, Any]] = []
+    for rec in executions.values():
+        if not isinstance(rec, dict) or rec.get("parent_trade_id"):
+            continue
+        if manual_trade_id and str(rec.get("id") or "") == manual_trade_id:
+            matches.append(rec)
+            continue
+        if signal_id and str(rec.get("strategy_pick_id") or "") == signal_id:
+            matches.append(rec)
+    if not matches:
+        return None
+    matches.sort(
+        key=lambda rec: (
+            rec.get("realized_pnl") is not None,
+            str(rec.get("closed_at") or rec.get("submitted_at") or rec.get("created_at") or ""),
+        ),
+        reverse=True,
+    )
+    return matches[0]
+
+
+def _status_pick_item(
+    record: dict[str, Any],
+    executions: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     saved_match = _saved_market_match(record)
     phase = _event_phase(record) if saved_match else record.get("event_phase")
     posted = _parse_iso(record.get("posted_at"))
     age_seconds = None
     if posted is not None:
         age_seconds = max(0, int((datetime.now(timezone.utc) - posted).total_seconds()))
+    execution = _execution_for_signal(record, executions)
+    settlement = (execution or {}).get("settlement") or {}
+    trade_result = str(settlement.get("result") or "").upper() or None
+    realized_pnl = (execution or {}).get("realized_pnl")
+    trade_stake = (execution or {}).get("actual_cost_usdc") or (execution or {}).get("budget_usdc")
     return {
         "status": record.get("status"),
         "selection": record.get("selection"),
@@ -1352,6 +1453,14 @@ def _status_pick_item(record: dict[str, Any]) -> dict[str, Any]:
         "manual_buy_request_id": record.get("manual_buy_request_id"),
         "manual_buy_status": record.get("manual_buy_status"),
         "manual_buy_error": record.get("manual_buy_error"),
+        "pick_result": record.get("pick_result"),
+        "settlement_terminal_price": record.get("settlement_terminal_price"),
+        "settlement_error": record.get("settlement_error"),
+        "trade_executed": execution is not None,
+        "trade_status": (execution or {}).get("status"),
+        "trade_result": trade_result,
+        "trade_pnl_usdc": realized_pnl,
+        "trade_stake_usdc": trade_stake,
     }
 
 
@@ -1360,6 +1469,7 @@ def _recent_status_items(
     status: str,
     *,
     limit: int = 30,
+    executions: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     matching = [row for row in rows if row.get("status") == status]
     matching.sort(
@@ -1371,13 +1481,14 @@ def _recent_status_items(
         ),
         reverse=True,
     )
-    return [_status_pick_item(row) for row in matching[:limit]]
+    return [_status_pick_item(row, executions) for row in matching[:limit]]
 
 
 def _recent_all_items(
     rows: list[dict[str, Any]],
     *,
     limit: int = 60,
+    executions: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     ordered = list(rows)
     ordered.sort(
@@ -1389,7 +1500,7 @@ def _recent_all_items(
         ),
         reverse=True,
     )
-    return [_status_pick_item(row) for row in ordered[:limit]]
+    return [_status_pick_item(row, executions) for row in ordered[:limit]]
 
 
 def _inject_dashboard_panel(html: str) -> str:
@@ -1406,6 +1517,10 @@ def _inject_dashboard_panel(html: str) -> str:
   </div>
 """
     html = html.replace('  <div class="tabs">', panel + '  <div class="tabs">', 1)
+    css = r"""
+.cfb-capper-performance{font-size:15px;line-height:1.75;margin:3px 0 9px;color:var(--muted)}.cfb-capper-performance .capper-pnl{font-size:18px;font-weight:900}.cfb-capper-performance .capper-pnl.positive,.cfb-result-line.positive{color:#86efac}.cfb-capper-performance .capper-pnl.negative,.cfb-result-line.negative{color:#fca5a5}.cfb-capper-performance .capper-pnl.flat,.cfb-result-line.flat{color:var(--muted)}.cfb-result-line{font-size:16px;font-weight:900;margin-top:6px;line-height:1.35}@media(max-width:650px){.cfb-capper-performance{font-size:16px}.cfb-capper-performance .capper-pnl{font-size:19px}.cfb-result-line{font-size:17px}}
+"""
+    html = html.replace("</style>", css + "</style>", 1)
 
     js = r"""
 function cfbEsc(v){
@@ -1426,6 +1541,28 @@ function cfbAge(seconds){
 function cfbPhaseVisual(item){
  const phase=String(item.event_phase||'').toUpperCase();
  const status=String(item.status||'').toUpperCase();
+ const result=String(item.trade_result||item.pick_result||'').toUpperCase();
+ if(phase==='CLOSED'&&result==='WIN'){
+  return {
+   label:'WIN',
+   row:'background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.42);border-left:4px solid #22c55e;',
+   badge:'background:rgba(34,197,94,.20);border:1px solid rgba(34,197,94,.50);color:#86efac;'
+  };
+ }
+ if(phase==='CLOSED'&&result==='LOSS'){
+  return {
+   label:'LOSS',
+   row:'background:rgba(239,68,68,.11);border:1px solid rgba(239,68,68,.42);border-left:4px solid #ef4444;',
+   badge:'background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.50);color:#fca5a5;'
+  };
+ }
+ if(phase==='CLOSED'&&result==='PUSH'){
+  return {
+   label:'PUSH',
+   row:'background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.38);border-left:4px solid #f59e0b;',
+   badge:'background:rgba(245,158,11,.16);border:1px solid rgba(245,158,11,.45);color:#fcd34d;'
+  };
+ }
  if(phase==='LIVE'||status==='MATCHED_LIVE'||status==='MATCHED_LIVE_ALTERNATE'){
   return {
    label:'LIVE',
@@ -1489,8 +1626,19 @@ function cfbPickList(title,items,kind){
   const marketAction=(item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+cfbEsc(item.market_url)+'">OPEN MARKET</a>':'';
   const action=buyAction+altActions+marketAction;
   const visual=cfbPhaseVisual(item);
-  const badge=visual.label?'<span style="display:inline-block;margin-left:7px;padding:2px 6px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.03em;vertical-align:1px;'+visual.badge+'">'+visual.label+'</span>':'';
-  return '<div style="margin-top:7px;padding:8px 9px;border-radius:8px;'+visual.row+'"><b>'+cfbEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+(action?'<br>'+action:'')+'</div>';
+  const badge=visual.label?'<span style="display:inline-block;margin-left:7px;padding:2px 6px;border-radius:999px;font-size:12px;font-weight:850;letter-spacing:.03em;vertical-align:1px;'+visual.badge+'">'+visual.label+'</span>':'';
+  let pnlLine='';
+  if(String(item.event_phase||'').toUpperCase()==='CLOSED'){
+   if(item.trade_executed){
+    const raw=item.trade_pnl_usdc===null||item.trade_pnl_usdc===undefined?null:Number(item.trade_pnl_usdc);
+    const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
+    const text=raw===null?'pending':(raw>0?'+':'')+'$'+raw.toFixed(2);
+    pnlLine='<div class="cfb-result-line '+cls+'">Trade P/L '+text+'</div>';
+   }else{
+    pnlLine='<div class="cfb-result-line flat">Trade P/L — · NOT TRADED</div>';
+   }
+  }
+  return '<div style="margin-top:7px;padding:9px 10px;border-radius:8px;'+visual.row+'"><b style="font-size:15px">'+cfbEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+pnlLine+(action?'<br>'+action:'')+'</div>';
  }).join('');
  return '<div style="margin-top:8px"><b>'+cfbEsc(title)+'</b>'+rows+'</div>';
 }
@@ -1549,6 +1697,13 @@ function cfbSetTab(sourceKey,tab){
 }
 function cfbCapperLine(x,sourceKey){
  if(!x)return 'No tracked signals yet';
+ const p=x.performance||{};
+ const roi=p.roi_pct===null||p.roi_pct===undefined?'—':Number(p.roi_pct).toFixed(1)+'%';
+ const winPct=p.win_pct===null||p.win_pct===undefined?'—':Number(p.win_pct).toFixed(1)+'%';
+ const rawPnl=p.realized_pnl_usdc===null||p.realized_pnl_usdc===undefined?null:Number(p.realized_pnl_usdc);
+ const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'$'+rawPnl.toFixed(2);
+ const pnlClass=rawPnl===null||rawPnl===0?'flat':(rawPnl>0?'positive':'negative');
+ const performance='<div class="cfb-capper-performance"><div>Bets '+(p.bets||0)+' · Open '+(p.open||0)+' · W-L-P '+(p.wins||0)+'-'+(p.losses||0)+'-'+(p.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(p.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">P/L '+pnl+'</span> · ROI '+roi+'</div></div>';
  const active=cfbActiveTabs[sourceKey]||'signals';
  const specs=cfbTabSpec(x);
  const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>{
@@ -1558,7 +1713,7 @@ function cfbCapperLine(x,sourceKey){
  const spec=specs.find(s=>s[0]===active)||specs[0];
  const items=spec[3]||[];
  const body=items.length?cfbPickList(spec[1]+' signals',items,spec[4]):'<div style="margin-top:8px;opacity:.7">No '+cfbEsc(spec[1].toLowerCase())+' signals.</div>';
- return tabs+body;
+ return performance+tabs+body;
 }
 async function loadCfbCapperStats(){
  try{
@@ -1705,7 +1860,13 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         # Refresh current odds/lifecycle for every already matched active signal,
         # including older signals that may no longer be in the bridge feed.
         for existing in signals.values():
-            if existing.get("status") in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE", "EVENT_CLOSED"}:
+            existing_status = str(existing.get("status") or "")
+            if existing_status in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE"}:
+                continue
+            if (
+                existing_status == "EVENT_CLOSED"
+                and str(existing.get("pick_result") or "").upper() in {"WIN", "LOSS", "PUSH"}
+            ):
                 continue
             if existing.get("status") in {"MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE"}:
                 if await asyncio.to_thread(_refresh_spread_alternatives, existing):
@@ -2023,11 +2184,20 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     @app.get("/api/cfb-cappers/status", dependencies=[Depends(dashboard._auth)])
     def cfb_capper_status() -> dict[str, Any]:
         signals = _load_signals()
+        executions = core._load(core.EXECUTIONS_FILE)
+        if not isinstance(executions, dict):
+            executions = {}
+        performance = nfl._stats_from_executions(
+            executions,
+            labels=SOURCE_LABELS,
+            sport="CFB",
+        )
         counts: dict[str, dict[str, Any]] = {}
         for label in SOURCE_LABELS:
             rows = [r for r in signals.values() if r.get("source") == label]
             counts[label] = {
                 "signals": len(rows),
+                "performance": performance.get(label, {}),
                 "preview_done": sum(1 for r in rows if r.get("status") == "PREVIEW_DONE"),
                 "preview_failed": sum(1 for r in rows if r.get("status") == "PREVIEW_FAILED"),
                 "preview_queued": sum(1 for r in rows if r.get("status") == "PREVIEW_QUEUED"),
@@ -2042,22 +2212,22 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 ),
                 "closed": sum(1 for r in rows if r.get("status") == "EVENT_CLOSED"),
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
-                "all_items": _recent_all_items(rows),
-                "queued_items": _recent_status_items(rows, "PREVIEW_QUEUED"),
-                "done_items": _recent_status_items(rows, "PREVIEW_DONE"),
-                "previewed_items": _recent_status_items(rows, "PREVIEW_DONE"),
-                "retrying_items": _recent_status_items(rows, "RETRYING"),
-                "failed_items": _recent_status_items(rows, "PREVIEW_FAILED"),
+                "all_items": _recent_all_items(rows, executions=executions),
+                "queued_items": _recent_status_items(rows, "PREVIEW_QUEUED", executions=executions),
+                "done_items": _recent_status_items(rows, "PREVIEW_DONE", executions=executions),
+                "previewed_items": _recent_status_items(rows, "PREVIEW_DONE", executions=executions),
+                "retrying_items": _recent_status_items(rows, "RETRYING", executions=executions),
+                "failed_items": _recent_status_items(rows, "PREVIEW_FAILED", executions=executions),
                 "pregame_items": _recent_all_items([
                     r for r in rows
                     if r.get("status") in {"MATCHED_PREGAME", "MATCHED_PREGAME_ALTERNATE"}
-                ], limit=30),
+                ], limit=30, executions=executions),
                 "live_items": _recent_all_items([
                     r for r in rows
                     if r.get("status") in {"MATCHED_LIVE", "MATCHED_LIVE_ALTERNATE"}
-                ], limit=30),
-                "closed_items": _recent_status_items(rows, "EVENT_CLOSED"),
-                "unsupported_items": _recent_status_items(rows, "IGNORED_UNSUPPORTED"),
+                ], limit=30, executions=executions),
+                "closed_items": _recent_status_items(rows, "EVENT_CLOSED", executions=executions),
+                "unsupported_items": _recent_status_items(rows, "IGNORED_UNSUPPORTED", executions=executions),
             }
         return {
             "enabled": enabled,

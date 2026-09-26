@@ -487,6 +487,41 @@ class NflCapperStatsTests(unittest.TestCase):
         self.assertEqual(syndicate["realized_pnl_usdc"], "-12.25")
         self.assertEqual(syndicate["roi_pct"], "-54.4")
 
+    def test_stats_helper_supports_cfb_labels_and_filters_other_sports(self):
+        executions = {
+            "cfb-win": {
+                "strategy_source": "Slam - CFB",
+                "strategy_sport": "CFB",
+                "strategy_units": "1",
+                "status": "SETTLED_WIN",
+                "actual_cost_usdc": "10",
+                "realized_pnl": "8",
+                "settlement": {"result": "WIN"},
+            },
+            "wrong-sport-loss": {
+                "strategy_source": "Slam - CFB",
+                "strategy_sport": "NFL",
+                "strategy_units": "1",
+                "status": "SETTLED_LOSS",
+                "actual_cost_usdc": "10",
+                "realized_pnl": "-10",
+                "settlement": {"result": "LOSS"},
+            },
+        }
+
+        stats = capper._stats_from_executions(
+            executions,
+            labels=("Slam - CFB", "Syndicate - CFB"),
+            sport="CFB",
+        )
+        slam = stats["Slam - CFB"]
+
+        self.assertEqual(slam["bets"], 1)
+        self.assertEqual(slam["wins"], 1)
+        self.assertEqual(slam["losses"], 0)
+        self.assertEqual(slam["realized_pnl_usdc"], "8.00")
+        self.assertEqual(slam["roi_pct"], "80.0")
+
 
 if __name__ == "__main__":
     unittest.main()
