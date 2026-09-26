@@ -1,3 +1,12 @@
+## 2026-09-26 — CFB game-state colours (#104)
+
+- CFB signal rows are now colour-coded consistently in every tab, including the combined Signals tab.
+- Pregame/not-started events use a blue left rail/background and a PREGAME badge.
+- Live events use a green left rail/background and a LIVE badge.
+- Finished/closed events use a muted grey left rail/background and a FINISHED badge.
+- Unmatched/retrying/unsupported signals without a confirmed event phase remain neutral rather than being given a misleading lifecycle colour.
+- Closed rows also display `GAME FINISHED` in metadata. Existing BUY LIVE and alternate-line actions are unchanged.
+
 ## 2026-09-26 — Reject legacy CFB future-game rollovers (#101 follow-up)
 
 - Production tracing confirmed the old Temple +3.5 signal had been attached to `cfb-templ-sfl-2026-10-03`, a later Temple game, after the original event disappeared from the open-event search.
