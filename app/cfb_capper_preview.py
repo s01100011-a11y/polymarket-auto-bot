@@ -1584,7 +1584,11 @@ def _status_pick_item(
         "signal_age_seconds": age_seconds,
         "units": record.get("units"),
         "stake_usdc": record.get("stake_usdc"),
-        "match_status": "MATCHED" if saved_match else record.get("match_status"),
+        "match_status": (
+            record.get("match_status")
+            if record.get("match_status") == "INVALID_FUTURE_MATCH"
+            else "MATCHED" if saved_match else record.get("match_status")
+        ),
         "market_type": record.get("market_type"),
         "market": record.get("market"),
         "market_url": record.get("market_url"),
@@ -1767,7 +1771,8 @@ function cfbPickList(title,items,kind){
   if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(cfbEsc(item.units)+'u');
   if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('\u0024'+Number(item.stake_usdc).toFixed(2));
   if(item.posted_at)meta.push('posted '+cfbPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+cfbAge(item.signal_age_seconds):''));
-  if(item.market)meta.push('Matched: '+cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
+  if(item.market&&String(item.match_status||'')!=='INVALID_FUTURE_MATCH')meta.push('Matched: '+cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
+  if(item.result_event_title)meta.push('Game '+cfbEsc(item.result_event_title));
   if(item.event_phase==='LIVE')meta.push('GAME LIVE');
   else if(item.event_phase==='CLOSED')meta.push('GAME FINISHED');
   else if(item.event_start_at)meta.push('starts '+cfbPickTime(item.event_start_at));
