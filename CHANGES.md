@@ -1,5 +1,14 @@
 # CHANGES
 
+## 2026-09-27 — NBA/WNBA Slack PW failover hardening (#127)
+
+- Confirmed the production Tailnet direct-feed outage is upstream of Railway: the Railway Tailscale node is healthy while TLS handshakes to the NBAMonitor host time out on both MagicDNS and the peer IP.
+- Generalized Slack Predicted Winner parsing and Polymarket matching from WNBA-only aliases to both NBA and WNBA.
+- Slack live routing now derives the correct NBA/WNBA Polymarket sports URL instead of hard-coding WNBA.
+- Preserved direct /api/pw-export polling as the primary path, cross-source deduplication, Railway live/auto gates, Termux executor readiness/geoblock checks, max-price/spread/stake limits, and duplicate-position protection.
+- Added NBA and WNBA failover parsing/league-routing tests.
+
+
 ## 2026-09-26 — CFB bridge-outage manual fallback (#125)
 
 - Added `CFB_CAPPER_MANUAL_PICKS_JSON` as an explicit fallback transport for user-verified Slam/Syndicate CFB picks when the Telegram bridge is unavailable.
