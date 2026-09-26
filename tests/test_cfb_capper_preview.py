@@ -253,6 +253,7 @@ class CfbDashboardPanelTests(unittest.TestCase):
         self.assertIn('stale_items', rendered)
         self.assertIn('Queued picks', rendered)
         self.assertIn('Stale picks', rendered)
+        self.assertIn('Previewed picks', rendered)
         self.assertIn('BUY LIVE', rendered)
         self.assertIn('/api/cfb-cappers/manual-buy/', rendered)
 
@@ -457,7 +458,8 @@ class CfbPreviewSafetyTests(unittest.TestCase):
         self.assertEqual(calls[0][0], "BUY")
         self.assertFalse(calls[0][1]["auto"])
         self.assertTrue(calls[0][1]["manual"])
-        self.assertEqual(calls[0][1]["source"], "cfb_capper_manual")
+        self.assertEqual(calls[0][1]["source"], "termux_executor")
+        self.assertEqual(calls[0][1]["strategy_execution_mode"], "manual")
         self.assertEqual(calls[0][1]["asset_id"], "baylor-token")
         self.assertEqual(calls[0][1]["max_price"], "0.47")
 
