@@ -61,10 +61,10 @@ Polymarket Auto Bot is a FastAPI service that automates sports prediction-market
 
 | Sport | Signal Source | Status |
 |-------|-------------|--------|
-| WNBA | NBAMonitor Predicted Winner calls | Active — live trading |
-| NFL | Telegram cappers (SLAM, Syndicate) | Active — live trading |
-| CFB | Telegram cappers (SLAM, Syndicate) | Preview/validation only |
-| NBA | NBAMonitor (shared infrastructure) | Planned |
+| WNBA | NBAMonitor Predicted Winner calls | Active — live auto-trading |
+| NFL | Telegram cappers (SLAM, Syndicate) | Active — live auto-trading |
+| CFB | Telegram cappers (SLAM, Syndicate) | Active — live auto-trading (via `CFB_CAPPER_LIVE_ENABLED`) |
+| NBA | NBAMonitor PW calls (Tailnet feed) | Active — live auto-trading (via `PW_NBA_EXPORT_URL`) |
 
 ---
 
