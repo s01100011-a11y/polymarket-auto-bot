@@ -649,6 +649,49 @@ class CfbLifecycleAndOddsTests(unittest.TestCase):
         self.assertEqual(record["game_status"], "Final")
 
 
+class CfbAlternateLifecycleTests(unittest.TestCase):
+    def test_finished_alternate_signal_moves_to_closed(self):
+        record = {
+            "status": "MATCHED_LIVE_ALTERNATE",
+            "event_phase": "LIVE",
+            "reason": "exact original spread is unavailable",
+            "pick": _pick(
+                selection="NORTHWESTERN 21",
+                posted_at="2026-09-25T22:32:01+00:00",
+                team_hint="Northwestern",
+                event_hints=["Northwestern"],
+                bet_types=["spread"],
+                spread_lines=["+21"],
+            ),
+            "live_alternatives": [
+                {
+                    "event_slug": "cfb-nw-ind-2026-09-25",
+                    "asset_id": "nw-215-no",
+                }
+            ],
+        }
+        with patch.object(
+            capper,
+            "_refresh_saved_event_state",
+            return_value={
+                "event_title": "Northwestern vs Indiana",
+                "event_start_at": "2026-09-25T23:00:00+00:00",
+                "event_start_checked_at": "2026-09-26T02:30:00+00:00",
+                "event_finished_at": "2026-09-26T02:00:00+00:00",
+                "event_closed": True,
+                "event_ended": True,
+                "event_live": False,
+                "game_status": "Final",
+                "market_accepting_orders": False,
+            },
+        ):
+            changed = capper._refresh_spread_alternatives(record)
+
+        self.assertTrue(changed)
+        self.assertEqual(record["status"], "EVENT_CLOSED")
+        self.assertEqual(record["event_phase"], "CLOSED")
+
+
 class CfbSpreadAlternateTests(unittest.TestCase):
     @staticmethod
     def _market(
