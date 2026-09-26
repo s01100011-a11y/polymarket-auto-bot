@@ -1,3 +1,14 @@
+## 2026-09-26 — Structured CFB spread-side resolution (#98)
+
+- Fixed live CFB spread matching for Polymarket Gamma markets where the selected team is the complementary outcome of the displayed spread.
+- Verified production metadata for Northwestern vs Indiana uses forms such as `Spread: Indiana (-20.5)` with outcomes `[Indiana, Northwestern]`; the Northwestern outcome is therefore interpreted explicitly as `+20.5`.
+- The resolver now maps the question's named spread team to exactly one outcome and inverts the structured line only when the selected team is unambiguously the other outcome.
+- Structured `sports.line` must agree with the signed line in the question; mismatches fail closed.
+- Exact spread matching and live-alternate matching now share the same selected-team effective-line logic.
+- Full-game CFB spread/total/moneyline matching now requires full-game sports market types. Second-half and quarter spreads such as `second_half_spreads` and `q3_spreads` cannot satisfy a full-game Telegram pick.
+- Removed the temporary verbose candidate diagnostic logging after confirming Gamma's representation.
+- This enables an original Northwestern +21 signal to surface explicit live +20.5/+21.5 alternatives when +21 itself is unavailable, without silently changing the wager.
+
 ## 2026-09-26 — Explicit CFB live spread alternatives (#96)
 
 - If an exact tracked CFB spread is no longer listed, the signal is kept visible and the bot discovers nearby open spread markets for the same team/event.
