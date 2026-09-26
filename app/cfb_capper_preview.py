@@ -1772,7 +1772,7 @@ def _inject_dashboard_panel(html: str) -> str:
 
     panel = r"""
   <div class="nfl-capper-panel" id="cfbCapperStats">
-    <div class="nfl-capper-head"><div><div class="label">CFB capper status</div><div class="nfl-capper-state" id="cfbCapperState">Loading…</div></div><div><div class="nfl-capper-meta" id="cfbCapperMeta"></div><button type="button" id="cfbFinishedToggle" style="margin-top:8px" onclick="cfbToggleFinished()">Hide finished</button></div></div>
+    <div class="nfl-capper-head"><div><div class="label">CFB capper auto-trading</div><div class="nfl-capper-state" id="cfbCapperState">Loading…</div></div><div><div class="nfl-capper-meta" id="cfbCapperMeta"></div><button type="button" id="cfbFinishedToggle" style="margin-top:8px" onclick="cfbToggleFinished()">Hide finished</button></div></div>
     <div class="nfl-capper-grid">
       <div class="nfl-capper-card"><b>Slam - CFB</b><div class="nfl-capper-kpis" id="cfbCapperSlam">—</div></div>
       <div class="nfl-capper-card"><b>Syndicate - CFB</b><div class="nfl-capper-kpis" id="cfbCapperSyndicate">—</div></div>
@@ -2033,8 +2033,7 @@ async function loadCfbCapperStats(){
   const r=await fetch('/api/cfb-cappers/status',{cache:'no-store'}),d=await r.json();
   if(!r.ok)throw new Error(d.detail||'CFB capper status failed');
   const state=document.getElementById('cfbCapperState'),meta=document.getElementById('cfbCapperMeta');
-  let mode=' · '+String(d.mode||'').replaceAll('_',' ');
-  if(state)state.textContent=(d.enabled?'ENABLED':'DISABLED')+(d.enabled?mode:'');
+  if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
   if(meta)meta.textContent='1u = \u0024'+Number(d.unit_usdc||10).toFixed(2)+' · auto fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · manual pregame/live while market open · odds refresh '+(d.poll_seconds||0)+'s';
   cfbLastSources=d.sources||{};
   const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
@@ -2559,6 +2558,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "closed_items": _recent_status_items(rows, "EVENT_CLOSED", executions=executions),
                 "unsupported_items": _recent_status_items(rows, "IGNORED_UNSUPPORTED", executions=executions),
             }
+        auto_trading = bool(core.auto_trading_enabled())
+        live_trading = bool(core.live_trading_enabled())
         return {
             "enabled": enabled,
             "mode": "LIVE" if live_enabled else "PREVIEW_ONLY",
@@ -2566,6 +2567,10 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             "max_pick_age_seconds": max_age_seconds,
             "feed_window_minutes": feed_window_minutes,
             "unit_usdc": str(unit_usdc),
+            "auto_trading": auto_trading,
+            "live_trading": live_trading,
+            "sport_live_enabled": live_enabled,
+            "auto_live": bool(enabled and live_enabled and auto_trading and live_trading),
             "sources": counts,
             "status": dict(_STATUS),
         }
