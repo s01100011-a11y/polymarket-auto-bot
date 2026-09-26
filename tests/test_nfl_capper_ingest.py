@@ -93,6 +93,28 @@ class NflCapperSizingTests(unittest.TestCase):
         self.assertEqual(str(capper._stake_for_pick(_pick(units=1.25))), "12.50")
         self.assertEqual(str(capper._stake_for_pick(_pick(units=3))), "30.00")
 
+    def test_audit_stake_targets_units_with_even_or_plus_money_floor(self):
+        self.assertEqual(
+            str(capper._audit_stake_for_pick(_pick(units=1, american_odds=-200, decimal_odds=None))),
+            "20.00",
+        )
+        self.assertEqual(
+            str(capper._audit_stake_for_pick(_pick(units=1, american_odds=-110, decimal_odds=None))),
+            "11.00",
+        )
+        self.assertEqual(
+            str(capper._audit_stake_for_pick(_pick(units=1, american_odds=100, decimal_odds=None))),
+            "10.00",
+        )
+        self.assertEqual(
+            str(capper._audit_stake_for_pick(_pick(units=1, american_odds=150, decimal_odds=None))),
+            "10.00",
+        )
+        self.assertEqual(
+            str(capper._audit_stake_for_pick(_pick(units=2, american_odds=-150, decimal_odds=None))),
+            "30.00",
+        )
+
     def test_props_and_period_markets_are_rejected(self):
         kind, reason = capper._classify_pick(_pick(bet_types=["prop"]))
         self.assertIsNone(kind)
@@ -577,9 +599,9 @@ class NflMissedPnlTests(unittest.TestCase):
         self.assertEqual(stats["Slam - NFL"]["missed_graded"], 2)
         self.assertEqual(stats["Slam - NFL"]["missed_wins"], 1)
         self.assertEqual(stats["Slam - NFL"]["missed_losses"], 1)
-        self.assertEqual(stats["Slam - NFL"]["missed_pnl_usdc"], "-1.30")
+        self.assertEqual(stats["Slam - NFL"]["missed_pnl_usdc"], "-1.50")
         self.assertEqual(stats["Syndicate - NFL"]["missed_graded"], 1)
-        self.assertEqual(stats["Syndicate - NFL"]["missed_pnl_usdc"], "12.40")
+        self.assertEqual(stats["Syndicate - NFL"]["missed_pnl_usdc"], "20.00")
 
     def test_paper_execution_does_not_hide_a_missed_real_trade(self):
         signals = {
