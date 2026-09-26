@@ -126,8 +126,38 @@ def _looks_basketball(text: str) -> bool:
 
 
 def _basketball_team_mentions(text: str) -> list[str]:
+    norm = _norm_text(text)
+
+    def full_names(aliases_by_team: dict[str, tuple[str, ...]]) -> list[str]:
+        return [
+            team
+            for team in aliases_by_team
+            if re.search(rf"(?<![a-z0-9]){re.escape(_norm_text(team))}(?![a-z0-9])", norm)
+        ]
+
+    wnba_full = full_names(WNBA_ALIASES)
+    nba_full = full_names(NBA_ALIASES)
+    # Prefer the league identified by full team names. This prevents short
+    # WNBA aliases such as "new york" from misclassifying "New York Knicks".
+    if nba_full and not wnba_full:
+        return _nba_team_mentions(text)
+    if wnba_full and not nba_full:
+        return _team_mentions(text)
+
+    if "wnba" in norm and not re.search(r"(?<![a-z0-9])nba(?![a-z0-9])", norm.replace("wnba", "")):
+        return _team_mentions(text)
+    if re.search(r"(?<![a-z0-9])nba(?![a-z0-9])", norm):
+        return _nba_team_mentions(text)
+
+    wnba = _team_mentions(text)
+    nba = _nba_team_mentions(text)
+    if nba and not wnba:
+        return nba
+    if wnba and not nba:
+        return wnba
+
     found: list[str] = []
-    for team in _team_mentions(text) + _nba_team_mentions(text):
+    for team in wnba_full + nba_full:
         if team not in found:
             found.append(team)
     return found
