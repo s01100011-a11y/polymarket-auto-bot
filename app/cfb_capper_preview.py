@@ -414,6 +414,39 @@ def _prepare_preview(
     }
 
 
+def _status_pick_item(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "selection": record.get("selection"),
+        "posted_at": record.get("posted_at"),
+        "updated_at": record.get("updated_at"),
+        "units": record.get("units"),
+        "stake_usdc": record.get("stake_usdc"),
+        "market": record.get("market"),
+        "outcome": record.get("outcome"),
+        "reason": record.get("reason"),
+        "request_id": record.get("request_id"),
+    }
+
+
+def _recent_status_items(
+    rows: list[dict[str, Any]],
+    status: str,
+    *,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    matching = [row for row in rows if row.get("status") == status]
+    matching.sort(
+        key=lambda row: str(
+            row.get("updated_at")
+            or row.get("posted_at")
+            or row.get("first_seen_at")
+            or ""
+        ),
+        reverse=True,
+    )
+    return [_status_pick_item(row) for row in matching[:limit]]
+
+
 def _inject_dashboard_panel(html: str) -> str:
     if 'id="cfbCapperStats"' in html:
         return html
@@ -430,9 +463,31 @@ def _inject_dashboard_panel(html: str) -> str:
     html = html.replace('  <div class="tabs">', panel + '  <div class="tabs">', 1)
 
     js = r"""
+function cfbEsc(v){
+ return String(v??'').replace(/[&<>\"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch]));
+}
+function cfbPickTime(v){
+ if(!v)return '';
+ const d=new Date(v);
+ return Number.isNaN(d.getTime())?cfbEsc(v):cfbEsc(d.toLocaleString());
+}
+function cfbPickList(title,items,kind){
+ if(!Array.isArray(items)||!items.length)return '';
+ const rows=items.map(item=>{
+  const meta=[];
+  if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(cfbEsc(item.units)+'u');
+  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('\u0024'+Number(item.stake_usdc).toFixed(2));
+  if(item.posted_at)meta.push('posted '+cfbPickTime(item.posted_at));
+  if(kind==='queued'&&item.market)meta.push(cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
+  if(kind==='stale'&&item.reason)meta.push(cfbEsc(item.reason));
+  return '<div style="margin-top:5px;padding-top:5px;border-top:1px solid rgba(255,255,255,.07)"><b>'+cfbEsc(item.selection||'Unknown selection')+'</b>'+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+'</div>';
+ }).join('');
+ return '<div style="margin-top:8px"><b>'+cfbEsc(title)+'</b>'+rows+'</div>';
+}
 function cfbCapperLine(x){
  if(!x)return 'No tracked signals yet';
- return 'Signals '+(x.signals||0)+' · Queued '+(x.preview_queued||0)+' · Done '+(x.preview_done||0)+' · Failed '+(x.preview_failed||0)+'<br>Retrying '+(x.retrying||0)+' · Stale '+(x.stale||0)+' · Unsupported '+(x.unsupported||0);
+ const base='Signals '+(x.signals||0)+' · Queued '+(x.preview_queued||0)+' · Done '+(x.preview_done||0)+' · Failed '+(x.preview_failed||0)+'<br>Retrying '+(x.retrying||0)+' · Stale '+(x.stale||0)+' · Unsupported '+(x.unsupported||0);
+ return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Stale picks',x.stale_items,'stale');
 }
 async function loadCfbCapperStats(){
  try{
@@ -747,7 +802,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     @app.get("/api/cfb-cappers/status", dependencies=[Depends(dashboard._auth)])
     def cfb_capper_status() -> dict[str, Any]:
         signals = _load_signals()
-        counts: dict[str, dict[str, int]] = {}
+        counts: dict[str, dict[str, Any]] = {}
         for label in SOURCE_LABELS:
             rows = [r for r in signals.values() if r.get("source") == label]
             counts[label] = {
@@ -758,6 +813,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
                 "stale": sum(1 for r in rows if r.get("status") == "IGNORED_STALE"),
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
+                "queued_items": _recent_status_items(rows, "PREVIEW_QUEUED"),
+                "stale_items": _recent_status_items(rows, "IGNORED_STALE"),
             }
         return {
             "enabled": enabled,
