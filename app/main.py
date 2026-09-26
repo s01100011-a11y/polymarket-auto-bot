@@ -458,7 +458,7 @@ async def _watch_loop() -> None:
             await asyncio.to_thread(_process_watchlist_once)
         except Exception as exc:
             WATCH_HEALTH["last_error"] = f"{type(exc).__name__}: {exc}"
-            log_event(logger, "watch_cycle_failed", stage="watch_loop", status="error", reason=WATCH_HEALTH["last_error"])
+            log_event(logger, "watch_cycle_failed", level=logging.ERROR, stage="watch_loop", status="error", reason=WATCH_HEALTH["last_error"])
         await asyncio.sleep(AUTO_POLL_SECONDS)
 
 
