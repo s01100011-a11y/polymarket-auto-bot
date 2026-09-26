@@ -380,12 +380,96 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
     return best[1], best[2], best[3], best[4]
 
 
+def _resolve_market_match(pick: dict[str, Any], kind: str) -> dict[str, Any]:
+    """Resolve and persist the exact Polymarket event/market before any BUY action."""
+    event, market, outcome_label, outcome_obj = _find_market(pick, kind)
+    asset_id = str(
+        getattr(outcome_obj, "token_id", None)
+        or getattr(outcome_obj, "position_id", None)
+        or ""
+    )
+    if not asset_id:
+        raise RuntimeError("Matched CFB market has no tradable outcome token")
+
+    event_slug = str(getattr(event, "slug", "") or "")
+    if not event_slug.startswith("cfb-"):
+        raise RuntimeError("Matched event is not a CFB Polymarket event")
+
+    return {
+        "match_status": "MATCHED",
+        "matched_at": _now_iso(),
+        "market_type": kind,
+        "event_slug": event_slug,
+        "event_title": str(getattr(event, "title", "") or ""),
+        "market": str(
+            getattr(market, "question", "")
+            or getattr(event, "title", "CFB market")
+        ),
+        "market_url": f"https://polymarket.com/sports/cfb/{event_slug}",
+        "outcome": outcome_label,
+        "asset_id": asset_id,
+    }
+
+
+def _saved_market_match(record: dict[str, Any] | None, kind: str | None = None) -> dict[str, Any] | None:
+    if not isinstance(record, dict):
+        return None
+    market_type = str(record.get("market_type") or "")
+    if kind and market_type != kind:
+        return None
+    asset_id = str(record.get("asset_id") or "")
+    market_url = str(record.get("market_url") or "")
+    outcome = str(record.get("outcome") or "")
+    if not asset_id or not outcome or not market_url.startswith("https://polymarket.com/sports/cfb/"):
+        return None
+    event_slug = str(record.get("event_slug") or market_url.rstrip("/").rsplit("/", 1)[-1])
+    if not event_slug.startswith("cfb-"):
+        return None
+    return {
+        "match_status": "MATCHED",
+        "matched_at": record.get("matched_at"),
+        "market_type": market_type,
+        "event_slug": event_slug,
+        "event_title": record.get("event_title"),
+        "market": record.get("market"),
+        "market_url": market_url,
+        "outcome": outcome,
+        "asset_id": asset_id,
+    }
+
+
+def _refresh_live_buy_quote(asset_id: str, core: Any) -> dict[str, str]:
+    """Refresh executable BUY data for an already matched outcome token."""
+    with PublicClient() as client:
+        buy_price = Decimal(str(client.get_price(asset_id=asset_id, side="BUY")))
+        spread = Decimal(str(client.get_spread(asset_id=asset_id)))
+        book = client.get_order_book(asset_id=asset_id)
+
+    asks = getattr(book, "asks", None) or []
+    best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
+    if buy_price <= 0 or buy_price >= 1:
+        raise RuntimeError(f"Invalid current BUY price {buy_price}")
+    if best_ask is None:
+        raise RuntimeError("No current ask is available")
+    if best_ask > core.MAX_PRICE:
+        raise RuntimeError(f"Current best ask {best_ask} exceeds MAX_PRICE={core.MAX_PRICE}")
+    if spread > core.MAX_SPREAD:
+        raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
+    return {
+        "current_buy_price": str(buy_price),
+        "best_ask": str(best_ask),
+        "max_price": str(best_ask),
+        "spread": str(spread),
+    }
+
+
 def _prepare_preview(
     pick: dict[str, Any],
     *,
     core: Any,
     remote: Any,
     unit_usdc: Decimal,
+    matched: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     kind, reason = _classify_pick(pick)
     if kind is None:
@@ -416,41 +500,17 @@ def _prepare_preview(
             f"limit=${core.MAX_DAILY_BUDGET_USDC}"
         )
 
-    event, market, outcome_label, outcome_obj = _find_market(pick, kind)
-    asset_id = str(
-        getattr(outcome_obj, "token_id", None)
-        or getattr(outcome_obj, "position_id", None)
-        or ""
-    )
-    if not asset_id:
-        raise RuntimeError("Matched CFB market has no tradable outcome token")
-
-    with PublicClient() as client:
-        buy_price = Decimal(str(client.get_price(asset_id=asset_id, side="BUY")))
-        spread = Decimal(str(client.get_spread(asset_id=asset_id)))
-        book = client.get_order_book(asset_id=asset_id)
-
-    asks = getattr(book, "asks", None) or []
-    best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
-    if buy_price <= 0 or buy_price >= 1:
-        raise RuntimeError(f"Invalid current BUY price {buy_price}")
-    if best_ask is None:
-        raise RuntimeError("No current ask is available")
-    if best_ask > core.MAX_PRICE:
-        raise RuntimeError(f"Current best ask {best_ask} exceeds MAX_PRICE={core.MAX_PRICE}")
-    if spread > core.MAX_SPREAD:
-        raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
-
-    event_slug = str(getattr(event, "slug", "") or "")
-    if not event_slug.startswith("cfb-"):
-        raise RuntimeError("Matched event is not a CFB Polymarket event")
+    match = _saved_market_match(matched, kind) or _resolve_market_match(pick, kind)
+    asset_id = str(match["asset_id"])
+    quote = _refresh_live_buy_quote(asset_id, core)
+    best_ask = Decimal(quote["best_ask"])
 
     source_label = _source_label(pick)
     fp = _fingerprint(pick)
     trade_id = f"cfb-capper-{fp[:18]}"
     payload = {
-        "market_url": f"https://polymarket.com/sports/cfb/{event_slug}",
-        "outcome": outcome_label,
+        "market_url": match["market_url"],
+        "outcome": match["outcome"],
         "market_type": kind,
         "asset_id": asset_id,
         "max_price": str(best_ask),
@@ -475,20 +535,10 @@ def _prepare_preview(
         "request_id": queued["id"],
         "trade_id": trade_id,
         "strategy_source": source_label,
-        "market_type": kind,
-        "market": str(
-            getattr(market, "question", "")
-            or getattr(event, "title", "CFB market")
-        ),
-        "market_url": payload["market_url"],
-        "outcome": outcome_label,
-        "asset_id": asset_id,
+        **match,
         "units": str(units),
         "stake_usdc": str(stake),
-        "current_buy_price": str(buy_price),
-        "best_ask": str(best_ask),
-        "max_price": str(best_ask),
-        "spread": str(spread),
+        **quote,
     }
 
 
@@ -530,6 +580,7 @@ def _prepare_manual_buy(
     core: Any,
     remote: Any,
     unit_usdc: Decimal,
+    matched: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Queue one user-authorized CFB BUY after refreshing the live market."""
     kind, reason = _classify_pick(pick)
@@ -562,40 +613,16 @@ def _prepare_manual_buy(
             f"limit=${core.MAX_DAILY_BUDGET_USDC}"
         )
 
-    event, market, outcome_label, outcome_obj = _find_market(pick, kind)
-    asset_id = str(
-        getattr(outcome_obj, "token_id", None)
-        or getattr(outcome_obj, "position_id", None)
-        or ""
-    )
-    if not asset_id:
-        raise RuntimeError("Matched CFB market has no tradable outcome token")
-
-    with PublicClient() as client:
-        buy_price = Decimal(str(client.get_price(asset_id=asset_id, side="BUY")))
-        spread = Decimal(str(client.get_spread(asset_id=asset_id)))
-        book = client.get_order_book(asset_id=asset_id)
-
-    asks = getattr(book, "asks", None) or []
-    best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
-    if buy_price <= 0 or buy_price >= 1:
-        raise RuntimeError(f"Invalid current BUY price {buy_price}")
-    if best_ask is None:
-        raise RuntimeError("No current ask is available")
-    if best_ask > core.MAX_PRICE:
-        raise RuntimeError(f"Current best ask {best_ask} exceeds MAX_PRICE={core.MAX_PRICE}")
-    if spread > core.MAX_SPREAD:
-        raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
-
-    event_slug = str(getattr(event, "slug", "") or "")
-    if not event_slug.startswith("cfb-"):
-        raise RuntimeError("Matched event is not a CFB Polymarket event")
+    match = _saved_market_match(matched, kind) or _resolve_market_match(pick, kind)
+    asset_id = str(match["asset_id"])
+    quote = _refresh_live_buy_quote(asset_id, core)
+    best_ask = Decimal(quote["best_ask"])
 
     source_label = _source_label(pick)
     trade_id = f"cfb-manual-{fp[:12]}-{uuid.uuid4().hex[:6]}"
     payload = {
-        "market_url": f"https://polymarket.com/sports/cfb/{event_slug}",
-        "outcome": outcome_label,
+        "market_url": match["market_url"],
+        "outcome": match["outcome"],
         "market_type": kind,
         "asset_id": asset_id,
         "max_price": str(best_ask),
@@ -622,35 +649,38 @@ def _prepare_manual_buy(
         "request_id": queued["id"],
         "trade_id": trade_id,
         "strategy_source": source_label,
-        "market_type": kind,
-        "market": str(
-            getattr(market, "question", "")
-            or getattr(event, "title", "CFB market")
-        ),
-        "market_url": payload["market_url"],
-        "outcome": outcome_label,
-        "asset_id": asset_id,
+        **match,
         "units": str(units),
         "stake_usdc": str(stake),
-        "current_buy_price": str(buy_price),
-        "best_ask": str(best_ask),
-        "max_price": str(best_ask),
-        "spread": str(spread),
+        **quote,
     }
 
 
 def _status_pick_item(record: dict[str, Any]) -> dict[str, Any]:
+    saved_match = _saved_market_match(record)
     return {
         "selection": record.get("selection"),
         "posted_at": record.get("posted_at"),
         "updated_at": record.get("updated_at"),
         "units": record.get("units"),
         "stake_usdc": record.get("stake_usdc"),
+        "match_status": "MATCHED" if saved_match else record.get("match_status"),
+        "market_type": record.get("market_type"),
         "market": record.get("market"),
+        "market_url": record.get("market_url"),
+        "event_title": record.get("event_title"),
         "outcome": record.get("outcome"),
+        "asset_id": record.get("asset_id"),
         "reason": record.get("reason"),
+        "last_error": record.get("last_error"),
         "request_id": record.get("request_id"),
         "signal_id": record.get("id"),
+        "buy_available": bool(
+            saved_match
+            and record.get("status") in {
+                "PREVIEW_QUEUED", "PREVIEW_DONE", "IGNORED_STALE", "RETRYING"
+            }
+        ),
         "manual_buy_request_id": record.get("manual_buy_request_id"),
         "manual_buy_status": record.get("manual_buy_status"),
         "manual_buy_error": record.get("manual_buy_error"),
@@ -707,15 +737,19 @@ function cfbPickList(title,items,kind){
   if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(cfbEsc(item.units)+'u');
   if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('\u0024'+Number(item.stake_usdc).toFixed(2));
   if(item.posted_at)meta.push('posted '+cfbPickTime(item.posted_at));
-  if(kind==='queued'&&item.market)meta.push(cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
+  if(item.market)meta.push('Matched: '+cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
   if(kind==='stale'&&item.reason)meta.push(cfbEsc(item.reason));
+  if(kind==='retrying'&&item.last_error)meta.push(cfbEsc(item.last_error));
+  if(!item.buy_available&&item.match_status!=='MATCHED')meta.push('Polymarket match pending');
   if(item.manual_buy_status)meta.push('manual BUY '+cfbEsc(item.manual_buy_status));
   if(item.manual_buy_error)meta.push(cfbEsc(item.manual_buy_error));
   const state=String(item.manual_buy_status||'').toUpperCase();
   const locked=['PENDING','LEASED','DONE'].includes(state);
   const label=state==='DONE'?'BOUGHT':(state==='PENDING'||state==='LEASED'?'BUY '+state:'BUY LIVE');
-  const action=item.signal_id?'<button type="button" style="margin-top:6px" data-signal-id="'+cfbEsc(item.signal_id)+'" onclick="cfbManualBuy(this.dataset.signalId,this)"'+(locked?' disabled':'')+'>'+label+'</button>':'';
-  return '<div style="margin-top:5px;padding-top:5px;border-top:1px solid rgba(255,255,255,.07)"><b>'+cfbEsc(item.selection||'Unknown selection')+'</b>'+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+'<br>'+action+'</div>';
+  const buyAction=(item.signal_id&&item.buy_available)?'<button type="button" style="margin-top:6px" data-signal-id="'+cfbEsc(item.signal_id)+'" onclick="cfbManualBuy(this.dataset.signalId,this)"'+(locked?' disabled':'')+'>'+label+'</button>':'';
+  const marketAction=(item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+cfbEsc(item.market_url)+'">OPEN MARKET</a>':'';
+  const action=buyAction+marketAction;
+  return '<div style="margin-top:5px;padding-top:5px;border-top:1px solid rgba(255,255,255,.07)"><b>'+cfbEsc(item.selection||'Unknown selection')+'</b>'+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+(action?'<br>'+action:'')+'</div>';
  }).join('');
  return '<div style="margin-top:8px"><b>'+cfbEsc(title)+'</b>'+rows+'</div>';
 }
@@ -738,7 +772,7 @@ async function cfbManualBuy(signalId,btn){
 function cfbCapperLine(x){
  if(!x)return 'No tracked signals yet';
  const base='Signals '+(x.signals||0)+' · Queued '+(x.preview_queued||0)+' · Done '+(x.preview_done||0)+' · Failed '+(x.preview_failed||0)+'<br>Retrying '+(x.retrying||0)+' · Stale '+(x.stale||0)+' · Unsupported '+(x.unsupported||0);
- return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Previewed picks',x.previewed_items,'previewed')+cfbPickList('Stale picks',x.stale_items,'stale');
+ return base+cfbPickList('Queued picks',x.queued_items,'queued')+cfbPickList('Previewed picks',x.previewed_items,'previewed')+cfbPickList('Matched / retrying picks',x.retrying_items,'retrying')+cfbPickList('Stale picks',x.stale_items,'stale');
 }
 async function loadCfbCapperStats(){
  try{
@@ -883,7 +917,11 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
                 "IGNORED_STALE", "IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE",
             }:
-                continue
+                terminal = str(current.get("status") or "")
+                if terminal in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE"}:
+                    continue
+                if _saved_market_match(current) is not None:
+                    continue
 
             source_label = _source_label(pick)
             record = current or {
@@ -906,20 +944,38 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 changed = True
                 continue
 
-            posted = _parse_iso(pick.get("posted_at"))
-            age = (now - posted).total_seconds() if posted else float("inf")
-            if age > max_age_seconds:
-                record["status"] = "IGNORED_STALE"
-                record["reason"] = f"pick age exceeds {max_age_seconds}s freshness limit"
+            kind, reason = _classify_pick(pick)
+            if kind is None:
+                record["status"] = "IGNORED_UNSUPPORTED"
+                record["reason"] = reason
                 record["updated_at"] = _now_iso()
                 signals[fp] = record
                 changed = True
                 continue
 
-            kind, reason = _classify_pick(pick)
-            if kind is None:
-                record["status"] = "IGNORED_UNSUPPORTED"
-                record["reason"] = reason
+            try:
+                saved_match = _saved_market_match(record, kind)
+                if saved_match is None:
+                    saved_match = await asyncio.to_thread(_resolve_market_match, pick, kind)
+                    record.update(saved_match)
+                else:
+                    record["match_status"] = "MATCHED"
+                record["match_error"] = None
+            except Exception as exc:
+                record["status"] = "RETRYING"
+                record["match_status"] = "UNRESOLVED"
+                record["match_error"] = f"{type(exc).__name__}: {exc}"
+                record["last_error"] = record["match_error"]
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            posted = _parse_iso(pick.get("posted_at"))
+            age = (now - posted).total_seconds() if posted else float("inf")
+            if age > max_age_seconds:
+                record["status"] = "IGNORED_STALE"
+                record["reason"] = f"pick age exceeds {max_age_seconds}s freshness limit"
                 record["updated_at"] = _now_iso()
                 signals[fp] = record
                 changed = True
@@ -932,6 +988,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     core=core,
                     remote=remote,
                     unit_usdc=unit_usdc,
+                    matched=record,
                 )
                 record.update(prepared)
                 record["updated_at"] = _now_iso()
@@ -989,6 +1046,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 core=core,
                 remote=remote,
                 unit_usdc=unit_usdc,
+                matched=saved_match,
             )
             marker = {
                 "trigger_hash": trigger_hash,
@@ -1086,6 +1144,10 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
                 "queued_items": _recent_status_items(rows, "PREVIEW_QUEUED"),
                 "previewed_items": _recent_status_items(rows, "PREVIEW_DONE"),
+                "retrying_items": _recent_status_items(
+                    [r for r in rows if _saved_market_match(r) is not None],
+                    "RETRYING",
+                ),
                 "stale_items": _recent_status_items(rows, "IGNORED_STALE"),
             }
         return {
@@ -1107,10 +1169,16 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             raise HTTPException(status_code=404, detail="Unknown CFB signal")
         if record.get("source") not in SOURCE_LABELS:
             raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
-        if record.get("status") not in {"PREVIEW_QUEUED", "PREVIEW_DONE", "IGNORED_STALE"}:
+        if record.get("status") not in {"PREVIEW_QUEUED", "PREVIEW_DONE", "IGNORED_STALE", "RETRYING"}:
             raise HTTPException(
                 status_code=409,
-                detail=f"CFB signal is {record.get('status')}; BUY LIVE is available only for queued, previewed, or stale signals",
+                detail=f"CFB signal is {record.get('status')}; BUY LIVE requires a matched actionable signal",
+            )
+        saved_match = _saved_market_match(record)
+        if saved_match is None:
+            raise HTTPException(
+                status_code=409,
+                detail="CFB signal has not been safely matched to a Polymarket event yet",
             )
 
         pick = record.get("pick") if isinstance(record.get("pick"), dict) else None
@@ -1132,6 +1200,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 core=core,
                 remote=remote,
                 unit_usdc=unit_usdc,
+                matched=saved_match,
             )
         except HTTPException:
             raise
