@@ -1203,45 +1203,9 @@ function nflCapperLine(x){
  const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
  const winPct=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
  const rawPnl=x.realized_pnl_usdc===null||x.realized_pnl_usdc===undefined?null:Number(x.realized_pnl_usdc);
- const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'async function loadNflCapperStats(){
- try{
-  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
-  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
-  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
-  if(state)state.textContent=(d.enabled?'ENABLED':'DISABLED')+(d.auto_trading?' · AUTO LIVE':' · AUTO TRADING OFF');
-  if(meta)meta.textContent='1u = $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · poll '+(d.poll_seconds||0)+'s';
-  const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
-  if(s)s.innerHTML=nflCapperLine((d.cappers||{})['Slam - NFL']);
-  if(y)y.innerHTML=nflCapperLine((d.cappers||{})['Syndicate - NFL']);
- }catch(e){
-  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
- }
-}
-loadNflCapperStats();setInterval(loadNflCapperStats,10000);
-"""
-        html = html.replace("</script>", js + "\n</script>", 1)
-        dashboard.DASHBOARD_HTML = html
-+rawPnl.toFixed(2);
+ const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'$'+rawPnl.toFixed(2);
  const pnlClass=rawPnl===null||rawPnl===0?'flat':(rawPnl>0?'positive':'negative');
- return '<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake async function loadNflCapperStats(){
- try{
-  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
-  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
-  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
-  if(state)state.textContent=(d.enabled?'ENABLED':'DISABLED')+(d.auto_trading?' · AUTO LIVE':' · AUTO TRADING OFF');
-  if(meta)meta.textContent='1u = $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · poll '+(d.poll_seconds||0)+'s';
-  const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
-  if(s)s.innerHTML=nflCapperLine((d.cappers||{})['Slam - NFL']);
-  if(y)y.innerHTML=nflCapperLine((d.cappers||{})['Syndicate - NFL']);
- }catch(e){
-  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
- }
-}
-loadNflCapperStats();setInterval(loadNflCapperStats,10000);
-"""
-        html = html.replace("</script>", js + "\n</script>", 1)
-        dashboard.DASHBOARD_HTML = html
-+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">P/L '+pnl+'</span> · ROI '+roi+'</div>';
+ return '<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">P/L '+pnl+'</span> · ROI '+roi+'</div>';
 }
 async function loadNflCapperStats(){
  try{
