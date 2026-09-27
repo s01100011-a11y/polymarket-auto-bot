@@ -2882,6 +2882,15 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         cleanup_changed = bool(purged_nfl or deduped)
         if cleanup_changed:
             _save_signals(signals)
+            print(
+                "CFB_CAPPER_CLEANUP "
+                + json.dumps(
+                    {"purged_nfl": purged_nfl, "deduped": deduped},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                flush=True,
+            )
 
         changed = _sync_queue_status(signals)
 
