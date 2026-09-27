@@ -1,3 +1,5 @@
+# DEVELOPMENT NOTES
+
 ## 2026-09-28 — NFL safer alternate-spread fallback (#148)
 
 - Production symptom: after Telegram recovered, SLAM `COMMANDERS +7` and `DOLPHINS +10` were ingested correctly but looped in `RETRYING` because Polymarket did not expose those exact spread lines.
@@ -7,7 +9,6 @@
 - Audit fields: `strategy_requested_spread_line`, `strategy_executed_spread_line`, and `strategy_alternate_spread_fallback`.
 - Runtime controls: `NFL_CAPPER_BETTER_SPREAD_FALLBACK_ENABLED` (default false) and `NFL_CAPPER_ALT_SPREAD_MAX_POINTS` (default 1.0).
 
-# DEVELOPMENT NOTES
 
 ## 2026-09-27 — Persist CFB cross-sport cleanup before reconciliation (#144)
 
