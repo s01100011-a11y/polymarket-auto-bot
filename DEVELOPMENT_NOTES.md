@@ -1,5 +1,11 @@
 # DEVELOPMENT NOTES
 
+## 2026-09-27 — Legacy CFB rows without pick metadata (#142)
+
+Production showed that #140 fixed current normalized records but some older persisted rows predated the schema that stored the full Telegram `pick`. Those rows could neither be purged as NFL contamination nor reconciled against ESPN, which is why Saints/Vikings/Steelers/Browns remained under Syndicate - CFB and several completed college games stayed RETRYING.
+
+The worker now reconstructs ordinary full-game wager metadata from persisted selection text when necessary, uses the visible wager text to purge bare NFL aliases even if legacy hints are corrupt, and applies ESPN phase/score reconciliation before further Polymarket matching. Finished games are terminal and graded; pending/live games continue exact/alternate matching. Duplicate non-traded historical rows are collapsed only inside a 36-hour game window, and any row with trade/request/manual-buy state is excluded from deletion.
+
 ## 2026-09-27 — CFB persisted-signal reconciliation and ESPN live scores (#140)
 
 The CFB worker previously had three separate recovery gaps: old cross-sport rows stayed in the persisted signal file after the parser was fixed; unmatched records depended on the Telegram bridge replaying them; and the ESPN fallback only graded records already known to be closed through a saved Polymarket match. That meant a valid historical CFB pick could remain RETRYING forever once its market closed.
