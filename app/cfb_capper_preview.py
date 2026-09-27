@@ -2197,7 +2197,8 @@ function cfbCapperLine(x,sourceKey){
  const items=spec[3]||[];
  const body=items.length?cfbPickList(spec[1]+' signals',items,spec[4]):'<div style="margin-top:8px;opacity:.7">No '+cfbEsc(spec[1].toLowerCase())+' signals.</div>';
  return performance+cfbOpenPositionList(x)+tabs+body;
-}async function loadCfbCapperStats(){
+}
+async function loadCfbCapperStats(){
  try{
   const r=await fetch('/api/cfb-cappers/status',{cache:'no-store'}),d=await r.json();
   if(!r.ok)throw new Error(d.detail||'CFB capper status failed');
