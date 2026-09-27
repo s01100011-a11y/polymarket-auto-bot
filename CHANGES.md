@@ -1,5 +1,12 @@
 # CHANGES
 
+## 2026-09-27 — Hard CFB/NFL routing boundary (#144)
+
+- CFB now classifies a potential NFL leak from the visible wager selection itself, so missing `team_hint` values or corrupt two-team `event_hints` can no longer let bare NFL picks such as Saints/Vikings/Steelers/Browns through.
+- Cross-sport purge and legacy dedupe are persisted immediately at the start of each CFB poll, before ESPN/Polymarket reconciliation, so a later network/reconciliation failure cannot leave already-identified NFL contamination on disk.
+- Explicit two-team college selections remain eligible for normal CFB matching.
+- Added regressions for NFL moneyline picks with missing metadata and corrupt event hints.
+
 ## 2026-09-27 — Legacy CFB cleanup and game-state reconciliation (#142)
 
 - CFB now purges persisted NFL nickname rows even when the old record has no normalized `pick` object or contains corrupted legacy event hints.
