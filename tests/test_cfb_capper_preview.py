@@ -1568,5 +1568,15 @@ class CfbFinishedResultsAndPerformanceTests(unittest.TestCase):
         self.assertIn("cfbSellPosition", rendered)
 
 
+class CfbRecoveryWindowTests(unittest.TestCase):
+    def test_only_delayed_pregame_live_enabled_pick_can_recover(self):
+        self.assertTrue(capper._recovery_pregame_allowed(3600, 180, 86400, "PREGAME", True))
+        self.assertFalse(capper._recovery_pregame_allowed(120, 180, 86400, "PREGAME", True))
+        self.assertFalse(capper._recovery_pregame_allowed(3600, 180, 86400, "LIVE", True))
+        self.assertFalse(capper._recovery_pregame_allowed(3600, 180, 86400, "CLOSED", True))
+        self.assertFalse(capper._recovery_pregame_allowed(3600, 180, 86400, "PREGAME", False))
+        self.assertFalse(capper._recovery_pregame_allowed(90000, 180, 86400, "PREGAME", True))
+
+
 if __name__ == "__main__":
     unittest.main()
