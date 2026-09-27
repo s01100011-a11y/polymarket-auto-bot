@@ -1578,5 +1578,21 @@ class CfbRecoveryWindowTests(unittest.TestCase):
         self.assertFalse(capper._recovery_pregame_allowed(90000, 180, 86400, "PREGAME", True))
 
 
+class CfbNoFillHelperTests(unittest.TestCase):
+    def test_cfb_uses_shared_no_fill_detection(self):
+        self.assertTrue(
+            capper.nfl._queue_result_is_no_fill(
+                {
+                    "action": "BUY",
+                    "result": {
+                        "ok": False,
+                        "filled_shares": "0",
+                        "status": "TEST_BUY_UNFILLED_CANCELED",
+                    },
+                }
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
