@@ -711,5 +711,46 @@ class NflCapperPositionTests(unittest.TestCase):
         self.assertEqual(by_id["win"]["realized_pnl_usdc"], "8.25")
 
 
+class NflCapperRecoveryTests(unittest.TestCase):
+    def test_recovery_age_is_bounded(self):
+        self.assertFalse(capper._is_recovery_age(180, 180, 86400))
+        self.assertTrue(capper._is_recovery_age(181, 180, 86400))
+        self.assertTrue(capper._is_recovery_age(86400, 180, 86400))
+        self.assertFalse(capper._is_recovery_age(86401, 180, 86400))
+
+    def test_recovery_phase_requires_confirmed_pregame(self):
+        future = SimpleNamespace(
+            state=SimpleNamespace(closed=False, ended=False, live=False),
+            schedule=SimpleNamespace(start_time="2026-09-27T17:00:00+00:00"),
+            sports=SimpleNamespace(game_status="scheduled"),
+        )
+        market = SimpleNamespace(
+            state=SimpleNamespace(accepting_orders=True),
+            sports=SimpleNamespace(game_status="scheduled"),
+        )
+        now = capper._parse_iso("2026-09-27T12:00:00+00:00")
+        self.assertEqual(capper._matched_event_phase(future, market, now), "PREGAME")
+        self.assertEqual(
+            capper._matched_event_phase(
+                future,
+                market,
+                capper._parse_iso("2026-09-27T18:00:00+00:00"),
+            ),
+            "LIVE",
+        )
+
+    def test_recovery_phase_fails_closed_without_kickoff_metadata(self):
+        event = SimpleNamespace(
+            state=SimpleNamespace(closed=False, ended=False, live=False),
+            schedule=SimpleNamespace(),
+            sports=SimpleNamespace(game_status="scheduled"),
+        )
+        market = SimpleNamespace(
+            state=SimpleNamespace(accepting_orders=True),
+            sports=SimpleNamespace(game_status="scheduled"),
+        )
+        self.assertEqual(capper._matched_event_phase(event, market), "UNKNOWN")
+
+
 if __name__ == "__main__":
     unittest.main()
