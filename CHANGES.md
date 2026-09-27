@@ -1,5 +1,11 @@
 # CHANGES
 
+## 2026-09-27 — NFL ingest defense against cross-sport nickname collisions
+
+- Added a downstream fail-closed guard: explicit matchup selections must resolve to exactly two NFL teams before the NFL trading worker can proceed.
+- This blocks college lines such as Hawaii vs Wyoming Cowboys even if an older bridge parser mislabels “Cowboys” as Dallas.
+- Valid explicit NFL totals such as Jaguars vs Patriots remain supported.
+
 ## 2026-09-27 — Safe Telegram outage recovery for NFL/CFB (#129)
 
 - Expanded NFL bridge lookback to 24 hours by default so picks missed during a Telegram outage can be rediscovered after reconnect.
