@@ -1,5 +1,11 @@
 # DEVELOPMENT NOTES
 
+## 2026-09-27 — Persist CFB cross-sport cleanup before reconciliation (#144)
+
+The remaining NFL rows in the CFB dashboard exposed two failure modes in the compatibility layer. First, the legacy ingest guard trusted `team_hint` / `event_hints`; old bridge records can omit or corrupt those fields even when the visible selection is plainly an NFL wager. Second, the poller removed contaminated rows in memory but deferred saving until after the rest of the reconciliation cycle, so an unrelated ESPN/Polymarket exception could prevent the cleanup from reaching the volume.
+
+The CFB boundary now rejects a wager whenever its visible selection, after removing the moneyline/spread/total suffix, is exactly an NFL team alias. This intentionally fails closed for bare NFL nicknames while preserving explicit college matchups. Cleanup/dedupe is saved immediately before any external reconciliation work, making removal durable even when later network calls fail.
+
 ## 2026-09-27 — Legacy CFB rows without pick metadata (#142)
 
 Production showed that #140 fixed current normalized records but some older persisted rows predated the schema that stored the full Telegram `pick`. Those rows could neither be purged as NFL contamination nor reconciled against ESPN, which is why Saints/Vikings/Steelers/Browns remained under Syndicate - CFB and several completed college games stayed RETRYING.
