@@ -1381,6 +1381,20 @@ def _refresh_record_runtime(record: dict[str, Any]) -> bool:
     return changed
 
 
+def _recovery_pregame_allowed(
+    age_seconds: float,
+    normal_max: int,
+    recovery_max: int,
+    phase: str,
+    live_enabled: bool,
+) -> bool:
+    return bool(
+        live_enabled
+        and phase == "PREGAME"
+        and nfl._is_recovery_age(age_seconds, normal_max, recovery_max)
+    )
+
+
 def _prepare_preview(
     pick: dict[str, Any],
     *,
@@ -2106,6 +2120,10 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     enabled = os.getenv("CFB_CAPPER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
     poll_seconds = max(5, int(os.getenv("CFB_CAPPER_POLL_SECONDS", "15")))
     max_age_seconds = max(30, int(os.getenv("CFB_CAPPER_MAX_PICK_AGE_SECONDS", "180")))
+    recovery_max_age_seconds = max(
+        max_age_seconds,
+        int(os.getenv("CFB_CAPPER_RECOVERY_MAX_PICK_AGE_SECONDS", "86400")),
+    )
     feed_window_minutes = max(
         180,
         min(4320, int(os.getenv("CFB_CAPPER_FEED_WINDOW_MINUTES", "1440"))),
@@ -2392,6 +2410,42 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             age = (now - posted).total_seconds() if posted else float("inf")
             if age > max_age_seconds:
                 record["event_phase"] = _event_phase(record, now)
+                if _recovery_pregame_allowed(
+                    age,
+                    max_age_seconds,
+                    recovery_max_age_seconds,
+                    record["event_phase"],
+                    live_enabled,
+                ):
+                    try:
+                        prepared = await asyncio.to_thread(
+                            _prepare_pick,
+                            pick,
+                            core=core,
+                            remote=remote,
+                            unit_usdc=unit_usdc,
+                            matched=record,
+                        )
+                        record.update(prepared)
+                        record["recovered_after_bridge_outage"] = True
+                        record["recovery_checked_at"] = _now_iso()
+                        record["updated_at"] = _now_iso()
+                        signals[fp] = record
+                        changed = True
+                        print(
+                            "CFB_CAPPER_RECOVERY "
+                            + json.dumps(record, sort_keys=True, separators=(",", ":"), default=str),
+                            flush=True,
+                        )
+                    except Exception as exc:
+                        record["status"] = "RETRYING"
+                        record["last_error"] = f"{type(exc).__name__}: {exc}"
+                        record["recovery_checked_at"] = _now_iso()
+                        record["updated_at"] = _now_iso()
+                        signals[fp] = record
+                        changed = True
+                    continue
+
                 if record["event_phase"] == "LIVE":
                     record["status"] = "MATCHED_LIVE"
                     record["reason"] = "game is live; matched Polymarket market remains open"
