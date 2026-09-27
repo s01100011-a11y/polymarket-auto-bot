@@ -1411,6 +1411,112 @@ class CfbScoreboardFallbackTests(unittest.TestCase):
 
         self.assertEqual(result["pick_result"], "LOSS")
 
+    def test_matched_early_pick_uses_event_start_date_to_close(self):
+        pick = _pick(
+            posted_at="2026-09-23T16:00:00+00:00",
+            selection="OREGON -3",
+            team_hint="Oregon",
+            event_hints=["Oregon"],
+            spread_lines=["-3"],
+        )
+        record = {
+            "id": "oregon-early",
+            "status": "MATCHED_LIVE",
+            "match_status": "MATCHED",
+            "market_type": "spread",
+            "event_slug": "cfb-ore-usc-2026-09-26",
+            "event_title": "Oregon vs USC",
+            "event_start_at": "2026-09-26T23:30:00+00:00",
+            "event_start_checked_at": "2026-09-26T23:00:00+00:00",
+            "market_accepting_orders": True,
+            "market_url": "https://polymarket.com/sports/cfb/cfb-ore-usc-2026-09-26",
+            "outcome": "Oregon",
+            "asset_id": "oregon-token",
+            "pick": pick,
+        }
+        final_event = self._response(
+            "Oregon",
+            41,
+            "USC",
+            27,
+            event_id="oregon-usc-final",
+        ).json()["events"][0]
+        queried_days = []
+
+        def scoreboard_events(game_day):
+            queried_days.append(game_day)
+            return [final_event] if game_day == "20260926" else []
+
+        refreshed = {
+            "event_title": "Oregon vs USC",
+            "event_start_at": "2026-09-26T23:30:00+00:00",
+            "event_start_checked_at": "2026-09-27T04:00:00+00:00",
+            "event_finished_at": None,
+            "event_closed": False,
+            "event_ended": False,
+            "event_live": True,
+            "game_status": "Live",
+            "market_accepting_orders": True,
+        }
+        with (
+            patch.object(capper, "_refresh_saved_event_state", return_value=refreshed),
+            patch.object(capper, "_espn_scoreboard_events", side_effect=scoreboard_events),
+            patch.object(
+                capper,
+                "_read_live_buy_quote",
+                side_effect=AssertionError("finished ESPN game must not stay live"),
+            ),
+        ):
+            changed = capper._refresh_record_runtime(record)
+
+        self.assertTrue(changed)
+        self.assertEqual(record["status"], "EVENT_CLOSED")
+        self.assertEqual(record["event_phase"], "CLOSED")
+        self.assertEqual(record["espn_phase"], "CLOSED")
+        self.assertEqual(record["pick_result"], "WIN")
+        self.assertEqual(record["espn_event_id"], "oregon-usc-final")
+        self.assertEqual(queried_days[0], "20260926")
+        self.assertNotIn("20260923", queried_days)
+
+    def test_stored_espn_event_id_disambiguates_same_team_hint(self):
+        pick = _pick(
+            posted_at="2026-09-26T12:00:00+00:00",
+            selection="TEXAS +3.5",
+            team_hint="Texas",
+            event_hints=["Texas"],
+            spread_lines=["+3.5"],
+        )
+        wrong = self._response(
+            "Texas Tech",
+            49,
+            "Baylor",
+            14,
+            event_id="wrong-game",
+        ).json()["events"][0]
+        target = self._response(
+            "Texas",
+            20,
+            "Tennessee",
+            17,
+            event_id="target-game",
+        ).json()["events"][0]
+
+        with patch.object(
+            capper,
+            "_espn_scoreboard_events",
+            side_effect=lambda game_day: [wrong, target] if game_day == "20260926" else [],
+        ):
+            snapshot = capper._scoreboard_snapshot_for_pick(
+                pick,
+                event_start_at="2026-09-26T16:00:00+00:00",
+                espn_event_id="target-game",
+            )
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["event_id"], "target-game")
+        self.assertEqual(snapshot["phase"], "CLOSED")
+        self.assertIn("Texas 20", snapshot["score"])
+
     def test_unresolved_closed_signal_is_regraded_without_saved_market(self):
         record = {
             "id": "northwestern-closed",

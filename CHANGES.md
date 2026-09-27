@@ -1,5 +1,13 @@
 # CHANGES
 
+## 2026-09-27 — Close finished CFB games from matched event date (#146)
+
+- ESPN reconciliation now prefers the persisted matched CFB `event_start_at` date instead of relying only on the Telegram post date, so early-posted picks still find the actual game after it finishes.
+- Persisted `espn_event_id` is reused when available, preventing short one-team hints from being reattached to a different same-window game.
+- A final ESPN snapshot immediately changes the saved signal to `EVENT_CLOSED` and grades the original full-game pick even when Polymarket still reports the market as open/live.
+- Existing trade execution, sizing, price/spread, executor, and geoblock gates are unchanged.
+- Added regressions for early-posted picks and stored ESPN event-id disambiguation.
+
 ## 2026-09-27 — Hard CFB/NFL routing boundary (#144)
 
 - CFB now classifies a potential NFL leak from the visible wager selection itself, so missing `team_hint` values or corrupt two-team `event_hints` can no longer let bare NFL picks such as Saints/Vikings/Steelers/Browns through.
