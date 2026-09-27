@@ -1209,19 +1209,38 @@ def _prepare_test_preview(
     }
 
 
+def _live_mark_map(dashboard: Any, executions: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Return the same executable SELL-side marks used by the main live dashboard."""
+    records = [rec for rec in executions.values() if isinstance(rec, dict)]
+    try:
+        current, _ = dashboard._estimate_pnl(records)
+    except Exception:
+        return {}
+    return {
+        str(row.get("id")): row
+        for row in current
+        if isinstance(row, dict) and row.get("id") is not None
+    }
+
+
 def _stats_from_executions(
     executions: dict[str, Any],
     *,
     labels: tuple[str, ...] = SOURCE_LABELS,
     sport: str = "NFL",
+    live_marks: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
+    marks = live_marks or {}
     out: dict[str, dict[str, Any]] = {}
     for label in labels:
-        wins = losses = pushes = open_trades = total = 0
+        wins = losses = pushes = open_trades = total = live_marked = 0
         stake = Decimal("0")
         realized = Decimal("0")
         units = Decimal("0")
-        for rec in executions.values():
+        live_pnl = Decimal("0")
+        open_cost_basis = Decimal("0")
+        open_value = Decimal("0")
+        for execution_id, rec in executions.items():
             if not isinstance(rec, dict) or rec.get("parent_trade_id") or rec.get("strategy_source") != label:
                 continue
             record_sport = str(rec.get("strategy_sport") or "").upper()
@@ -1235,6 +1254,35 @@ def _stats_from_executions(
             status = str(rec.get("status") or "")
             if status in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}:
                 open_trades += 1
+                trade_id = str(rec.get("id") or execution_id)
+                mark = marks.get(trade_id) or {}
+                try:
+                    entry = Decimal(str(mark.get("entry_price") or "0"))
+                    shares = Decimal(str(mark.get("shares") or "0"))
+                    basis = entry * shares if entry > 0 and shares > 0 else Decimal(
+                        str(rec.get("actual_cost_usdc") or rec.get("budget_usdc") or "0")
+                    )
+                    open_cost_basis += basis
+                except Exception:
+                    pass
+                pnl_raw = mark.get("estimated_pnl")
+                if pnl_raw is not None:
+                    try:
+                        live_pnl += Decimal(str(pnl_raw))
+                        live_marked += 1
+                    except Exception:
+                        pass
+                try:
+                    current_value_raw = mark.get("current_value_usdc")
+                    if current_value_raw is not None:
+                        open_value += Decimal(str(current_value_raw))
+                    else:
+                        current_price = Decimal(str(mark.get("current_price") or mark.get("current_sell_price") or "0"))
+                        shares = Decimal(str(mark.get("shares") or "0"))
+                        if current_price > 0 and shares > 0:
+                            open_value += current_price * shares
+                except Exception:
+                    pass
                 continue
             pnl_raw = rec.get("realized_pnl")
             if pnl_raw is None:
@@ -1275,6 +1323,10 @@ def _stats_from_executions(
             "graded_stake_usdc": str(stake.quantize(Decimal("0.01"))),
             "realized_pnl_usdc": str(realized.quantize(Decimal("0.01"))),
             "roi_pct": str(roi.quantize(Decimal("0.1"))) if roi is not None else None,
+            "live_marked": live_marked,
+            "live_pnl_usdc": str(live_pnl.quantize(Decimal("0.01"))) if live_marked else None,
+            "open_cost_basis_usdc": str(open_cost_basis.quantize(Decimal("0.01"))) if open_trades else "0.00",
+            "open_value_usdc": str(open_value.quantize(Decimal("0.01"))) if live_marked else None,
         }
     return out
 
@@ -1285,9 +1337,11 @@ def _position_items(
     *,
     sport: str = "NFL",
     limit: int = 40,
+    live_marks: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    marks = live_marks or {}
     items: list[dict[str, Any]] = []
-    for rec in executions.values():
+    for execution_id, rec in executions.items():
         if not isinstance(rec, dict) or rec.get("parent_trade_id"):
             continue
         if rec.get("strategy_source") != label:
@@ -1303,13 +1357,41 @@ def _position_items(
         quote = rec.get("quote") or {}
         realized = rec.get("realized_pnl")
         stake = rec.get("actual_cost_usdc") or rec.get("budget_usdc")
+        trade_id = str(rec.get("id") or execution_id)
+        mark = marks.get(trade_id) or {}
+        live_pnl = mark.get("estimated_pnl") if status in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"} else None
+        entry_price = mark.get("entry_price")
+        current_price = mark.get("current_price") or mark.get("current_sell_price")
+        shares = mark.get("shares")
+        current_value = mark.get("current_value_usdc")
+        open_cost_basis = None
+        live_pnl_pct = None
+        try:
+            entry_dec = Decimal(str(entry_price or "0"))
+            shares_dec = Decimal(str(shares or "0"))
+            if entry_dec > 0 and shares_dec > 0:
+                basis = entry_dec * shares_dec
+                open_cost_basis = str(basis.quantize(Decimal("0.01")))
+                if current_value is None and current_price is not None:
+                    current_value = str((Decimal(str(current_price)) * shares_dec).quantize(Decimal("0.01")))
+                if live_pnl is not None and basis > 0:
+                    live_pnl_pct = str((Decimal(str(live_pnl)) / basis * Decimal("100")).quantize(Decimal("0.1")))
+        except Exception:
+            pass
         items.append({
-            "trade_id": rec.get("id"),
+            "trade_id": trade_id,
             "selection": rec.get("strategy_selection") or quote.get("requested_outcome") or quote.get("market"),
             "status": status,
             "result": result,
             "stake_usdc": stake,
             "realized_pnl_usdc": realized,
+            "live_pnl_usdc": live_pnl,
+            "live_pnl_pct": live_pnl_pct,
+            "entry_price": entry_price,
+            "current_price": current_price,
+            "shares": shares,
+            "open_cost_basis_usdc": open_cost_basis,
+            "current_value_usdc": current_value,
             "market": quote.get("market"),
             "market_url": quote.get("market_url"),
             "outcome": quote.get("resolved_outcome") or quote.get("requested_outcome"),
@@ -1325,12 +1407,12 @@ def _position_items(
             ),
         })
     items.sort(
-        key=lambda item: str(item.get("closed_at") or item.get("submitted_at") or ""),
-        reverse=True,
+        key=lambda item: (
+            0 if item.get("sell_available") else 1,
+            str(item.get("closed_at") or item.get("submitted_at") or ""),
+        )
     )
     return items[:limit]
-
-
 def install(*, app: Any, dashboard: Any, core: Any) -> None:
     global _INSTALLED
     if _INSTALLED:
@@ -1767,7 +1849,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         if not isinstance(executions, dict):
             executions = {}
         signals = _load_signals()
-        stats = _stats_from_executions(executions)
+        live_marks = _live_mark_map(dashboard, executions)
+        stats = _stats_from_executions(executions, live_marks=live_marks)
         missed = _missed_signal_stats(
             signals,
             executions,
@@ -1777,7 +1860,12 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         )
         for label in SOURCE_LABELS:
             stats.setdefault(label, {}).update(missed.get(label, {}))
-            stats[label]["positions"] = _position_items(executions, label, sport="NFL")
+            stats[label]["positions"] = _position_items(
+                executions,
+                label,
+                sport="NFL",
+                live_marks=live_marks,
+            )
         signal_summary = {
             "queued": sum(1 for x in signals.values() if (x or {}).get("status") in {"QUEUED", "EXECUTOR_DONE"}),
             "failed": sum(1 for x in signals.values() if (x or {}).get("status") == "EXECUTOR_FAILED"),
@@ -1827,7 +1915,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
 """
         html = html.replace('  <div class="tabs">', panel + '  <div class="tabs">', 1)
         css = r"""
-.nfl-capper-panel{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px;margin:14px 0}.nfl-capper-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.nfl-capper-state{font-size:15px;font-weight:850;margin-top:5px}.nfl-capper-meta{font-size:12px;color:var(--muted);text-align:right;line-height:1.45}.nfl-capper-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.nfl-capper-card{border:1px solid var(--border);border-radius:10px;background:#0d1522;padding:13px}.nfl-capper-card>b{font-size:18px;line-height:1.3}.nfl-capper-kpis{font-size:14px;color:var(--muted);line-height:1.75;margin-top:7px}.nfl-capper-kpis .capper-pnl{font-size:17px;font-weight:900}.nfl-capper-kpis .capper-pnl.positive{color:#86efac}.nfl-capper-kpis .capper-pnl.negative{color:#fca5a5}.nfl-capper-kpis .capper-pnl.flat{color:var(--muted)}.nfl-position-row{margin-top:8px;padding:9px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.08)}.nfl-position-row.win{background:rgba(34,197,94,.11);border-color:rgba(34,197,94,.40);border-left:4px solid #22c55e}.nfl-position-row.loss{background:rgba(239,68,68,.10);border-color:rgba(239,68,68,.40);border-left:4px solid #ef4444}.nfl-position-row.push{background:rgba(245,158,11,.10);border-color:rgba(245,158,11,.38);border-left:4px solid #f59e0b}.nfl-position-row.open{background:rgba(59,130,246,.08);border-color:rgba(59,130,246,.32);border-left:4px solid #3b82f6}.nfl-position-title{font-size:15px;font-weight:850}.nfl-position-pnl{font-size:16px;font-weight:900}.nfl-position-pnl.positive{color:#86efac}.nfl-position-pnl.negative{color:#fca5a5}@media(max-width:650px){.nfl-capper-grid{grid-template-columns:1fr}.nfl-capper-head{flex-direction:column}.nfl-capper-meta{text-align:left}.nfl-capper-card>b{font-size:19px}.nfl-capper-kpis{font-size:15px}.nfl-capper-kpis .capper-pnl{font-size:18px}.nfl-position-title{font-size:16px}.nfl-position-pnl{font-size:17px}}
+.nfl-capper-panel{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px;margin:14px 0}.nfl-capper-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.nfl-capper-state{font-size:15px;font-weight:850;margin-top:5px}.nfl-capper-meta{font-size:12px;color:var(--muted);text-align:right;line-height:1.45}.nfl-capper-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.nfl-capper-card{border:1px solid var(--border);border-radius:10px;background:#0d1522;padding:13px}.nfl-capper-card>b{font-size:18px;line-height:1.3}.nfl-capper-kpis{font-size:14px;color:var(--muted);line-height:1.75;margin-top:7px}.nfl-capper-kpis .capper-pnl{font-size:17px;font-weight:900}.nfl-capper-kpis .capper-pnl.positive{color:#86efac}.nfl-capper-kpis .capper-pnl.negative{color:#fca5a5}.nfl-capper-kpis .capper-pnl.flat{color:var(--muted)}.nfl-position-row{margin-top:8px;padding:9px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.08)}.nfl-position-row.win{background:rgba(34,197,94,.11);border-color:rgba(34,197,94,.40);border-left:4px solid #22c55e}.nfl-position-row.loss{background:rgba(239,68,68,.10);border-color:rgba(239,68,68,.40);border-left:4px solid #ef4444}.nfl-position-row.push{background:rgba(245,158,11,.10);border-color:rgba(245,158,11,.38);border-left:4px solid #f59e0b}.nfl-position-row.open{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.46);border-left:4px solid #f59e0b}.nfl-position-title{font-size:15px;font-weight:850}.nfl-position-pnl{font-size:16px;font-weight:900}.nfl-position-pnl.positive{color:#86efac}.nfl-position-pnl.negative{color:#fca5a5}@media(max-width:650px){.nfl-capper-grid{grid-template-columns:1fr}.nfl-capper-head{flex-direction:column}.nfl-capper-meta{text-align:left}.nfl-capper-card>b{font-size:19px}.nfl-capper-kpis{font-size:15px}.nfl-capper-kpis .capper-pnl{font-size:18px}.nfl-position-title{font-size:16px}.nfl-position-pnl{font-size:17px}}
 """
         html = html.replace("</style>", css + "</style>", 1)
         js = r"""
@@ -1850,18 +1938,31 @@ function nflToggleFinished(){
 }
 function nflPositionList(x){
  const items=Array.isArray(x.positions)?x.positions:[];
- const visible=nflHideFinished?items.filter(item=>!item.finished):items;
- if(!visible.length)return '<div style="margin-top:9px;opacity:.7">'+(nflHideFinished&&items.length?'Finished positions hidden.':'No capper positions yet.')+'</div>';
- return '<div style="margin-top:9px"><b>Positions</b>'+visible.map(item=>{
+ const open=items.filter(item=>item.sell_available);
+ const settled=items.filter(item=>!item.sell_available&&item.finished);
+ const renderOpen=item=>{
+  const raw=item.live_pnl_usdc===null||item.live_pnl_usdc===undefined?null:Number(item.live_pnl_usdc);
+  const pnlClass=raw===null||raw===0?'':(raw>0?'positive':'negative');
+  const pnlText=raw===null?'—':(raw>0?'+':'')+'$'+raw.toFixed(2)+(item.live_pnl_pct===null||item.live_pnl_pct===undefined?'':' ('+Number(item.live_pnl_pct).toFixed(1)+'%)');
+  const entry=item.entry_price===null||item.entry_price===undefined?'—':(Number(item.entry_price)*100).toFixed(1)+'¢';
+  const live=item.current_price===null||item.current_price===undefined?'—':(Number(item.current_price)*100).toFixed(1)+'¢';
+  const shares=item.shares===null||item.shares===undefined?'—':Number(item.shares).toFixed(2);
+  const cost=item.open_cost_basis_usdc||item.stake_usdc;
+  const value=item.current_value_usdc===null||item.current_value_usdc===undefined?'—':'$'+Number(item.current_value_usdc).toFixed(2);
+  const sell=item.trade_id?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  return '<div class="nfl-position-row open"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+' · OPEN</div><div>'+nflEsc(item.outcome||'')+' · Entry '+entry+' · Live '+live+'</div><div>Shares '+shares+' · Cost $'+Number(cost||0).toFixed(2)+' · Value '+value+'</div><div class="nfl-position-pnl '+pnlClass+'">Live P/L '+pnlText+'</div>'+sell+'</div>';
+ };
+ const renderSettled=item=>{
   const result=String(item.result||'').toUpperCase();
-  const cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':item.sell_available?'open':'';
-  const badge=result|| (item.sell_available?'OPEN':String(item.status||''));
+  const cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
   const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
-  const pnl=raw===null?'':('<div class="nfl-position-pnl '+(raw>0?'positive':raw<0?'negative':'')+'">P/L '+(raw>0?'+':'')+'$'+raw.toFixed(2)+'</div>');
+  const pnl=raw===null?'':('<div class="nfl-position-pnl '+(raw>0?'positive':raw<0?'negative':'')+'">Realized P/L '+(raw>0?'+':'')+'$'+raw.toFixed(2)+'</div>');
   const stake=item.stake_usdc===null||item.stake_usdc===undefined?'':' · Stake $'+Number(item.stake_usdc).toFixed(2);
-  const sell=(item.trade_id&&item.sell_available)?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
-  return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+(badge?' · '+nflEsc(badge):'')+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+sell+'</div>';
- }).join('')+'</div>';
+  return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+(result?' · '+nflEsc(result):'')+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+'</div>';
+ };
+ let html='<div style="margin-top:9px"><b>Open positions</b>'+(open.length?open.map(renderOpen).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>')+'</div>';
+ if(!nflHideFinished&&settled.length)html+='<div style="margin-top:12px"><b>Settled positions</b>'+settled.map(renderSettled).join('')+'</div>';
+ return html;
 }
 async function nflSellPosition(tradeId,btn){
  if(!confirm('Sell the full tracked open position at the current executable market?'))return;
@@ -1902,7 +2003,11 @@ function nflCapperLine(x){
  const missedRaw=Number(x.missed_pnl_usdc||0);
  const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
  const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
- const metrics='<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">P/L '+pnl+'</span> · ROI '+roi+'</div><div>Missed '+Number(x.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div>';
+ const liveRaw=x.live_pnl_usdc===null||x.live_pnl_usdc===undefined?null:Number(x.live_pnl_usdc);
+ const livePnl=liveRaw===null?'—':(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
+ const liveClass=liveRaw===null||liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
+ const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
+ const metrics='<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">Realized P/L '+pnl+'</span> · ROI '+roi+'</div><div><span class="capper-pnl '+liveClass+'">Live P/L '+livePnl+'</span> · Open value '+openValue+'</div><div>Missed '+Number(x.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div>';
  return metrics+nflPositionList(x);
 }
 async function loadNflCapperStats(){
