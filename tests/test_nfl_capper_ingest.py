@@ -93,6 +93,34 @@ class NflCapperSizingTests(unittest.TestCase):
         self.assertEqual(str(capper._stake_for_pick(_pick(units=1.25))), "12.50")
         self.assertEqual(str(capper._stake_for_pick(_pick(units=3))), "30.00")
 
+    def test_explicit_college_matchup_with_nfl_nickname_is_rejected(self):
+        kind, reason = capper._classify_pick(
+            _pick(
+                selection="Hawaii Rainbow Warriors v Wyoming Cowboys Under 45.5 Points",
+                teams=["DAL"],
+                bet_types=["total"],
+                spread_lines=[],
+                total_side="UNDER",
+                total_line=45.5,
+            )
+        )
+        self.assertIsNone(kind)
+        self.assertIn("two NFL teams", reason)
+
+    def test_valid_explicit_nfl_matchup_is_allowed(self):
+        kind, reason = capper._classify_pick(
+            _pick(
+                selection="Jaguars v Patriots Over 44.5 Points",
+                teams=["JAX", "NE"],
+                bet_types=["total"],
+                spread_lines=[],
+                total_side="OVER",
+                total_line=44.5,
+            )
+        )
+        self.assertEqual(kind, "total")
+        self.assertIsNone(reason)
+
     def test_props_and_period_markets_are_rejected(self):
         kind, reason = capper._classify_pick(_pick(bet_types=["prop"]))
         self.assertIsNone(kind)

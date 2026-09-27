@@ -288,6 +288,11 @@ def _classify_pick(pick: dict[str, Any]) -> tuple[str | None, str | None]:
 
     kind = next(iter(primary))
     teams = [str(x).upper() for x in (pick.get("teams") or []) if str(x).upper() in NFL_TEAMS]
+    explicit_matchup = bool(
+        re.search(r"(?:/|\bvs\.?\b|\bv\.?\b|\s@\s)", selection, re.I)
+    )
+    if explicit_matchup and len(set(teams)) != 2:
+        return None, "explicit matchup does not resolve to exactly two NFL teams"
     if kind == "moneyline" and len(teams) < 1:
         return None, "moneyline pick has no recognized NFL team"
     if kind == "spread":
