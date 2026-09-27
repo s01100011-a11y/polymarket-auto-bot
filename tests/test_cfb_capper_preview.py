@@ -1458,6 +1458,103 @@ class CfbScoreboardFallbackTests(unittest.TestCase):
         self.assertTrue(item["sell_available"])
 
 
+    def test_unmatched_finished_total_is_graded_without_polymarket_match(self):
+        pick = _pick(
+            posted_at="2026-09-26T15:00:00+00:00",
+            selection="TEXAS/ TENNESSEE UNDER 55",
+            team_hint=None,
+            event_hints=[],
+            bet_types=["total"],
+            spread_lines=[],
+            total_side="UNDER",
+            total_line=55,
+        )
+        record = {
+            "id": "texas-tennessee-under",
+            "status": "RETRYING",
+            "selection": pick["selection"],
+            "pick": pick,
+        }
+
+        with patch.object(
+            capper.httpx,
+            "get",
+            return_value=self._response("Texas", 20, "Tennessee", 17),
+        ):
+            changed = capper._refresh_unmatched_record(record)
+
+        self.assertTrue(changed)
+        self.assertEqual(record["status"], "EVENT_CLOSED")
+        self.assertEqual(record["match_status"], "SCOREBOARD_ONLY")
+        self.assertEqual(record["pick_result"], "WIN")
+        self.assertIn("Texas 20", record["final_score"])
+        self.assertEqual(record["pick"]["event_hints"], ["TEXAS", "TENNESSEE"])
+
+    def test_unmatched_live_spread_retries_and_exposes_alternate(self):
+        pick = _pick(
+            posted_at="2026-09-26T22:00:00+00:00",
+            selection="SOUTH ALABAMA +21",
+            team_hint="South Alabama",
+            event_hints=["South Alabama"],
+            spread_lines=["+21"],
+        )
+        record = {
+            "id": "south-alabama",
+            "status": "RETRYING",
+            "selection": pick["selection"],
+            "pick": pick,
+        }
+        live = {
+            "event_id": "live-1",
+            "event_title": "South Alabama vs Kentucky",
+            "phase": "LIVE",
+            "status": "Q3 06:21",
+            "score": "South Alabama 17 - Kentucky 21",
+            "_competitors": [],
+            "_scores": [],
+        }
+        alternate = {
+            "alternative_id": "alt-205",
+            "event_title": "South Alabama vs Kentucky",
+            "event_start_at": "2026-09-26T23:00:00+00:00",
+            "event_phase": "LIVE",
+            "market_url": "https://polymarket.com/sports/cfb/cfb-south-alabama-kentucky-2026-09-26",
+            "spread_line": "+20.5",
+            "best_ask": "0.51",
+            "live_odds_american": "-104",
+            "relative_to_original": "WORSE",
+        }
+
+        with (
+            patch.object(capper, "_scoreboard_snapshot_for_pick", return_value=live),
+            patch.object(capper, "_resolve_market_match", side_effect=ValueError("exact unavailable")),
+            patch.object(capper, "_find_spread_alternatives", return_value=[alternate]),
+        ):
+            changed = capper._refresh_unmatched_record(record)
+
+        self.assertTrue(changed)
+        self.assertEqual(record["status"], "MATCHED_LIVE_ALTERNATE")
+        self.assertEqual(record["match_status"], "ALTERNATE_AVAILABLE")
+        self.assertEqual(record["live_score"], "South Alabama 17 - Kentucky 21")
+        self.assertEqual(record["live_alternatives"][0]["spread_line"], "+20.5")
+
+    def test_live_score_snapshot_is_exposed_on_status_item(self):
+        record = {
+            "id": "live-cfb",
+            "status": "RETRYING",
+            "selection": "ARKANSAS -7",
+            "event_phase": "LIVE",
+            "espn_phase": "LIVE",
+            "espn_score": "Arkansas 14 - Opponent 10",
+            "espn_status": "Q2 03:10",
+            "live_score": "Arkansas 14 - Opponent 10",
+        }
+        item = capper._status_pick_item(record, {})
+        self.assertEqual(item["espn_score"], "Arkansas 14 - Opponent 10")
+        self.assertEqual(item["espn_status"], "Q2 03:10")
+        self.assertEqual(item["live_score"], "Arkansas 14 - Opponent 10")
+
+
 class CfbFinishedResultsAndPerformanceTests(unittest.TestCase):
     def test_resolved_signal_outcome_uses_authoritative_token_resolution(self):
         yes = SimpleNamespace(label="Clemson", token_id="clemson-token", price="1")
@@ -1571,6 +1668,7 @@ class CfbFinishedResultsAndPerformanceTests(unittest.TestCase):
         self.assertIn("Hide finished", rendered)
         self.assertIn("SELL POSITION", rendered)
         self.assertIn("cfbSellPosition", rendered)
+        self.assertIn("ESPN ", rendered)
 
 
 class CfbRecoveryWindowTests(unittest.TestCase):
@@ -1598,6 +1696,58 @@ class CfbNoFillHelperTests(unittest.TestCase):
             )
         )
 
+
+
+class CfbPersistedCleanupTests(unittest.TestCase):
+    def test_old_nfl_rows_are_purged_but_explicit_college_matchup_remains(self):
+        nfl_pick = _pick(
+            selection="Vikings To Win",
+            team_hint="Vikings",
+            event_hints=["Vikings"],
+            bet_types=["moneyline"],
+            spread_lines=[],
+        )
+        cfb_pick = _pick(
+            source="The Syndicate",
+            source_key="syndicate",
+            selection="Hawaii Rainbow Warriors v Wyoming Cowboys Under 45.5 Points",
+            team_hint=None,
+            event_hints=["Hawaii Rainbow Warriors", "Wyoming Cowboys"],
+            bet_types=["total"],
+            spread_lines=[],
+            total_side="UNDER",
+            total_line=45.5,
+        )
+        signals = {
+            "old-nfl": {"selection": nfl_pick["selection"], "pick": nfl_pick},
+            "real-cfb": {"selection": cfb_pick["selection"], "pick": cfb_pick},
+        }
+
+        removed = capper._purge_misrouted_nfl_signals(signals)
+
+        self.assertEqual(removed, ["Vikings To Win"])
+        self.assertNotIn("old-nfl", signals)
+        self.assertIn("real-cfb", signals)
+
+    def test_semantic_lookup_reuses_normalized_texas_tech_record(self):
+        old = _pick(
+            selection="TEXAS TEXCH -34.5",
+            team_hint="TEXAS TEXCH",
+            event_hints=["TEXAS TEXCH"],
+            spread_lines=["-34.5"],
+        )
+        normalized = capper._normalize_legacy_bridge_pick(old)
+        signals = {
+            "legacy-key": {
+                "selection": old["selection"],
+                "pick": old,
+            }
+        }
+
+        self.assertEqual(
+            capper._signal_key_by_semantic(signals, normalized),
+            "legacy-key",
+        )
 
 
 class CfbLegacyBridgeNormalizationTests(unittest.TestCase):
