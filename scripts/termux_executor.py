@@ -523,7 +523,17 @@ def main() -> None:
                     result = _sell(payload, private_key, wallet)
                 else:
                     raise RuntimeError(f"Unknown executor action {action}")
-                body = {"ok": True, "result": result}
+                if action == "BUY" and result.get("ok") is False:
+                    body = {
+                        "ok": False,
+                        "result": result,
+                        "error": (
+                            "BUY_UNFILLED_RETRYABLE: limit order filled 0 shares "
+                            "before the unfilled remainder was canceled"
+                        ),
+                    }
+                else:
+                    body = {"ok": True, "result": result}
             except Exception as exc:
                 body = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
             _journal_completed(request_id, action, body)
