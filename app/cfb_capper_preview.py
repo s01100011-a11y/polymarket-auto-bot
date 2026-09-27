@@ -196,22 +196,22 @@ def _inline_matchup_hints(selection: str) -> list[str]:
 
 
 def _legacy_bridge_nfl_collision(pick: dict[str, Any]) -> bool:
-    """Fail closed on a bare NFL-nickname game pick leaking from the old NCAAF parser."""
+    """Fail closed when visible CFB wager text reduces to a bare NFL alias."""
     selection = str(pick.get("selection") or "").strip()
-    team_hint = str(pick.get("team_hint") or "").strip()
-    if not selection or not team_hint:
-        return False
-    if len([x for x in (pick.get("event_hints") or []) if str(x).strip()]) >= 2:
-        return False
-    base = _strip_wager_suffix(selection)
-    base_norm = _norm_text(base)
-    hint_norm = _norm_text(team_hint)
-    if not base_norm or base_norm != hint_norm:
+    if not selection:
         return False
 
-    # A bare nickname that is also an NFL alias is ambiguous in an NCAAF feed.
-    # Blocking it is safer than guessing; explicit two-team college matchups are
-    # retained because they carry enough context for exact event resolution.
+    # Do not trust legacy team/event hints here. The old bridge occasionally
+    # omitted team_hint or attached corrupt two-team event_hints to NFL picks,
+    # which allowed obvious NFL wagers back into the CFB feed. Classification
+    # must be driven by the visible wager text itself.
+    base_norm = _norm_text(_strip_wager_suffix(selection))
+    if not base_norm:
+        return False
+
+    # A bare NFL alias is ambiguous/invalid in the CFB feed and is rejected.
+    # Explicit college matchups such as Hawaii v Wyoming reduce to a multi-team
+    # string rather than one NFL alias and remain eligible for CFB resolution.
     for abbr in nfl.NFL_TEAMS:
         for alias in nfl._team_aliases(abbr):
             if base_norm == _norm_text(alias):
@@ -2875,7 +2875,24 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         if deduped:
             _STATUS["deduped_cfb_signals"] = deduped
             _STATUS["deduped_cfb_at"] = _now_iso()
-        changed = bool(purged_nfl or deduped) or _sync_queue_status(signals)
+
+        # Persist cross-sport cleanup immediately. Do not wait until the end of
+        # the poll cycle: a later ESPN/Polymarket reconciliation exception must
+        # never leave already-identified NFL contamination on disk.
+        cleanup_changed = bool(purged_nfl or deduped)
+        if cleanup_changed:
+            _save_signals(signals)
+            print(
+                "CFB_CAPPER_CLEANUP "
+                + json.dumps(
+                    {"purged_nfl": purged_nfl, "deduped": deduped},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                flush=True,
+            )
+
+        changed = _sync_queue_status(signals)
 
         if not enabled:
             _STATUS["last_error"] = "CFB capper preview is disabled"
