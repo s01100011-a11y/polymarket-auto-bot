@@ -1,5 +1,15 @@
 # CHANGES
 
+## 2026-09-27 — Capper open positions + live P/L (#138)
+
+- NFL and CFB capper cards now show aggregate **Live P/L** for each capper separately from realized P/L.
+- Added **Open positions** under every Slam/Syndicate capper card with entry price, executable live SELL price, shares, remaining cost basis, current value, and live unrealized P/L/%.
+- Live marks reuse the dashboard's existing executable SELL-side Polymarket mark so capper P/L matches the portfolio dashboard rather than using a second pricing method.
+- Open capper positions are now **amber**; settled wins remain green, losses red, and pushes amber/neutral.
+- Position attribution continues to use `strategy_source` + `strategy_sport`, preventing cross-sport/capper P/L mixing.
+- Added regression coverage for aggregate live P/L, per-position live values, and CFB amber/open-position UI.
+
+
 ## 2026-09-27 — Normalize legacy CFB bridge output in the bot (#136)
 
 - Added an execution-side compatibility layer so CFB no longer depends on the bridge being on the newest parser build.
