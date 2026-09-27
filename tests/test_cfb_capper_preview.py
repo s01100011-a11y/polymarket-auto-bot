@@ -1923,6 +1923,28 @@ class CfbPersistedCleanupTests(unittest.TestCase):
             ["Saints To Win", "Vikings To Win", "Steelers +3.5", "Browns +3.5"],
         )
 
+    def test_persisted_nfl_row_with_corrupted_two_team_hints_is_still_purged(self):
+        signals = {
+            "vikings": {
+                "source": "Syndicate - CFB",
+                "posted_at": "2026-09-26T15:40:00+00:00",
+                "selection": "Vikings To Win",
+                "status": "RETRYING",
+                "pick": _pick(
+                    source="The Syndicate",
+                    source_key="syndicate",
+                    selection="Vikings To Win",
+                    team_hint="Vikings",
+                    event_hints=["Vikings", "DAL"],
+                    bet_types=["moneyline"],
+                    spread_lines=[],
+                ),
+            }
+        }
+
+        capper._purge_misrouted_nfl_signals(signals)
+        self.assertEqual(signals, {})
+
     def test_compound_colts_nfl_row_without_pick_is_purged(self):
         signals = {
             "colts": {
