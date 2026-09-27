@@ -1430,7 +1430,10 @@ class CfbScoreboardFallbackTests(unittest.TestCase):
             "final_score": "Northwestern 23 - Indiana 29",
         }
 
-        with patch.object(capper, "_scoreboard_result_for_pick", return_value=resolved):
+        with (
+            patch.object(capper, "_scoreboard_snapshot_for_pick", return_value=None),
+            patch.object(capper, "_scoreboard_result_for_pick", return_value=resolved),
+        ):
             changed = capper._refresh_unresolved_closed_result(record)
 
         self.assertTrue(changed)
