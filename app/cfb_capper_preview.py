@@ -2129,6 +2129,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         min(4320, int(os.getenv("CFB_CAPPER_FEED_WINDOW_MINUTES", "1440"))),
     )
     unit_usdc = Decimal(os.getenv("CFB_CAPPER_UNIT_USDC", "10"))
+    no_fill_retry_limit = max(0, int(os.getenv("CFB_CAPPER_NO_FILL_RETRIES", "2")))
     live_enabled = os.getenv("CFB_CAPPER_LIVE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
     test_preview_raw = os.getenv("CFB_CAPPER_TEST_PREVIEW_JSON", "").strip()
     test_preview_marker = core.DATA_DIR / "cfb_capper_test_preview.json"
@@ -2174,23 +2175,47 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     if manual_result is not None and rec.get("manual_buy_result") != manual_result:
                         rec["manual_buy_result"] = manual_result
                         changed = True
-            current_status = rec.get("status")
-            if current_status not in {"PREVIEW_QUEUED", "QUEUED"} or not rec.get("request_id"):
+            current_status = str(rec.get("status") or "")
+            if current_status not in {"PREVIEW_QUEUED", "QUEUED", "EXECUTOR_DONE"} or not rec.get("request_id"):
                 continue
             queued = queue.get(str(rec.get("request_id")))
             if not queued:
                 continue
             qstatus = str(queued.get("status") or "")
-            is_live = current_status == "QUEUED"
-            if qstatus == "DONE":
-                rec["status"] = "EXECUTOR_DONE" if is_live else "PREVIEW_DONE"
-                rec["completed_at"] = queued.get("updated_at") or _now_iso()
-                rec["result"] = queued.get("result")
+            is_live = current_status in {"QUEUED", "EXECUTOR_DONE"}
+            no_fill = is_live and nfl._queue_result_is_no_fill(queued)
+            if no_fill and qstatus in {"DONE", "FAILED"}:
+                attempts = int(rec.get("no_fill_retries") or 0)
+                if attempts < no_fill_retry_limit:
+                    rec["status"] = "RETRYING"
+                    rec["no_fill_retries"] = attempts + 1
+                    rec["last_error"] = str(
+                        queued.get("error")
+                        or "BUY_UNFILLED_RETRYABLE: previous limit order filled 0 shares"
+                    )
+                    rec["last_no_fill_at"] = queued.get("updated_at") or _now_iso()
+                    rec.pop("request_id", None)
+                    rec.pop("completed_at", None)
+                else:
+                    rec["status"] = "EXECUTOR_FAILED"
+                    rec["last_error"] = (
+                        str(queued.get("error") or "BUY unfilled")
+                        + f"; no-fill retry limit {no_fill_retry_limit} reached"
+                    )
+                    rec["completed_at"] = queued.get("updated_at") or _now_iso()
                 changed = True
+            elif qstatus == "DONE":
+                target = "EXECUTOR_DONE" if is_live else "PREVIEW_DONE"
+                if current_status != target:
+                    rec["status"] = target
+                    rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                    rec["result"] = queued.get("result")
+                    changed = True
             elif qstatus == "FAILED":
                 rec["status"] = "EXECUTOR_FAILED" if is_live else "PREVIEW_FAILED"
                 rec["last_error"] = queued.get("error")
                 rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                rec["result"] = queued.get("result")
                 changed = True
         return changed
 
