@@ -1,5 +1,13 @@
 # CHANGES
 
+## 2026-09-27 — NFL exact-market resolution hardening (#132)
+
+- NFL spreads now use Polymarket's structured `sports.line` and correctly invert the complementary outcome, matching alternate lines such as Steelers +3.5 when the market is encoded as Bengals -3.5.
+- One-team NFL picks are narrowed to the unique nearby game date using the same fail-closed approach already used by CFB, preventing future-week events from tying current-week moneylines.
+- NFL auto matching now requires exact full-game sports market types rather than accepting period variants containing the same type name.
+- Added regression tests for structured complementary spread lines and current-week moneyline resolution.
+
+
 ## 2026-09-27 — NFL ingest defense against cross-sport nickname collisions
 
 - Added a downstream fail-closed guard: explicit matchup selections must resolve to exactly two NFL teams before the NFL trading worker can proceed.
