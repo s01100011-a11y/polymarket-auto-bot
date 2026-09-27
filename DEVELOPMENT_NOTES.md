@@ -1,3 +1,13 @@
+# DEVELOPMENT NOTES
+
+## 2026-09-27 — CFB persisted-signal reconciliation and ESPN live scores (#140)
+
+The CFB worker previously had three separate recovery gaps: old cross-sport rows stayed in the persisted signal file after the parser was fixed; unmatched records depended on the Telegram bridge replaying them; and the ESPN fallback only graded records already known to be closed through a saved Polymarket match. That meant a valid historical CFB pick could remain RETRYING forever once its market closed.
+
+The worker now reconciles every persisted CFB signal on each poll. Legacy NFL nickname collisions are purged, legacy CFB rows are normalized in-place and semantically reused, exact Polymarket matching is retried, nearby same-game spread alternatives are exposed when the exact line is unavailable, and ESPN supplies live score/status or final grading when appropriate. Bridge outages still fail closed for new ingest but no longer prevent reconciliation of already-saved records.
+
+ESPN lookups use a short 10-second per-day cache to keep the polling path bounded. A recovered historical signal never auto-enqueues solely because reconciliation found a market; it only restores dashboard state/options. Existing live trading gates, price/spread limits, budgets, executor readiness, and geoblock checks are unchanged.
+
 ## 2026-09-26 — Forward executable PW spread capture (#15)
 
 ## 2026-09-27 — PW direct-feed outage + NBA/WNBA Slack failover (#127)

@@ -1,5 +1,15 @@
 # CHANGES
 
+## 2026-09-27 — Reconcile CFB signals, alternate lines, ESPN scores (#140)
+
+- Persisted NFL picks that leaked into the CFB store before the cross-sport ingest guard are now removed automatically on the next CFB poll.
+- Persisted unmatched CFB picks are retried independently of Telegram replay, so legacy parser records such as Texas/Tennessee Under 55, Hawaii/Wyoming Under 45.5, and the Texas Tech typo can recover after the bridge has moved on.
+- Exact spread misses now retry current same-game Polymarket alternate spreads and keep explicit BUY choices visible instead of silently changing the wager.
+- If an unmatched game's original Polymarket market is already closed, ESPN final-score data can now identify the game and grade the original full-game moneyline/spread/total WIN/LOSS/PUSH.
+- Live CFB cards now show the ESPN score/status, refreshed with the existing capper polling cycle.
+- Reconciliation is read/repair-only: recovering a historical signal does not enqueue a new trade; existing auto/live/executor/risk gates remain unchanged.
+- Added regression coverage for persisted NFL cleanup, closed unmatched grading, live alternate recovery, semantic reuse of normalized legacy records, and ESPN score rendering.
+
 ## 2026-09-27 — Capper open positions + live P/L (#138)
 
 - NFL and CFB capper cards now show aggregate **Live P/L** for each capper separately from realized P/L.
