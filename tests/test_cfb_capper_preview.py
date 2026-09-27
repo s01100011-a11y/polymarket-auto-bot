@@ -1701,6 +1701,140 @@ class CfbNoFillHelperTests(unittest.TestCase):
 
 
 
+class CfbLegacyRecordReconciliationTests(unittest.TestCase):
+    @staticmethod
+    def _response(team_a, score_a, team_b, score_b, *, completed=True, state=None, detail=""):
+        status_type = {"completed": completed}
+        if state is not None:
+            status_type["state"] = state
+        if detail:
+            status_type["shortDetail"] = detail
+        payload = {
+            "events": [
+                {
+                    "id": "legacy-game",
+                    "name": f"{team_a} vs {team_b}",
+                    "competitions": [
+                        {
+                            "status": {"type": status_type},
+                            "competitors": [
+                                {
+                                    "score": str(score_a),
+                                    "team": {
+                                        "displayName": team_a,
+                                        "shortDisplayName": team_a,
+                                        "name": team_a,
+                                        "location": team_a,
+                                        "abbreviation": team_a[:4].upper(),
+                                    },
+                                },
+                                {
+                                    "score": str(score_b),
+                                    "team": {
+                                        "displayName": team_b,
+                                        "shortDisplayName": team_b,
+                                        "name": team_b,
+                                        "location": team_b,
+                                        "abbreviation": team_b[:4].upper(),
+                                    },
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+
+        class _Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return payload
+
+        return _Response()
+
+    def test_missing_pick_spread_is_reconstructed_and_finished_game_is_graded(self):
+        record = {
+            "id": "legacy-oregon",
+            "source": "Slam - CFB",
+            "telegram_source": "SLAM - All Access",
+            "posted_at": "2026-09-26T22:15:00+00:00",
+            "selection": "OREGON -3 MAX",
+            "units": "5",
+            "status": "RETRYING",
+        }
+
+        with patch.object(
+            capper.httpx,
+            "get",
+            return_value=self._response("Oregon", 41, "USC", 27),
+        ):
+            changed = capper._refresh_unmatched_record(record)
+
+        self.assertTrue(changed)
+        self.assertEqual(record["status"], "EVENT_CLOSED")
+        self.assertEqual(record["pick_result"], "WIN")
+        self.assertEqual(record["event_phase"], "CLOSED")
+        self.assertEqual(record["pick"]["team_hint"], "OREGON")
+        self.assertEqual(record["pick"]["spread_lines"], ["-3"])
+
+    def test_missing_pick_finished_loss_is_graded_from_original_line(self):
+        record = {
+            "id": "legacy-south-carolina",
+            "source": "Slam - CFB",
+            "telegram_source": "SLAM - All Access",
+            "posted_at": "2026-09-26T22:15:00+00:00",
+            "selection": "SOUTH CAROLINA +13",
+            "units": "2",
+            "status": "RETRYING",
+        }
+
+        with patch.object(
+            capper.httpx,
+            "get",
+            return_value=self._response("South Carolina", 18, "Alabama", 49),
+        ):
+            capper._refresh_unmatched_record(record)
+
+        self.assertEqual(record["status"], "EVENT_CLOSED")
+        self.assertEqual(record["pick_result"], "LOSS")
+        self.assertEqual(record["final_score"], "South Carolina 18 - Alabama 49")
+
+    def test_pending_game_is_marked_pregame_not_finished(self):
+        record = {
+            "id": "legacy-arkansas",
+            "source": "Slam - CFB",
+            "telegram_source": "SLAM - All Access",
+            "posted_at": "2026-09-27T10:00:00+00:00",
+            "selection": "ARKANSAS -7",
+            "units": "1",
+            "status": "RETRYING",
+        }
+        pending = {
+            "event_id": "pending-game",
+            "event_title": "Arkansas vs Opponent",
+            "phase": "PREGAME",
+            "status": "7:00 PM",
+            "score": "Arkansas 0 - Opponent 0",
+            "_competitors": [],
+            "_scores": [],
+        }
+
+        with (
+            patch.object(capper, "_scoreboard_snapshot_for_pick", return_value=pending),
+            patch.object(capper, "_resolve_market_match", side_effect=ValueError("not open yet")),
+            patch.object(capper, "_find_spread_alternatives", return_value=[]),
+        ):
+            capper._refresh_unmatched_record(record)
+
+        self.assertEqual(record["espn_phase"], "PREGAME")
+        self.assertEqual(record["status"], "RETRYING")
+        self.assertIn("game is pending on ESPN", record["reason"])
+        self.assertNotEqual(record.get("pick_result"), "WIN")
+        self.assertNotEqual(record.get("pick_result"), "LOSS")
+
+
 class CfbPersistedCleanupTests(unittest.TestCase):
     def test_old_nfl_rows_are_purged_but_explicit_college_matchup_remains(self):
         nfl_pick = _pick(
@@ -1751,6 +1885,129 @@ class CfbPersistedCleanupTests(unittest.TestCase):
             capper._signal_key_by_semantic(signals, normalized),
             "legacy-key",
         )
+
+
+    def test_old_nfl_rows_without_pick_objects_are_purged(self):
+        signals = {
+            "saints": {
+                "source": "Syndicate - CFB",
+                "posted_at": "2026-09-26T15:40:00+00:00",
+                "selection": "Saints To Win",
+                "status": "RETRYING",
+            },
+            "vikings": {
+                "source": "Syndicate - CFB",
+                "posted_at": "2026-09-26T15:40:00+00:00",
+                "selection": "Vikings To Win",
+                "status": "RETRYING",
+            },
+            "steelers": {
+                "source": "Syndicate - CFB",
+                "posted_at": "2026-09-26T15:40:00+00:00",
+                "selection": "Steelers +3.5",
+                "status": "RETRYING",
+            },
+            "browns": {
+                "source": "Syndicate - CFB",
+                "posted_at": "2026-09-26T15:40:00+00:00",
+                "selection": "Browns +3.5",
+                "status": "RETRYING",
+            },
+        }
+
+        removed = capper._purge_misrouted_nfl_signals(signals)
+
+        self.assertEqual(signals, {})
+        self.assertCountEqual(
+            removed,
+            ["Saints To Win", "Vikings To Win", "Steelers +3.5", "Browns +3.5"],
+        )
+
+    def test_compound_colts_nfl_row_without_pick_is_purged(self):
+        signals = {
+            "colts": {
+                "source": "Syndicate - CFB",
+                "posted_at": "2026-09-26T15:40:00+00:00",
+                "selection": "Colts +7.5 + Under 51.5 Points",
+                "status": "IGNORED_UNSUPPORTED",
+            }
+        }
+        capper._purge_misrouted_nfl_signals(signals)
+        self.assertEqual(signals, {})
+
+    def test_nontraded_legacy_duplicate_is_collapsed_to_graded_record(self):
+        old = {
+            "id": "old-south-alabama",
+            "source": "Slam - CFB",
+            "telegram_source": "SLAM - All Access",
+            "posted_at": "2026-09-26T15:43:48+00:00",
+            "selection": "SOUTH ALABAMA +21",
+            "units": "2",
+            "status": "RETRYING",
+        }
+        graded_pick = _pick(
+            posted_at="2026-09-26T16:06:13+00:00",
+            selection="SOUTH ALABAMA +21",
+            team_hint="SOUTH ALABAMA",
+            event_hints=["SOUTH ALABAMA"],
+            spread_lines=["+21"],
+        )
+        graded = {
+            "id": "graded-south-alabama",
+            "source": "Slam - CFB",
+            "telegram_source": "SLAM - All Access",
+            "posted_at": graded_pick["posted_at"],
+            "selection": graded_pick["selection"],
+            "units": "2",
+            "status": "EVENT_CLOSED",
+            "pick": graded_pick,
+            "pick_result": "WIN",
+            "espn_phase": "CLOSED",
+            "final_score": "South Alabama 24 - Alabama 41",
+        }
+        signals = {
+            "old-south-alabama": old,
+            "graded-south-alabama": graded,
+        }
+
+        removed = capper._dedupe_persisted_signals(signals)
+
+        self.assertEqual(len(signals), 1)
+        self.assertIn("graded-south-alabama", signals)
+        self.assertEqual(signals["graded-south-alabama"]["pick_result"], "WIN")
+        self.assertEqual(removed, ["SOUTH ALABAMA +21"])
+
+    def test_duplicate_with_trade_state_is_not_removed(self):
+        pick = _pick(
+            posted_at="2026-09-26T16:00:00+00:00",
+            selection="AUBURN -10",
+            team_hint="AUBURN",
+            event_hints=["AUBURN"],
+            spread_lines=["-10"],
+        )
+        signals = {
+            "traded": {
+                "id": "traded",
+                "source": "Slam - CFB",
+                "posted_at": pick["posted_at"],
+                "selection": "AUBURN -10",
+                "pick": pick,
+                "trade_id": "trade-1",
+                "status": "EXECUTOR_DONE",
+            },
+            "legacy": {
+                "id": "legacy",
+                "source": "Slam - CFB",
+                "posted_at": pick["posted_at"],
+                "selection": "34-20 TYPE GAME. AUBURN -10.",
+                "status": "RETRYING",
+            },
+        }
+
+        removed = capper._dedupe_persisted_signals(signals)
+
+        self.assertEqual(removed, [])
+        self.assertEqual(len(signals), 2)
 
 
 class CfbLegacyBridgeNormalizationTests(unittest.TestCase):
