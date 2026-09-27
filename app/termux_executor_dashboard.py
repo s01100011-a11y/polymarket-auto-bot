@@ -733,6 +733,20 @@ def _record_already_closed_sell(queue_rec: dict[str, Any], error: str) -> bool:
     return True
 
 
+def _effective_executor_result_ok(action: str, body_ok: bool, result: dict[str, Any]) -> bool:
+    """A BUY is successful only when the wallet actually gained shares."""
+    if not body_ok:
+        return False
+    if str(action or "").upper() != "BUY":
+        return True
+    if result.get("ok") is False:
+        return False
+    try:
+        return Decimal(str(result.get("filled_shares") or "0")) > 0
+    except Exception:
+        return False
+
+
 @app.post("/api/executor/result/{request_id}")
 def executor_result(request_id: str, body: ExecutorResult, _: dict[str, Any] = Depends(_executor_auth)):
     with _QUEUE_LOCK:
@@ -746,6 +760,13 @@ def executor_result(request_id: str, body: ExecutorResult, _: dict[str, Any] = D
         ):
             return {"ok": True, "duplicate": True}
         result = body.result or {}
+        effective_ok = _effective_executor_result_ok(str(rec.get("action") or ""), body.ok, result)
+        effective_error = body.error
+        if body.ok and not effective_ok and rec.get("action") == "BUY":
+            effective_error = (
+                "BUY_UNFILLED_RETRYABLE: executor completed without any filled shares; "
+                "the remainder was canceled"
+            )
         already_closed = bool(
             not body.ok
             and rec.get("action") == "SELL"
@@ -764,15 +785,15 @@ def executor_result(request_id: str, body: ExecutorResult, _: dict[str, Any] = D
             rec["result"] = result
             rec["error"] = None
         else:
-            rec["status"] = "DONE" if body.ok else "FAILED"
+            rec["status"] = "DONE" if effective_ok else "FAILED"
             rec["result"] = result
-            rec["error"] = body.error
+            rec["error"] = effective_error
         rec["updated_at"] = _now_iso()
         data[request_id] = rec
         _queue_save(data)
-    if body.ok and rec.get("action") == "BUY":
+    if effective_ok and rec.get("action") == "BUY":
         _record_buy_result(rec, result)
-    elif body.ok and rec.get("action") == "SELL":
+    elif effective_ok and rec.get("action") == "SELL":
         _record_sell_result(rec, result)
     elif already_closed:
         _record_already_closed_sell(rec, str(body.error or ""))

@@ -855,5 +855,33 @@ class NflStructuredSpreadAndDateResolutionTests(unittest.TestCase):
         self.assertEqual(label, "Minnesota Vikings")
 
 
+class NflNoFillRetryTests(unittest.TestCase):
+    def test_zero_fill_queue_result_is_retryable(self):
+        self.assertTrue(
+            capper._queue_result_is_no_fill(
+                {
+                    "action": "BUY",
+                    "status": "DONE",
+                    "result": {
+                        "ok": False,
+                        "filled_shares": "0",
+                        "status": "TEST_BUY_UNFILLED_CANCELED",
+                    },
+                }
+            )
+        )
+
+    def test_positive_fill_is_not_no_fill(self):
+        self.assertFalse(
+            capper._queue_result_is_no_fill(
+                {
+                    "action": "BUY",
+                    "status": "DONE",
+                    "result": {"ok": True, "filled_shares": "2.5", "status": "ORDER_SUBMITTED"},
+                }
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
