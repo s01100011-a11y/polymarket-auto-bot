@@ -230,7 +230,13 @@ def _normalize_legacy_bridge_pick(pick: dict[str, Any]) -> dict[str, Any] | None
 
     hints = []
     for hint in row.get("event_hints") or []:
-        value = re.sub(r"\bTEXAS\s+TEXCH\b", "TEXAS TECH", str(hint), flags=re.I)
+        value = re.sub(
+            r"^\s*\d{1,2}-\d{1,2}\s+TYPE\s+GAME[.:]?\s*",
+            "",
+            str(hint),
+            flags=re.I,
+        )
+        value = re.sub(r"\bTEXAS\s+TEXCH\b", "TEXAS TECH", value, flags=re.I)
         value = re.sub(r"\s+", " ", value).strip()
         if value:
             hints.append(value)
