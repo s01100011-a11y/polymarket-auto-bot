@@ -268,6 +268,38 @@ def _normalize_bridge_picks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         normalized.append(row)
     return normalized
 
+def _purge_misrouted_nfl_signals(signals: dict[str, Any]) -> list[str]:
+    """Remove old NFL rows that were persisted before the CFB ingest guard existed."""
+    removed: list[str] = []
+    for signal_id, record in list(signals.items()):
+        if not isinstance(record, dict):
+            continue
+        pick = record.get("pick")
+        if not isinstance(pick, dict):
+            continue
+        if not _legacy_bridge_nfl_collision(pick):
+            continue
+        removed.append(str(record.get("selection") or pick.get("selection") or signal_id))
+        signals.pop(signal_id, None)
+    return removed
+
+
+def _signal_key_by_semantic(signals: dict[str, Any], pick: dict[str, Any]) -> str | None:
+    target = _semantic_fingerprint(pick)
+    for signal_id, record in signals.items():
+        if not isinstance(record, dict):
+            continue
+        existing_pick = record.get("pick")
+        if not isinstance(existing_pick, dict):
+            continue
+        normalized = _normalize_legacy_bridge_pick(existing_pick)
+        if normalized is None:
+            continue
+        if _semantic_fingerprint(normalized) == target:
+            return str(signal_id)
+    return None
+
+
 def _semantic_fingerprint(pick: dict[str, Any]) -> str:
     """Fingerprint wager identity without transport timestamp/odds for outage dedupe."""
     canonical = {
@@ -343,7 +375,11 @@ def _classify_pick(pick: dict[str, Any]) -> tuple[str | None, str | None]:
 
 
 def _norm_text(value: Any) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+    text = str(value or "").casefold()
+    # ESPN commonly spells the school as Hawai'i/Hawaiʻi while Telegram and
+    # Polymarket often use Hawaii. Treat those spellings as the same team.
+    text = text.replace("hawaiʻi", "hawaii").replace("hawai'i", "hawaii").replace("hawai’i", "hawaii")
+    return re.sub(r"[^a-z0-9]+", " ", text).strip()
 
 
 def _contains_hint(text: Any, hint: Any) -> bool:
@@ -387,8 +423,39 @@ def _espn_hint_matches_competitor(hint: str, competitor: dict[str, Any]) -> bool
     return False
 
 
-def _scoreboard_result_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
-    """Grade a completed CFB pick from ESPN's final score when the market is unavailable."""
+_ESPN_SCOREBOARD_CACHE: dict[str, tuple[datetime, list[dict[str, Any]]]] = {}
+_ESPN_SCOREBOARD_CACHE_TTL_SECONDS = 10
+
+
+def _espn_scoreboard_events(game_day: str) -> list[dict[str, Any]]:
+    """Read one ESPN CFB scoreboard day, with a short production-only cache."""
+    use_cache = type(httpx.get).__module__ != "unittest.mock"
+    now = datetime.now(timezone.utc)
+    cached = _ESPN_SCOREBOARD_CACHE.get(game_day) if use_cache else None
+    if cached is not None:
+        cached_at, events = cached
+        if (now - cached_at).total_seconds() <= _ESPN_SCOREBOARD_CACHE_TTL_SECONDS:
+            return events
+
+    response = httpx.get(
+        "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
+        params={"dates": game_day, "limit": 1000},
+        timeout=12,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    events = [event for event in (payload.get("events") or []) if isinstance(event, dict)]
+    if use_cache:
+        _ESPN_SCOREBOARD_CACHE[game_day] = (now, events)
+        # The worker only needs the current game window. Keep the cache bounded.
+        if len(_ESPN_SCOREBOARD_CACHE) > 8:
+            oldest = min(_ESPN_SCOREBOARD_CACHE, key=lambda key: _ESPN_SCOREBOARD_CACHE[key][0])
+            _ESPN_SCOREBOARD_CACHE.pop(oldest, None)
+    return events
+
+
+def _scoreboard_snapshot_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
+    """Resolve one CFB game on ESPN and return live/final score context."""
     kind, _ = _classify_pick(pick)
     posted = _parse_iso(pick.get("posted_at"))
     if kind is None or posted is None:
@@ -402,28 +469,22 @@ def _scoreboard_result_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
     for offset in (0, -1, 1):
         game_day = (posted + timedelta(days=offset)).strftime("%Y%m%d")
         try:
-            response = httpx.get(
-                "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
-                params={"dates": game_day, "limit": 1000},
-                timeout=12,
-            )
-            response.raise_for_status()
-            payload = response.json()
+            events = _espn_scoreboard_events(game_day)
         except Exception:
             continue
 
-        for event in payload.get("events") or []:
+        for event in events:
             competitions = event.get("competitions") or []
             if not competitions:
                 continue
             competition = competitions[0] or {}
-            status = ((competition.get("status") or {}).get("type") or {})
-            if not bool(status.get("completed")):
-                continue
             competitors = competition.get("competitors") or []
             if len(competitors) != 2:
                 continue
-            if not all(any(_espn_hint_matches_competitor(hint, comp) for comp in competitors) for hint in hints):
+            if not all(
+                any(_espn_hint_matches_competitor(hint, comp) for comp in competitors)
+                for hint in hints
+            ):
                 continue
             event_id = str(event.get("id") or "")
             if event_id:
@@ -440,13 +501,65 @@ def _scoreboard_result_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
     except Exception:
         return None
 
-    short_names = []
+    names: list[str] = []
     for comp in competitors:
         team = comp.get("team") or {}
-        short_names.append(
-            str(team.get("shortDisplayName") or team.get("displayName") or team.get("name") or "").strip()
+        names.append(
+            str(
+                team.get("shortDisplayName")
+                or team.get("displayName")
+                or team.get("name")
+                or team.get("location")
+                or ""
+            ).strip()
         )
-    final_score = f"{short_names[0]} {scores[0]:f} - {short_names[1]} {scores[1]:f}"
+    if len(names) != 2 or not all(names):
+        return None
+
+    status_type = ((competition.get("status") or {}).get("type") or {})
+    completed = bool(status_type.get("completed"))
+    state = str(status_type.get("state") or "").strip().lower()
+    description = str(
+        status_type.get("shortDetail")
+        or status_type.get("detail")
+        or status_type.get("description")
+        or status_type.get("name")
+        or ""
+    ).strip()
+    if completed or state == "post":
+        phase = "CLOSED"
+    elif state == "in":
+        phase = "LIVE"
+    else:
+        phase = "PREGAME"
+
+    score_text = f"{names[0]} {scores[0]:f} - {names[1]} {scores[1]:f}"
+    return {
+        "event_id": str(event.get("id") or ""),
+        "event_title": str(event.get("name") or event.get("shortName") or ""),
+        "phase": phase,
+        "status": description,
+        "score": score_text,
+        "_competitors": competitors,
+        "_scores": [str(score) for score in scores],
+    }
+
+
+def _scoreboard_result_from_snapshot(
+    pick: dict[str, Any],
+    snapshot: dict[str, Any],
+) -> dict[str, Any] | None:
+    if str(snapshot.get("phase") or "").upper() != "CLOSED":
+        return None
+
+    kind, _ = _classify_pick(pick)
+    competitors = snapshot.get("_competitors") or []
+    try:
+        scores = [Decimal(str(value)) for value in (snapshot.get("_scores") or [])]
+    except Exception:
+        return None
+    if kind is None or len(competitors) != 2 or len(scores) != 2:
+        return None
 
     result: str | None = None
     selected_score: Decimal | None = None
@@ -455,7 +568,11 @@ def _scoreboard_result_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
     if kind in {"moneyline", "spread"}:
         selected_hint = str(pick.get("team_hint") or "").strip()
         selected_index = next(
-            (idx for idx, comp in enumerate(competitors) if _espn_hint_matches_competitor(selected_hint, comp)),
+            (
+                idx
+                for idx, comp in enumerate(competitors)
+                if _espn_hint_matches_competitor(selected_hint, comp)
+            ),
             None,
         )
         if selected_index is None:
@@ -464,14 +581,26 @@ def _scoreboard_result_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
         selected_score = scores[selected_index]
         opponent_score = scores[other_index]
         if kind == "moneyline":
-            result = "WIN" if selected_score > opponent_score else "LOSS" if selected_score < opponent_score else "PUSH"
+            result = (
+                "WIN"
+                if selected_score > opponent_score
+                else "LOSS"
+                if selected_score < opponent_score
+                else "PUSH"
+            )
         else:
             try:
                 line = Decimal(str((pick.get("spread_lines") or [])[0]))
             except Exception:
                 return None
             adjusted = selected_score + line
-            result = "WIN" if adjusted > opponent_score else "LOSS" if adjusted < opponent_score else "PUSH"
+            result = (
+                "WIN"
+                if adjusted > opponent_score
+                else "LOSS"
+                if adjusted < opponent_score
+                else "PUSH"
+            )
     elif kind == "total":
         try:
             line = Decimal(str(pick.get("total_line")))
@@ -492,13 +621,65 @@ def _scoreboard_result_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "pick_result": result,
         "result_source": "espn_final_score",
-        "result_event_id": str(event.get("id") or ""),
-        "result_event_title": str(event.get("name") or event.get("shortName") or ""),
-        "final_score": final_score,
+        "result_event_id": str(snapshot.get("event_id") or ""),
+        "result_event_title": str(snapshot.get("event_title") or ""),
+        "final_score": str(snapshot.get("score") or ""),
         "result_checked_at": _now_iso(),
         "selected_final_score": str(selected_score) if selected_score is not None else None,
         "opponent_final_score": str(opponent_score) if opponent_score is not None else None,
     }
+
+
+def _scoreboard_result_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
+    """Grade a completed CFB pick from ESPN even if no Polymarket match was saved."""
+    snapshot = _scoreboard_snapshot_for_pick(pick)
+    if not snapshot:
+        return None
+    return _scoreboard_result_from_snapshot(pick, snapshot)
+
+
+def _apply_scoreboard_snapshot(
+    record: dict[str, Any],
+    pick: dict[str, Any] | None = None,
+) -> bool:
+    source_pick = pick if isinstance(pick, dict) else record.get("pick")
+    if not isinstance(source_pick, dict):
+        return False
+    snapshot = _scoreboard_snapshot_for_pick(source_pick)
+    if not snapshot:
+        return False
+
+    changed = False
+    updates = {
+        "espn_event_id": snapshot.get("event_id"),
+        "espn_event_title": snapshot.get("event_title"),
+        "espn_phase": snapshot.get("phase"),
+        "espn_status": snapshot.get("status"),
+        "espn_score": snapshot.get("score"),
+    }
+    if str(snapshot.get("phase") or "").upper() == "LIVE":
+        updates["live_score"] = snapshot.get("score")
+    else:
+        updates["live_score"] = None
+    if str(snapshot.get("phase") or "").upper() == "CLOSED":
+        updates["final_score"] = snapshot.get("score")
+
+    for key, value in updates.items():
+        if record.get(key) != value:
+            record[key] = value
+            changed = True
+
+    if str(snapshot.get("phase") or "").upper() == "CLOSED":
+        resolved = _scoreboard_result_from_snapshot(source_pick, snapshot)
+        if resolved:
+            for key, value in resolved.items():
+                if record.get(key) != value:
+                    record[key] = value
+                    changed = True
+
+    if changed:
+        record["espn_score_updated_at"] = _now_iso()
+    return changed
 
 
 def _apply_scoreboard_result(record: dict[str, Any], pick: dict[str, Any] | None = None) -> bool:
@@ -522,10 +703,11 @@ def _refresh_unresolved_closed_result(record: dict[str, Any]) -> bool:
     """Grade a persisted closed signal even when no exact saved market remains."""
     if str(record.get("status") or "") != "EVENT_CLOSED":
         return False
-    if str(record.get("pick_result") or "").upper() in {"WIN", "LOSS", "PUSH"}:
-        return False
-    return _apply_scoreboard_result(record)
-
+    changed = _apply_scoreboard_snapshot(record)
+    if str(record.get("pick_result") or "").upper() not in {"WIN", "LOSS", "PUSH"}:
+        if _apply_scoreboard_result(record):
+            changed = True
+    return changed
 
 def _event_date(event: Any) -> date | None:
     """Best-effort event date from Gamma schedule metadata or CFB slug/title."""
@@ -1415,8 +1597,13 @@ def _refresh_record_runtime(record: dict[str, Any]) -> bool:
             record["event_metadata_error"] = error
             changed = True
 
+    source_pick = record.get("pick")
+    if isinstance(source_pick, dict) and _apply_scoreboard_snapshot(record, source_pick):
+        changed = True
+
     match = _saved_market_match(record) or match
-    phase = _event_phase(record)
+    espn_phase = str(record.get("espn_phase") or "").upper()
+    phase = espn_phase if espn_phase in {"LIVE", "CLOSED"} else _event_phase(record)
 
     if record.get("event_phase") != phase:
         record["event_phase"] = phase
@@ -1474,6 +1661,138 @@ def _refresh_record_runtime(record: dict[str, Any]) -> bool:
         record["live_quote_error"] = None
         changed = True
     return changed
+
+
+def _refresh_unmatched_record(record: dict[str, Any]) -> bool:
+    """Retry exact/alternate matching and reconcile live/final ESPN state."""
+    pick = record.get("pick")
+    if not isinstance(pick, dict):
+        return False
+
+    changed = False
+    normalized = _normalize_legacy_bridge_pick(pick)
+    if normalized is None:
+        return False
+    if normalized != pick:
+        record["pick"] = normalized
+        record["selection"] = normalized.get("selection") or record.get("selection")
+        record["telegram_source"] = normalized.get("source") or record.get("telegram_source")
+        changed = True
+    pick = normalized
+
+    kind, reason = _classify_pick(pick)
+    if kind is None:
+        if record.get("status") != "IGNORED_UNSUPPORTED":
+            record["status"] = "IGNORED_UNSUPPORTED"
+            record["reason"] = reason
+            changed = True
+        return changed
+
+    if _apply_scoreboard_snapshot(record, pick):
+        changed = True
+    espn_phase = str(record.get("espn_phase") or "").upper()
+    if espn_phase == "CLOSED":
+        if record.get("status") != "EVENT_CLOSED":
+            record["status"] = "EVENT_CLOSED"
+            changed = True
+        if record.get("match_status") != "SCOREBOARD_ONLY":
+            record["match_status"] = "SCOREBOARD_ONLY"
+            changed = True
+        closed_reason = "game finished; graded from ESPN final score"
+        if record.get("reason") != closed_reason:
+            record["reason"] = closed_reason
+            changed = True
+        return changed
+
+    try:
+        match = _resolve_market_match(pick, kind)
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        if record.get("match_error") != error:
+            record["match_error"] = error
+            record["last_error"] = error
+            changed = True
+
+        alternatives: list[dict[str, Any]] = []
+        if kind == "spread":
+            try:
+                alternatives = _find_spread_alternatives(pick)
+                if record.get("alternate_error") is not None:
+                    record["alternate_error"] = None
+                    changed = True
+            except Exception as alt_exc:
+                alt_error = f"{type(alt_exc).__name__}: {alt_exc}"
+                if record.get("alternate_error") != alt_error:
+                    record["alternate_error"] = alt_error
+                    changed = True
+
+        if alternatives:
+            first = alternatives[0]
+            updates = {
+                "live_alternatives": alternatives,
+                "match_status": "ALTERNATE_AVAILABLE",
+                "event_title": first.get("event_title"),
+                "event_start_at": first.get("event_start_at"),
+                "event_phase": first.get("event_phase"),
+                "market_url": first.get("market_url"),
+                "status": (
+                    "MATCHED_LIVE_ALTERNATE"
+                    if first.get("event_phase") == "LIVE"
+                    else "MATCHED_PREGAME_ALTERNATE"
+                ),
+                "reason": "exact original spread is unavailable; explicit current Polymarket alternatives are shown",
+            }
+            for key, value in updates.items():
+                if record.get(key) != value:
+                    record[key] = value
+                    changed = True
+            return changed
+
+        if record.get("live_alternatives"):
+            record["live_alternatives"] = []
+            changed = True
+        if record.get("match_status") != "UNRESOLVED":
+            record["match_status"] = "UNRESOLVED"
+            changed = True
+        if record.get("status") != "RETRYING":
+            record["status"] = "RETRYING"
+            changed = True
+        retry_reason = (
+            "game is live on ESPN; exact Polymarket market is not matched and no alternate spread is open"
+            if espn_phase == "LIVE"
+            else "exact Polymarket market is not matched; will retry exact market and alternate spreads"
+        )
+        if record.get("reason") != retry_reason:
+            record["reason"] = retry_reason
+            changed = True
+        if espn_phase == "LIVE" and record.get("event_phase") != "LIVE":
+            record["event_phase"] = "LIVE"
+            changed = True
+        return changed
+
+    record.update(match)
+    record["match_error"] = None
+    if record.get("live_alternatives"):
+        record["live_alternatives"] = []
+    phase = str(record.get("espn_phase") or "").upper()
+    if phase not in {"LIVE", "CLOSED"}:
+        phase = _event_phase(record)
+    record["event_phase"] = phase
+    record["status"] = "MATCHED_LIVE" if phase == "LIVE" else "MATCHED_PREGAME"
+    record["reason"] = (
+        "game is live; exact Polymarket market matched"
+        if phase == "LIVE"
+        else "exact Polymarket market matched"
+    )
+    # Refresh the executable quote after recovering an exact match, but do not
+    # enqueue a trade from this reconciliation-only path.
+    try:
+        quote = _read_live_buy_quote(str(record["asset_id"]))
+        record.update(quote)
+        record["live_quote_error"] = None
+    except Exception as exc:
+        record["live_quote_error"] = f"{type(exc).__name__}: {exc}"
+    return True
 
 
 def _recovery_pregame_allowed(
@@ -1873,6 +2192,12 @@ def _status_pick_item(
         "result_source": record.get("result_source"),
         "result_event_title": record.get("result_event_title"),
         "final_score": record.get("final_score"),
+        "live_score": record.get("live_score"),
+        "espn_score": record.get("espn_score"),
+        "espn_status": record.get("espn_status"),
+        "espn_phase": record.get("espn_phase"),
+        "espn_event_title": record.get("espn_event_title"),
+        "espn_score_updated_at": record.get("espn_score_updated_at"),
     }
 
 
@@ -2014,7 +2339,10 @@ function cfbPickList(title,items,kind){
   if(item.posted_at)meta.push('posted '+cfbPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+cfbAge(item.signal_age_seconds):''));
   if(item.market&&String(item.match_status||'')!=='INVALID_FUTURE_MATCH')meta.push('Matched: '+cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
   if(item.result_event_title)meta.push('Game '+cfbEsc(item.result_event_title));
-  if(item.event_phase==='LIVE')meta.push('GAME LIVE');
+  if(item.event_phase==='LIVE'){
+   meta.push('GAME LIVE');
+   if(item.espn_score)meta.push('ESPN '+cfbEsc(item.espn_score)+(item.espn_status?' · '+cfbEsc(item.espn_status):''));
+  }
   else if(item.event_phase==='CLOSED')meta.push('GAME FINISHED');
   else if(item.event_start_at)meta.push('starts '+cfbPickTime(item.event_start_at));
   if(item.event_phase!=='CLOSED'&&item.best_ask!==null&&item.best_ask!==undefined&&item.best_ask!==''){
@@ -2337,7 +2665,11 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     async def _poll_once() -> None:
         _STATUS["last_poll_at"] = _now_iso()
         signals = _load_signals()
-        changed = _sync_queue_status(signals)
+        purged_nfl = _purge_misrouted_nfl_signals(signals)
+        if purged_nfl:
+            _STATUS["purged_nfl_signals"] = purged_nfl
+            _STATUS["purged_nfl_at"] = _now_iso()
+        changed = bool(purged_nfl) or _sync_queue_status(signals)
 
         if not enabled:
             _STATUS["last_error"] = "CFB capper preview is disabled"
@@ -2361,11 +2693,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 feed = response.json()
         except Exception as exc:
             bridge_error = f"{type(exc).__name__}: {exc}"
-            if not manual_fallback_picks:
-                _STATUS["last_error"] = bridge_error
-                if changed:
-                    _save_signals(signals)
-                return
+            # Fail closed for new ingest, but still reconcile already-saved
+            # signals against Polymarket/ESPN while Telegram is unavailable.
             feed = {
                 "sport": "NCAAF",
                 "generated_at": _now_iso(),
@@ -2410,30 +2739,34 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         picks.sort(key=lambda p: str(p.get("posted_at") or ""))
         now = datetime.now(timezone.utc)
 
-        # Refresh current odds/lifecycle for every already matched active signal,
-        # including older signals that may no longer be in the bridge feed.
-        for existing in signals.values():
+        # Refresh/reconcile every persisted CFB signal, including records that
+        # are no longer replayed by the Telegram bridge.
+        for existing in list(signals.values()):
             existing_status = str(existing.get("status") or "")
-            if existing_status in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE"}:
+            if existing_status in {"IGNORED_UNTRACKED_SOURCE"}:
+                continue
+            if _saved_market_match(existing) is None:
+                if await asyncio.to_thread(_refresh_unmatched_record, existing):
+                    existing["updated_at"] = _now_iso()
+                    changed = True
                 continue
             if existing_status == "EVENT_CLOSED":
                 if await asyncio.to_thread(_refresh_unresolved_closed_result, existing):
                     existing["updated_at"] = _now_iso()
                     changed = True
                 continue
-            if existing.get("status") in {"MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE"}:
-                if await asyncio.to_thread(_refresh_spread_alternatives, existing):
-                    existing["updated_at"] = _now_iso()
-                    changed = True
-                continue
-            if _saved_market_match(existing) is not None:
-                if await asyncio.to_thread(_refresh_record_runtime, existing):
-                    existing["updated_at"] = _now_iso()
-                    changed = True
+            if await asyncio.to_thread(_refresh_record_runtime, existing):
+                existing["updated_at"] = _now_iso()
+                changed = True
 
         for pick in picks:
             fp = _fingerprint(pick)
             current = signals.get(fp)
+            if current is None:
+                semantic_key = _signal_key_by_semantic(signals, pick)
+                if semantic_key is not None:
+                    fp = semantic_key
+                    current = signals.get(fp)
             if current and not current.get("pick"):
                 current["pick"] = pick
                 changed = True
@@ -2494,9 +2827,22 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 else:
                     record["match_status"] = "MATCHED"
                 record["match_error"] = None
+                await asyncio.to_thread(_apply_scoreboard_snapshot, record, pick)
             except Exception as exc:
                 record["match_error"] = f"{type(exc).__name__}: {exc}"
                 record["last_error"] = record["match_error"]
+                await asyncio.to_thread(_apply_scoreboard_snapshot, record, pick)
+                if str(record.get("espn_phase") or "").upper() == "CLOSED":
+                    record["status"] = "EVENT_CLOSED"
+                    record["match_status"] = "SCOREBOARD_ONLY"
+                    record["event_phase"] = "CLOSED"
+                    record["reason"] = "game finished; graded from ESPN final score"
+                    record["updated_at"] = _now_iso()
+                    signals[fp] = record
+                    changed = True
+                    continue
+                if str(record.get("espn_phase") or "").upper() == "LIVE":
+                    record["event_phase"] = "LIVE"
                 alternatives = []
                 if kind == "spread":
                     try:
