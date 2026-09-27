@@ -1931,7 +1931,7 @@ def _inject_dashboard_panel(html: str) -> str:
 """
     html = html.replace('  <div class="tabs">', panel + '  <div class="tabs">', 1)
     css = r"""
-.cfb-capper-performance{font-size:15px;line-height:1.75;margin:3px 0 9px;color:var(--muted)}.cfb-capper-performance .capper-pnl{font-size:18px;font-weight:900}.cfb-capper-performance .capper-pnl.positive,.cfb-result-line.positive{color:#86efac}.cfb-capper-performance .capper-pnl.negative,.cfb-result-line.negative{color:#fca5a5}.cfb-capper-performance .capper-pnl.flat,.cfb-result-line.flat{color:var(--muted)}.cfb-result-line{font-size:16px;font-weight:900;margin-top:6px;line-height:1.35}@media(max-width:650px){.cfb-capper-performance{font-size:16px}.cfb-capper-performance .capper-pnl{font-size:19px}.cfb-result-line{font-size:17px}}
+.cfb-capper-performance{font-size:15px;line-height:1.75;margin:3px 0 9px;color:var(--muted)}.cfb-capper-performance .capper-pnl{font-size:18px;font-weight:900}.cfb-capper-performance .capper-pnl.positive,.cfb-result-line.positive{color:#86efac}.cfb-capper-performance .capper-pnl.negative,.cfb-result-line.negative{color:#fca5a5}.cfb-capper-performance .capper-pnl.flat,.cfb-result-line.flat{color:var(--muted)}.cfb-result-line{font-size:16px;font-weight:900;margin-top:6px;line-height:1.35}.cfb-open-position{margin-top:7px;padding:9px 10px;border-radius:8px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.46);border-left:4px solid #f59e0b}.cfb-open-position .live-pnl{font-size:16px;font-weight:900}@media(max-width:650px){.cfb-capper-performance{font-size:16px}.cfb-capper-performance .capper-pnl{font-size:19px}.cfb-result-line{font-size:17px}}
 """
     html = html.replace("</style>", css + "</style>", 1)
 
@@ -2155,6 +2155,22 @@ function cfbSetTab(sourceKey,tab){
  const el=document.getElementById(sourceKey==='slam'?'cfbCapperSlam':'cfbCapperSyndicate');
  if(el&&x)el.innerHTML=cfbCapperLine(x,sourceKey);
 }
+function cfbOpenPositionList(x){
+ const items=(Array.isArray(x.positions)?x.positions:[]).filter(item=>item.sell_available);
+ if(!items.length)return '<div style="margin-top:9px"><b>Open positions</b><div style="margin-top:7px;opacity:.7">No open positions.</div></div>';
+ return '<div style="margin-top:9px"><b>Open positions</b>'+items.map(item=>{
+  const raw=item.live_pnl_usdc===null||item.live_pnl_usdc===undefined?null:Number(item.live_pnl_usdc);
+  const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
+  const pnl=raw===null?'—':(raw>0?'+':'')+'$'+raw.toFixed(2)+(item.live_pnl_pct===null||item.live_pnl_pct===undefined?'':' ('+Number(item.live_pnl_pct).toFixed(1)+'%)');
+  const entry=item.entry_price===null||item.entry_price===undefined?'—':(Number(item.entry_price)*100).toFixed(1)+'¢';
+  const live=item.current_price===null||item.current_price===undefined?'—':(Number(item.current_price)*100).toFixed(1)+'¢';
+  const shares=item.shares===null||item.shares===undefined?'—':Number(item.shares).toFixed(2);
+  const cost=item.open_cost_basis_usdc||item.stake_usdc;
+  const value=item.current_value_usdc===null||item.current_value_usdc===undefined?'—':'$'+Number(item.current_value_usdc).toFixed(2);
+  const sell=item.trade_id?'<button type="button" style="margin-top:6px" data-trade-id="'+cfbEsc(item.trade_id)+'" onclick="cfbSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  return '<div class="cfb-open-position"><b style="font-size:15px">'+cfbEsc(item.selection||item.market||'CFB position')+' · OPEN</b><br><span>'+cfbEsc(item.outcome||'')+' · Entry '+entry+' · Live '+live+'</span><br><span>Shares '+shares+' · Cost $'+Number(cost||0).toFixed(2)+' · Value '+value+'</span><div class="live-pnl '+cls+'">Live P/L '+pnl+'</div>'+sell+'</div>';
+ }).join('')+'</div>';
+}
 function cfbCapperLine(x,sourceKey){
  if(!x)return 'No tracked signals yet';
  const p=x.performance||{};
@@ -2166,7 +2182,830 @@ function cfbCapperLine(x,sourceKey){
  const missedRaw=Number(p.missed_pnl_usdc||0);
  const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
  const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
- const performance='<div class="cfb-capper-performance"><div>Bets '+(p.bets||0)+' · Open '+(p.open||0)+' · W-L-P '+(p.wins||0)+'-'+(p.losses||0)+'-'+(p.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(p.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">P/L '+pnl+'</span> · ROI '+roi+'</div><div>Missed '+Number(p.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div></div>';
+ const liveRaw=p.live_pnl_usdc===null||p.live_pnl_usdc===undefined?null:Number(p.live_pnl_usdc);
+ const livePnl=liveRaw===null?'—':(liveRaw>0?'+':'')+'
+ const active=cfbActiveTabs[sourceKey]||'signals';
+ const specs=cfbTabSpec(x);
+ const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>{
+  const selected=s[0]===active;
+  return '<button type="button" style="padding:5px 8px;min-height:34px;'+(selected?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="cfbSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+cfbEsc(s[1])+' '+s[2]+'</button>';
+ }).join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const items=spec[3]||[];
+ const body=items.length?cfbPickList(spec[1]+' signals',items,spec[4]):'<div style="margin-top:8px;opacity:.7">No '+cfbEsc(spec[1].toLowerCase())+' signals.</div>';
+ return performance+cfbOpenPositionList(x)+tabs+body;
+}
+async function loadCfbCapperStats(){
+ try{
+  const r=await fetch('/api/cfb-cappers/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'CFB capper status failed');
+  const state=document.getElementById('cfbCapperState'),meta=document.getElementById('cfbCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
+  if(meta)meta.textContent='1u = \u0024'+Number(d.unit_usdc||10).toFixed(2)+' · auto fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · manual pregame/live while market open · odds refresh '+(d.poll_seconds||0)+'s';
+  cfbLastSources=d.sources||{};
+  const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
+  if(s)s.innerHTML=cfbCapperLine(cfbLastSources['Slam - CFB'],'slam');
+  if(y)y.innerHTML=cfbCapperLine(cfbLastSources['Syndicate - CFB'],'syndicate');
+  cfbUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('cfbCapperState');if(state)state.textContent='Status unavailable: '+String(e);
+ }
+}
+loadCfbCapperStats();setInterval(loadCfbCapperStats,10000);
+"""
+    return html.replace("</script>", js + "\n</script>", 1)
+
+
+def install(*, app: Any, dashboard: Any, core: Any) -> None:
+    global _INSTALLED
+    if _INSTALLED:
+        return
+    _INSTALLED = True
+
+    remote = live_control.remote
+    signal_file = core.DATA_DIR / "cfb_capper_preview_signals.json"
+    last_feed_file = core.DATA_DIR / "cfb_capper_last_feed.json"
+    bridge_url = os.getenv(
+        "CFB_CAPPER_BRIDGE_URL",
+        "https://telegram-chatgpt-bridge-production-286a.up.railway.app",
+    ).rstrip("/")
+    enabled = os.getenv("CFB_CAPPER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    poll_seconds = max(5, int(os.getenv("CFB_CAPPER_POLL_SECONDS", "15")))
+    max_age_seconds = max(30, int(os.getenv("CFB_CAPPER_MAX_PICK_AGE_SECONDS", "180")))
+    recovery_max_age_seconds = max(
+        max_age_seconds,
+        int(os.getenv("CFB_CAPPER_RECOVERY_MAX_PICK_AGE_SECONDS", "86400")),
+    )
+    feed_window_minutes = max(
+        180,
+        min(4320, int(os.getenv("CFB_CAPPER_FEED_WINDOW_MINUTES", "1440"))),
+    )
+    unit_usdc = Decimal(os.getenv("CFB_CAPPER_UNIT_USDC", "10"))
+    no_fill_retry_limit = max(0, int(os.getenv("CFB_CAPPER_NO_FILL_RETRIES", "2")))
+    live_enabled = os.getenv("CFB_CAPPER_LIVE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    test_preview_raw = os.getenv("CFB_CAPPER_TEST_PREVIEW_JSON", "").strip()
+    test_preview_marker = core.DATA_DIR / "cfb_capper_test_preview.json"
+    manual_fallback_error: str | None = None
+    try:
+        manual_fallback_picks = _manual_fallback_picks(
+            os.getenv("CFB_CAPPER_MANUAL_PICKS_JSON", "")
+        )
+    except Exception as exc:
+        manual_fallback_picks = []
+        manual_fallback_error = f"{type(exc).__name__}: {exc}"
+
+    def _load_signals() -> dict[str, Any]:
+        data = core._load(signal_file)
+        return data if isinstance(data, dict) else {}
+
+    def _save_signals(data: dict[str, Any]) -> None:
+        if len(data) > 2500:
+            ordered = sorted(
+                data.items(),
+                key=lambda item: str((item[1] or {}).get("first_seen_at") or ""),
+            )
+            data = dict(ordered[-2000:])
+        core._save(signal_file, data)
+
+    def _sync_queue_status(signals: dict[str, Any]) -> bool:
+        changed = False
+        queue = remote._queue_load()
+        for rec in signals.values():
+            manual_request_id = str(rec.get("manual_buy_request_id") or "")
+            if manual_request_id:
+                manual = queue.get(manual_request_id)
+                if manual:
+                    manual_status = str(manual.get("status") or "")
+                    manual_error = manual.get("error")
+                    manual_result = manual.get("result")
+                    if rec.get("manual_buy_status") != manual_status:
+                        rec["manual_buy_status"] = manual_status
+                        changed = True
+                    if rec.get("manual_buy_error") != manual_error:
+                        rec["manual_buy_error"] = manual_error
+                        changed = True
+                    if manual_result is not None and rec.get("manual_buy_result") != manual_result:
+                        rec["manual_buy_result"] = manual_result
+                        changed = True
+            current_status = str(rec.get("status") or "")
+            if current_status not in {"PREVIEW_QUEUED", "QUEUED", "EXECUTOR_DONE"} or not rec.get("request_id"):
+                continue
+            queued = queue.get(str(rec.get("request_id")))
+            if not queued:
+                continue
+            qstatus = str(queued.get("status") or "")
+            is_live = current_status in {"QUEUED", "EXECUTOR_DONE"}
+            no_fill = is_live and nfl._queue_result_is_no_fill(queued)
+            if no_fill and qstatus in {"DONE", "FAILED"}:
+                attempts = int(rec.get("no_fill_retries") or 0)
+                if attempts < no_fill_retry_limit:
+                    rec["status"] = "RETRYING"
+                    rec["no_fill_retries"] = attempts + 1
+                    rec["last_error"] = str(
+                        queued.get("error")
+                        or "BUY_UNFILLED_RETRYABLE: previous limit order filled 0 shares"
+                    )
+                    rec["last_no_fill_at"] = queued.get("updated_at") or _now_iso()
+                    rec.pop("request_id", None)
+                    rec.pop("completed_at", None)
+                else:
+                    rec["status"] = "EXECUTOR_FAILED"
+                    rec["last_error"] = (
+                        str(queued.get("error") or "BUY unfilled")
+                        + f"; no-fill retry limit {no_fill_retry_limit} reached"
+                    )
+                    rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                changed = True
+            elif qstatus == "DONE":
+                target = "EXECUTOR_DONE" if is_live else "PREVIEW_DONE"
+                if current_status != target:
+                    rec["status"] = target
+                    rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                    rec["result"] = queued.get("result")
+                    changed = True
+            elif qstatus == "FAILED":
+                rec["status"] = "EXECUTOR_FAILED" if is_live else "PREVIEW_FAILED"
+                rec["last_error"] = queued.get("error")
+                rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                rec["result"] = queued.get("result")
+                changed = True
+        return changed
+
+    async def _poll_once() -> None:
+        _STATUS["last_poll_at"] = _now_iso()
+        signals = _load_signals()
+        changed = _sync_queue_status(signals)
+
+        if not enabled:
+            _STATUS["last_error"] = "CFB capper preview is disabled"
+            if changed:
+                _save_signals(signals)
+            return
+
+        bridge_error: str | None = None
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.get(
+                    f"{bridge_url}/public/ncaaf",
+                    params={
+                        "minutes": feed_window_minutes,
+                        "limit": 300,
+                        "include_graded": "false",
+                        "require_fresh": "true",
+                    },
+                )
+                response.raise_for_status()
+                feed = response.json()
+        except Exception as exc:
+            bridge_error = f"{type(exc).__name__}: {exc}"
+            if not manual_fallback_picks:
+                _STATUS["last_error"] = bridge_error
+                if changed:
+                    _save_signals(signals)
+                return
+            feed = {
+                "sport": "NCAAF",
+                "generated_at": _now_iso(),
+                "freshness": {"connected": False, "ready": False, "error": bridge_error},
+                "scanned_posts": 0,
+                "detected_posts": 0,
+                "detected_picks": 0,
+                "listener_connected": False,
+                "listener_ready": False,
+                "picks": [],
+            }
+
+        bridge_picks = _normalize_bridge_picks(
+            [p for p in (feed.get("picks") or []) if isinstance(p, dict)]
+        )
+        manual_fallback_picks = [
+            row for row in (_normalize_legacy_bridge_pick(p) for p in manual_fallback_picks)
+            if row is not None
+        ]
+        manual_semantics = {_semantic_fingerprint(p) for p in manual_fallback_picks}
+        bridge_picks = [
+            p for p in bridge_picks
+            if _semantic_fingerprint(p) not in manual_semantics
+        ]
+        picks = [*bridge_picks, *[dict(p) for p in manual_fallback_picks]]
+
+        core._save(last_feed_file, {
+            "saved_at": _now_iso(),
+            "sport": feed.get("sport"),
+            "generated_at": feed.get("generated_at"),
+            "freshness": feed.get("freshness"),
+            "scanned_posts": feed.get("scanned_posts"),
+            "detected_posts": feed.get("detected_posts"),
+            "detected_picks": len(picks),
+            "listener_connected": feed.get("listener_connected"),
+            "listener_ready": feed.get("listener_ready"),
+            "manual_fallback_count": len(manual_fallback_picks),
+            "bridge_error": bridge_error,
+            "picks": picks,
+        })
+
+        picks.sort(key=lambda p: str(p.get("posted_at") or ""))
+        now = datetime.now(timezone.utc)
+
+        # Refresh current odds/lifecycle for every already matched active signal,
+        # including older signals that may no longer be in the bridge feed.
+        for existing in signals.values():
+            existing_status = str(existing.get("status") or "")
+            if existing_status in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE"}:
+                continue
+            if existing_status == "EVENT_CLOSED":
+                if await asyncio.to_thread(_refresh_unresolved_closed_result, existing):
+                    existing["updated_at"] = _now_iso()
+                    changed = True
+                continue
+            if existing.get("status") in {"MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE"}:
+                if await asyncio.to_thread(_refresh_spread_alternatives, existing):
+                    existing["updated_at"] = _now_iso()
+                    changed = True
+                continue
+            if _saved_market_match(existing) is not None:
+                if await asyncio.to_thread(_refresh_record_runtime, existing):
+                    existing["updated_at"] = _now_iso()
+                    changed = True
+
+        for pick in picks:
+            fp = _fingerprint(pick)
+            current = signals.get(fp)
+            if current and not current.get("pick"):
+                current["pick"] = pick
+                changed = True
+            if current and current.get("status") in {
+                "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
+                "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED",
+                "MATCHED_PREGAME", "MATCHED_LIVE",
+                "MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE", "EVENT_CLOSED",
+                "IGNORED_STALE", "IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE",
+            }:
+                terminal = str(current.get("status") or "")
+                if terminal in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE", "EVENT_CLOSED"}:
+                    continue
+                if terminal in {"MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE"}:
+                    continue
+                if (
+                    terminal != "IGNORED_STALE"
+                    and _saved_market_match(current) is not None
+                    and current.get("event_start_checked_at")
+                ):
+                    continue
+
+            source_label = _source_label(pick)
+            record = current or {
+                "id": fp,
+                "first_seen_at": _now_iso(),
+                "source": source_label,
+                "telegram_source": pick.get("source"),
+                "posted_at": pick.get("posted_at"),
+                "selection": pick.get("selection"),
+                "units": str(_units_for_pick(pick)),
+                "stake_usdc": str(_stake_for_pick(pick, unit_usdc)),
+                "pick": pick,
+            }
+
+            if source_label is None:
+                record["status"] = "IGNORED_UNTRACKED_SOURCE"
+                record["reason"] = "CFB feed source is not Slam or Syndicate"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            kind, reason = _classify_pick(pick)
+            if kind is None:
+                record["status"] = "IGNORED_UNSUPPORTED"
+                record["reason"] = reason
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            try:
+                saved_match = _saved_market_match(record, kind)
+                if saved_match is None or not record.get("event_start_checked_at"):
+                    saved_match = await asyncio.to_thread(_resolve_market_match, pick, kind)
+                    record.update(saved_match)
+                else:
+                    record["match_status"] = "MATCHED"
+                record["match_error"] = None
+            except Exception as exc:
+                record["match_error"] = f"{type(exc).__name__}: {exc}"
+                record["last_error"] = record["match_error"]
+                alternatives = []
+                if kind == "spread":
+                    try:
+                        alternatives = await asyncio.to_thread(_find_spread_alternatives, pick)
+                    except Exception as alt_exc:
+                        record["alternate_error"] = f"{type(alt_exc).__name__}: {alt_exc}"
+                if alternatives:
+                    record["live_alternatives"] = alternatives
+                    record["alternate_error"] = None
+                    record["match_status"] = "ALTERNATE_AVAILABLE"
+                    record["event_title"] = alternatives[0].get("event_title")
+                    record["event_start_at"] = alternatives[0].get("event_start_at")
+                    record["event_phase"] = alternatives[0].get("event_phase")
+                    record["market_url"] = alternatives[0].get("market_url")
+                    record["status"] = (
+                        "MATCHED_LIVE_ALTERNATE"
+                        if alternatives[0].get("event_phase") == "LIVE"
+                        else "MATCHED_PREGAME_ALTERNATE"
+                    )
+                    record["reason"] = (
+                        "exact original spread is unavailable; explicit current Polymarket alternatives are shown"
+                    )
+                    print(
+                        "CFB_CAPPER_ALTERNATES "
+                        + json.dumps(
+                            {
+                                "selection": record.get("selection"),
+                                "source": record.get("source"),
+                                "status": record.get("status"),
+                                "event_title": record.get("event_title"),
+                                "event_phase": record.get("event_phase"),
+                                "alternatives": [
+                                    {
+                                        "line": alt.get("spread_line"),
+                                        "best_ask": alt.get("best_ask"),
+                                        "odds": alt.get("live_odds_american"),
+                                        "relative": alt.get("relative_to_original"),
+                                    }
+                                    for alt in alternatives
+                                ],
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            default=str,
+                        ),
+                        flush=True,
+                    )
+                else:
+                    record["status"] = "RETRYING"
+                    record["match_status"] = "UNRESOLVED"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            posted = _parse_iso(pick.get("posted_at"))
+            age = (now - posted).total_seconds() if posted else float("inf")
+            if age > max_age_seconds:
+                record["event_phase"] = _event_phase(record, now)
+                if _recovery_pregame_allowed(
+                    age,
+                    max_age_seconds,
+                    recovery_max_age_seconds,
+                    record["event_phase"],
+                    live_enabled,
+                ):
+                    try:
+                        prepared = await asyncio.to_thread(
+                            _prepare_pick,
+                            pick,
+                            core=core,
+                            remote=remote,
+                            unit_usdc=unit_usdc,
+                            matched=record,
+                        )
+                        record.update(prepared)
+                        record["recovered_after_bridge_outage"] = True
+                        record["recovery_checked_at"] = _now_iso()
+                        record["updated_at"] = _now_iso()
+                        signals[fp] = record
+                        changed = True
+                        print(
+                            "CFB_CAPPER_RECOVERY "
+                            + json.dumps(record, sort_keys=True, separators=(",", ":"), default=str),
+                            flush=True,
+                        )
+                    except Exception as exc:
+                        record["status"] = "RETRYING"
+                        record["last_error"] = f"{type(exc).__name__}: {exc}"
+                        record["recovery_checked_at"] = _now_iso()
+                        record["updated_at"] = _now_iso()
+                        signals[fp] = record
+                        changed = True
+                    continue
+
+                if record["event_phase"] == "LIVE":
+                    record["status"] = "MATCHED_LIVE"
+                    record["reason"] = "game is live; matched Polymarket market remains open"
+                    try:
+                        record.update(await asyncio.to_thread(
+                            _read_live_buy_quote,
+                            str(record["asset_id"]),
+                        ))
+                        record["live_quote_error"] = None
+                    except Exception as exc:
+                        record["live_quote_error"] = f"{type(exc).__name__}: {exc}"
+                elif record["event_phase"] == "CLOSED":
+                    record["status"] = "EVENT_CLOSED"
+                    record["reason"] = "matched Polymarket event/market is closed"
+                else:
+                    record["status"] = "MATCHED_PREGAME"
+                    record["reason"] = (
+                        f"outside {max_age_seconds}s auto-trade freshness window; "
+                        "manual BUY remains available while market is open"
+                    )
+                    try:
+                        record.update(await asyncio.to_thread(
+                            _read_live_buy_quote,
+                            str(record["asset_id"]),
+                        ))
+                        record["live_quote_error"] = None
+                    except Exception as exc:
+                        record["live_quote_error"] = f"{type(exc).__name__}: {exc}"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            try:
+                prepare_fn = _prepare_pick if live_enabled else _prepare_preview
+                prepared = await asyncio.to_thread(
+                    prepare_fn,
+                    pick,
+                    core=core,
+                    remote=remote,
+                    unit_usdc=unit_usdc,
+                    matched=record,
+                )
+                record.update(prepared)
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                log_label = "CFB_CAPPER_LIVE" if live_enabled else "CFB_CAPPER_PREVIEW"
+                print(
+                    f"{log_label} "
+                    + json.dumps(record, sort_keys=True, separators=(",", ":"), default=str),
+                    flush=True,
+                )
+            except Exception as exc:
+                record["status"] = "RETRYING"
+                record["last_error"] = f"{type(exc).__name__}: {exc}"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+
+        if changed:
+            _save_signals(signals)
+
+        _STATUS["last_success_at"] = _now_iso()
+        _STATUS["last_error"] = bridge_error or manual_fallback_error
+        _STATUS["cycles"] = int(_STATUS.get("cycles") or 0) + 1
+
+    async def _run_test_preview_once() -> None:
+        if not test_preview_raw:
+            return
+
+        trigger_hash = hashlib.sha256(test_preview_raw.encode("utf-8")).hexdigest()
+        existing = core._load(test_preview_marker) if test_preview_marker.exists() else {}
+        if (
+            isinstance(existing, dict)
+            and existing.get("trigger_hash") == trigger_hash
+            and existing.get("status") in {"QUEUED", "DONE"}
+        ):
+            return
+
+        try:
+            pick = json.loads(test_preview_raw)
+            if not isinstance(pick, dict):
+                raise RuntimeError("CFB_CAPPER_TEST_PREVIEW_JSON must decode to an object")
+            pick["posted_at"] = _now_iso()
+
+            while True:
+                ready, state = live_control._executor_ready()
+                if ready:
+                    break
+                if state.get("geo_blocked"):
+                    raise RuntimeError("Termux executor is geoblocked")
+                await asyncio.sleep(2)
+
+            test_prepare_fn = _prepare_pick if live_enabled else _prepare_preview
+            result = await asyncio.to_thread(
+                test_prepare_fn,
+                pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+            )
+            marker = {
+                "trigger_hash": trigger_hash,
+                "created_at": _now_iso(),
+                "pick": pick,
+                "preview": result,
+                "status": "QUEUED",
+            }
+            core._save(test_preview_marker, marker)
+            print(
+                "CFB_CAPPER_TEST_PREVIEW "
+                + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                flush=True,
+            )
+
+            request_id = str(result.get("request_id") or "")
+            for _ in range(90):
+                await asyncio.sleep(1)
+                queued = remote._queue_load().get(request_id) if request_id else None
+                if not queued:
+                    continue
+                status = str(queued.get("status") or "")
+                if status not in {"DONE", "FAILED"}:
+                    continue
+                marker["status"] = status
+                marker["completed_at"] = queued.get("updated_at") or _now_iso()
+                marker["result"] = queued.get("result")
+                marker["error"] = queued.get("error")
+                core._save(test_preview_marker, marker)
+                print(
+                    "CFB_CAPPER_TEST_PREVIEW_RESULT "
+                    + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                    flush=True,
+                )
+                return
+        except Exception as exc:
+            marker = {
+                "trigger_hash": trigger_hash,
+                "created_at": _now_iso(),
+                "status": "FAILED",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            core._save(test_preview_marker, marker)
+            print(
+                "CFB_CAPPER_TEST_PREVIEW_RESULT "
+                + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                flush=True,
+            )
+
+    async def _loop() -> None:
+        await asyncio.sleep(4)
+        while True:
+            try:
+                await _poll_once()
+            except Exception as exc:
+                _STATUS["last_error"] = f"{type(exc).__name__}: {exc}"
+            await asyncio.sleep(poll_seconds)
+
+    original_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def _lifespan(application: Any):
+        async with original_lifespan(application):
+            task = asyncio.create_task(_loop(), name="cfb-capper-preview-poller")
+            preview_task = asyncio.create_task(
+                _run_test_preview_once(),
+                name="cfb-capper-test-preview",
+            )
+            try:
+                yield
+            finally:
+                for pending in (task, preview_task):
+                    pending.cancel()
+                for pending in (task, preview_task):
+                    try:
+                        await pending
+                    except asyncio.CancelledError:
+                        pass
+
+    app.router.lifespan_context = _lifespan
+
+    @app.get("/api/cfb-cappers/status", dependencies=[Depends(dashboard._auth)])
+    def cfb_capper_status() -> dict[str, Any]:
+        signals = _load_signals()
+        executions = core._load(core.EXECUTIONS_FILE)
+        if not isinstance(executions, dict):
+            executions = {}
+        live_marks = nfl._live_mark_map(dashboard, executions)
+        performance = nfl._stats_from_executions(
+            executions,
+            labels=SOURCE_LABELS,
+            sport="CFB",
+            live_marks=live_marks,
+        )
+        missed = nfl._missed_signal_stats(
+            signals,
+            executions,
+            labels=SOURCE_LABELS,
+            sport="CFB",
+            unit_usdc=unit_usdc,
+        )
+        for label in SOURCE_LABELS:
+            performance.setdefault(label, {}).update(missed.get(label, {}))
+        counts: dict[str, dict[str, Any]] = {}
+        for label in SOURCE_LABELS:
+            rows = [r for r in signals.values() if r.get("source") == label]
+            counts[label] = {
+                "signals": len(rows),
+                "performance": performance.get(label, {}),
+                "positions": nfl._position_items(
+                    executions,
+                    label,
+                    sport="CFB",
+                    live_marks=live_marks,
+                ),
+                "preview_done": sum(1 for r in rows if r.get("status") in {"PREVIEW_DONE", "EXECUTOR_DONE"}),
+                "preview_failed": sum(1 for r in rows if r.get("status") in {"PREVIEW_FAILED", "EXECUTOR_FAILED"}),
+                "preview_queued": sum(1 for r in rows if r.get("status") in {"PREVIEW_QUEUED", "QUEUED"}),
+                "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
+                "pregame": sum(
+                    1 for r in rows
+                    if r.get("status") in {"MATCHED_PREGAME", "MATCHED_PREGAME_ALTERNATE"}
+                ),
+                "live": sum(
+                    1 for r in rows
+                    if r.get("status") in {"MATCHED_LIVE", "MATCHED_LIVE_ALTERNATE"}
+                ),
+                "closed": sum(1 for r in rows if r.get("status") == "EVENT_CLOSED"),
+                "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
+                "all_items": _recent_all_items(rows, executions=executions),
+                "queued_items": _recent_status_items(rows, {"PREVIEW_QUEUED", "QUEUED"}, executions=executions),
+                "done_items": _recent_status_items(rows, {"PREVIEW_DONE", "EXECUTOR_DONE"}, executions=executions),
+                "previewed_items": _recent_status_items(rows, {"PREVIEW_DONE", "EXECUTOR_DONE"}, executions=executions),
+                "retrying_items": _recent_status_items(rows, "RETRYING", executions=executions),
+                "failed_items": _recent_status_items(rows, {"PREVIEW_FAILED", "EXECUTOR_FAILED"}, executions=executions),
+                "pregame_items": _recent_all_items([
+                    r for r in rows
+                    if r.get("status") in {"MATCHED_PREGAME", "MATCHED_PREGAME_ALTERNATE"}
+                ], limit=30, executions=executions),
+                "live_items": _recent_all_items([
+                    r for r in rows
+                    if r.get("status") in {"MATCHED_LIVE", "MATCHED_LIVE_ALTERNATE"}
+                ], limit=30, executions=executions),
+                "closed_items": _recent_status_items(rows, "EVENT_CLOSED", executions=executions),
+                "unsupported_items": _recent_status_items(rows, "IGNORED_UNSUPPORTED", executions=executions),
+            }
+        auto_trading = bool(core.auto_trading_enabled())
+        live_trading = bool(core.live_trading_enabled())
+        return {
+            "enabled": enabled,
+            "mode": "LIVE" if live_enabled else "PREVIEW_ONLY",
+            "poll_seconds": poll_seconds,
+            "max_pick_age_seconds": max_age_seconds,
+            "feed_window_minutes": feed_window_minutes,
+            "unit_usdc": str(unit_usdc),
+            "auto_trading": auto_trading,
+            "live_trading": live_trading,
+            "sport_live_enabled": live_enabled,
+            "auto_live": bool(enabled and live_enabled and auto_trading and live_trading),
+            "sources": counts,
+            "status": dict(_STATUS),
+        }
+
+
+    @app.post(
+        "/api/cfb-cappers/manual-buy-alternate/{signal_id}/{alternative_id}",
+        dependencies=[Depends(dashboard._auth)],
+    )
+    def cfb_capper_manual_buy_alternate(signal_id: str, alternative_id: str) -> dict[str, Any]:
+        signals = _load_signals()
+        record = signals.get(signal_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Unknown CFB signal")
+        if record.get("source") not in SOURCE_LABELS:
+            raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
+
+        pick = record.get("pick") if isinstance(record.get("pick"), dict) else None
+        if pick is None:
+            raise HTTPException(status_code=409, detail="Original CFB pick details are unavailable")
+        kind, _ = _classify_pick(pick)
+        if kind != "spread":
+            raise HTTPException(status_code=409, detail="Alternate live-line BUY is only for spread signals")
+
+        try:
+            alternatives = _find_spread_alternatives(pick, limit=8)
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=f"Could not refresh live spread alternatives: {exc}") from exc
+        selected = next(
+            (alt for alt in alternatives if str(alt.get("alternative_id") or "") == alternative_id),
+            None,
+        )
+        if selected is None:
+            raise HTTPException(
+                status_code=409,
+                detail="That live spread is no longer available; refresh the dashboard and choose a current line",
+            )
+        if _event_phase(selected) == "CLOSED":
+            raise HTTPException(status_code=409, detail="Selected Polymarket spread market is closed")
+
+        execution_pick = dict(pick)
+        execution_pick["spread_lines"] = [selected["spread_line"]]
+        execution_pick["selection"] = (
+            f"{pick.get('team_hint') or pick.get('selection')} {selected['spread_line']}"
+        )
+        try:
+            result = _prepare_manual_buy(
+                execution_pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+                matched=selected,
+                strategy_pick_id=signal_id,
+                strategy_selection=str(record.get("selection") or pick.get("selection") or ""),
+                strategy_alternate_line=str(selected["spread_line"]),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        record["manual_buy_request_id"] = result["request_id"]
+        record["manual_buy_trade_id"] = result["trade_id"]
+        record["manual_buy_status"] = "PENDING"
+        record["manual_buy_error"] = None
+        record["manual_buy_at"] = _now_iso()
+        record["manual_buy_alternate_line"] = selected["spread_line"]
+        record["manual_buy_alternative_id"] = alternative_id
+        record["live_alternatives"] = alternatives
+        record["updated_at"] = _now_iso()
+        signals[signal_id] = record
+        _save_signals(signals)
+        return {
+            "ok": True,
+            "signal_id": signal_id,
+            "original_selection": record.get("selection"),
+            "selected_live_line": selected["spread_line"],
+            "request_id": result["request_id"],
+            "trade_id": result["trade_id"],
+            "best_ask": result.get("best_ask"),
+            "live_odds_american": result.get("live_odds_american"),
+        }
+
+
+    @app.post("/api/cfb-cappers/manual-buy/{signal_id}", dependencies=[Depends(dashboard._auth)])
+    def cfb_capper_manual_buy(signal_id: str) -> dict[str, Any]:
+        signals = _load_signals()
+        record = signals.get(signal_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Unknown CFB signal")
+        if record.get("source") not in SOURCE_LABELS:
+            raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
+        if record.get("status") not in {
+            "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
+            "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED",
+            "MATCHED_PREGAME", "MATCHED_LIVE", "RETRYING"
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail=f"CFB signal is {record.get('status')}; BUY LIVE requires a matched actionable signal",
+            )
+        saved_match = _saved_market_match(record)
+        if saved_match is None:
+            raise HTTPException(
+                status_code=409,
+                detail="CFB signal has not been safely matched to a Polymarket event yet",
+            )
+        phase = _event_phase(record)
+        if phase == "CLOSED":
+            raise HTTPException(
+                status_code=409,
+                detail="CFB market is closed; BUY LIVE is no longer available",
+            )
+
+        pick = record.get("pick") if isinstance(record.get("pick"), dict) else None
+        if pick is None:
+            feed = core._load(last_feed_file)
+            for candidate in (feed.get("picks") or []) if isinstance(feed, dict) else []:
+                if isinstance(candidate, dict) and _fingerprint(candidate) == signal_id:
+                    pick = candidate
+                    break
+        if pick is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Original CFB pick details are no longer available to submit the matched market",
+            )
+
+        try:
+            result = _prepare_manual_buy(
+                pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+                matched=saved_match,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        record["manual_buy_request_id"] = result["request_id"]
+        record["manual_buy_trade_id"] = result["trade_id"]
+        record["manual_buy_status"] = "PENDING"
+        record["manual_buy_error"] = None
+        record["manual_buy_at"] = _now_iso()
+        record["updated_at"] = _now_iso()
+        signals[signal_id] = record
+        _save_signals(signals)
+        return {
+            "ok": True,
+            "manual": True,
+            "auto": False,
+            **result,
+        }
+
+    dashboard.DASHBOARD_HTML = _inject_dashboard_panel(dashboard.DASHBOARD_HTML)
++liveRaw.toFixed(2);
+ const liveClass=liveRaw===null||liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
+ const performance='<div class="cfb-capper-performance"><div>Bets '+(p.bets||0)+' · Open '+(p.open||0)+' · W-L-P '+(p.wins||0)+'-'+(p.losses||0)+'-'+(p.pushes||0)+' · Win '+winPct+'</div><div>Stake 
  const active=cfbActiveTabs[sourceKey]||'signals';
  const specs=cfbTabSpec(x);
  const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>{
@@ -2760,10 +3599,12 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         executions = core._load(core.EXECUTIONS_FILE)
         if not isinstance(executions, dict):
             executions = {}
+        live_marks = nfl._live_mark_map(dashboard, executions)
         performance = nfl._stats_from_executions(
             executions,
             labels=SOURCE_LABELS,
             sport="CFB",
+            live_marks=live_marks,
         )
         missed = nfl._missed_signal_stats(
             signals,
@@ -2780,6 +3621,1652 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             counts[label] = {
                 "signals": len(rows),
                 "performance": performance.get(label, {}),
+                "positions": nfl._position_items(
+                    executions,
+                    label,
+                    sport="CFB",
+                    live_marks=live_marks,
+                ),
+                "preview_done": sum(1 for r in rows if r.get("status") in {"PREVIEW_DONE", "EXECUTOR_DONE"}),
+                "preview_failed": sum(1 for r in rows if r.get("status") in {"PREVIEW_FAILED", "EXECUTOR_FAILED"}),
+                "preview_queued": sum(1 for r in rows if r.get("status") in {"PREVIEW_QUEUED", "QUEUED"}),
+                "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
+                "pregame": sum(
+                    1 for r in rows
+                    if r.get("status") in {"MATCHED_PREGAME", "MATCHED_PREGAME_ALTERNATE"}
+                ),
+                "live": sum(
+                    1 for r in rows
+                    if r.get("status") in {"MATCHED_LIVE", "MATCHED_LIVE_ALTERNATE"}
+                ),
+                "closed": sum(1 for r in rows if r.get("status") == "EVENT_CLOSED"),
+                "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
+                "all_items": _recent_all_items(rows, executions=executions),
+                "queued_items": _recent_status_items(rows, {"PREVIEW_QUEUED", "QUEUED"}, executions=executions),
+                "done_items": _recent_status_items(rows, {"PREVIEW_DONE", "EXECUTOR_DONE"}, executions=executions),
+                "previewed_items": _recent_status_items(rows, {"PREVIEW_DONE", "EXECUTOR_DONE"}, executions=executions),
+                "retrying_items": _recent_status_items(rows, "RETRYING", executions=executions),
+                "failed_items": _recent_status_items(rows, {"PREVIEW_FAILED", "EXECUTOR_FAILED"}, executions=executions),
+                "pregame_items": _recent_all_items([
+                    r for r in rows
+                    if r.get("status") in {"MATCHED_PREGAME", "MATCHED_PREGAME_ALTERNATE"}
+                ], limit=30, executions=executions),
+                "live_items": _recent_all_items([
+                    r for r in rows
+                    if r.get("status") in {"MATCHED_LIVE", "MATCHED_LIVE_ALTERNATE"}
+                ], limit=30, executions=executions),
+                "closed_items": _recent_status_items(rows, "EVENT_CLOSED", executions=executions),
+                "unsupported_items": _recent_status_items(rows, "IGNORED_UNSUPPORTED", executions=executions),
+            }
+        auto_trading = bool(core.auto_trading_enabled())
+        live_trading = bool(core.live_trading_enabled())
+        return {
+            "enabled": enabled,
+            "mode": "LIVE" if live_enabled else "PREVIEW_ONLY",
+            "poll_seconds": poll_seconds,
+            "max_pick_age_seconds": max_age_seconds,
+            "feed_window_minutes": feed_window_minutes,
+            "unit_usdc": str(unit_usdc),
+            "auto_trading": auto_trading,
+            "live_trading": live_trading,
+            "sport_live_enabled": live_enabled,
+            "auto_live": bool(enabled and live_enabled and auto_trading and live_trading),
+            "sources": counts,
+            "status": dict(_STATUS),
+        }
+
+
+    @app.post(
+        "/api/cfb-cappers/manual-buy-alternate/{signal_id}/{alternative_id}",
+        dependencies=[Depends(dashboard._auth)],
+    )
+    def cfb_capper_manual_buy_alternate(signal_id: str, alternative_id: str) -> dict[str, Any]:
+        signals = _load_signals()
+        record = signals.get(signal_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Unknown CFB signal")
+        if record.get("source") not in SOURCE_LABELS:
+            raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
+
+        pick = record.get("pick") if isinstance(record.get("pick"), dict) else None
+        if pick is None:
+            raise HTTPException(status_code=409, detail="Original CFB pick details are unavailable")
+        kind, _ = _classify_pick(pick)
+        if kind != "spread":
+            raise HTTPException(status_code=409, detail="Alternate live-line BUY is only for spread signals")
+
+        try:
+            alternatives = _find_spread_alternatives(pick, limit=8)
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=f"Could not refresh live spread alternatives: {exc}") from exc
+        selected = next(
+            (alt for alt in alternatives if str(alt.get("alternative_id") or "") == alternative_id),
+            None,
+        )
+        if selected is None:
+            raise HTTPException(
+                status_code=409,
+                detail="That live spread is no longer available; refresh the dashboard and choose a current line",
+            )
+        if _event_phase(selected) == "CLOSED":
+            raise HTTPException(status_code=409, detail="Selected Polymarket spread market is closed")
+
+        execution_pick = dict(pick)
+        execution_pick["spread_lines"] = [selected["spread_line"]]
+        execution_pick["selection"] = (
+            f"{pick.get('team_hint') or pick.get('selection')} {selected['spread_line']}"
+        )
+        try:
+            result = _prepare_manual_buy(
+                execution_pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+                matched=selected,
+                strategy_pick_id=signal_id,
+                strategy_selection=str(record.get("selection") or pick.get("selection") or ""),
+                strategy_alternate_line=str(selected["spread_line"]),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        record["manual_buy_request_id"] = result["request_id"]
+        record["manual_buy_trade_id"] = result["trade_id"]
+        record["manual_buy_status"] = "PENDING"
+        record["manual_buy_error"] = None
+        record["manual_buy_at"] = _now_iso()
+        record["manual_buy_alternate_line"] = selected["spread_line"]
+        record["manual_buy_alternative_id"] = alternative_id
+        record["live_alternatives"] = alternatives
+        record["updated_at"] = _now_iso()
+        signals[signal_id] = record
+        _save_signals(signals)
+        return {
+            "ok": True,
+            "signal_id": signal_id,
+            "original_selection": record.get("selection"),
+            "selected_live_line": selected["spread_line"],
+            "request_id": result["request_id"],
+            "trade_id": result["trade_id"],
+            "best_ask": result.get("best_ask"),
+            "live_odds_american": result.get("live_odds_american"),
+        }
+
+
+    @app.post("/api/cfb-cappers/manual-buy/{signal_id}", dependencies=[Depends(dashboard._auth)])
+    def cfb_capper_manual_buy(signal_id: str) -> dict[str, Any]:
+        signals = _load_signals()
+        record = signals.get(signal_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Unknown CFB signal")
+        if record.get("source") not in SOURCE_LABELS:
+            raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
+        if record.get("status") not in {
+            "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
+            "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED",
+            "MATCHED_PREGAME", "MATCHED_LIVE", "RETRYING"
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail=f"CFB signal is {record.get('status')}; BUY LIVE requires a matched actionable signal",
+            )
+        saved_match = _saved_market_match(record)
+        if saved_match is None:
+            raise HTTPException(
+                status_code=409,
+                detail="CFB signal has not been safely matched to a Polymarket event yet",
+            )
+        phase = _event_phase(record)
+        if phase == "CLOSED":
+            raise HTTPException(
+                status_code=409,
+                detail="CFB market is closed; BUY LIVE is no longer available",
+            )
+
+        pick = record.get("pick") if isinstance(record.get("pick"), dict) else None
+        if pick is None:
+            feed = core._load(last_feed_file)
+            for candidate in (feed.get("picks") or []) if isinstance(feed, dict) else []:
+                if isinstance(candidate, dict) and _fingerprint(candidate) == signal_id:
+                    pick = candidate
+                    break
+        if pick is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Original CFB pick details are no longer available to submit the matched market",
+            )
+
+        try:
+            result = _prepare_manual_buy(
+                pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+                matched=saved_match,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        record["manual_buy_request_id"] = result["request_id"]
+        record["manual_buy_trade_id"] = result["trade_id"]
+        record["manual_buy_status"] = "PENDING"
+        record["manual_buy_error"] = None
+        record["manual_buy_at"] = _now_iso()
+        record["updated_at"] = _now_iso()
+        signals[signal_id] = record
+        _save_signals(signals)
+        return {
+            "ok": True,
+            "manual": True,
+            "auto": False,
+            **result,
+        }
+
+    dashboard.DASHBOARD_HTML = _inject_dashboard_panel(dashboard.DASHBOARD_HTML)
++Number(p.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">Realized P/L '+pnl+'</span> · ROI '+roi+'</div><div><span class="capper-pnl '+liveClass+'">Live P/L '+livePnl+'</span> · Open value '+(p.open_value_usdc===null||p.open_value_usdc===undefined?'—':'
+ const active=cfbActiveTabs[sourceKey]||'signals';
+ const specs=cfbTabSpec(x);
+ const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>{
+  const selected=s[0]===active;
+  return '<button type="button" style="padding:5px 8px;min-height:34px;'+(selected?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="cfbSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+cfbEsc(s[1])+' '+s[2]+'</button>';
+ }).join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const items=spec[3]||[];
+ const body=items.length?cfbPickList(spec[1]+' signals',items,spec[4]):'<div style="margin-top:8px;opacity:.7">No '+cfbEsc(spec[1].toLowerCase())+' signals.</div>';
+ return performance+tabs+body;
+}
+async function loadCfbCapperStats(){
+ try{
+  const r=await fetch('/api/cfb-cappers/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'CFB capper status failed');
+  const state=document.getElementById('cfbCapperState'),meta=document.getElementById('cfbCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
+  if(meta)meta.textContent='1u = \u0024'+Number(d.unit_usdc||10).toFixed(2)+' · auto fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · manual pregame/live while market open · odds refresh '+(d.poll_seconds||0)+'s';
+  cfbLastSources=d.sources||{};
+  const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
+  if(s)s.innerHTML=cfbCapperLine(cfbLastSources['Slam - CFB'],'slam');
+  if(y)y.innerHTML=cfbCapperLine(cfbLastSources['Syndicate - CFB'],'syndicate');
+  cfbUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('cfbCapperState');if(state)state.textContent='Status unavailable: '+String(e);
+ }
+}
+loadCfbCapperStats();setInterval(loadCfbCapperStats,10000);
+"""
+    return html.replace("</script>", js + "\n</script>", 1)
+
+
+def install(*, app: Any, dashboard: Any, core: Any) -> None:
+    global _INSTALLED
+    if _INSTALLED:
+        return
+    _INSTALLED = True
+
+    remote = live_control.remote
+    signal_file = core.DATA_DIR / "cfb_capper_preview_signals.json"
+    last_feed_file = core.DATA_DIR / "cfb_capper_last_feed.json"
+    bridge_url = os.getenv(
+        "CFB_CAPPER_BRIDGE_URL",
+        "https://telegram-chatgpt-bridge-production-286a.up.railway.app",
+    ).rstrip("/")
+    enabled = os.getenv("CFB_CAPPER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    poll_seconds = max(5, int(os.getenv("CFB_CAPPER_POLL_SECONDS", "15")))
+    max_age_seconds = max(30, int(os.getenv("CFB_CAPPER_MAX_PICK_AGE_SECONDS", "180")))
+    recovery_max_age_seconds = max(
+        max_age_seconds,
+        int(os.getenv("CFB_CAPPER_RECOVERY_MAX_PICK_AGE_SECONDS", "86400")),
+    )
+    feed_window_minutes = max(
+        180,
+        min(4320, int(os.getenv("CFB_CAPPER_FEED_WINDOW_MINUTES", "1440"))),
+    )
+    unit_usdc = Decimal(os.getenv("CFB_CAPPER_UNIT_USDC", "10"))
+    no_fill_retry_limit = max(0, int(os.getenv("CFB_CAPPER_NO_FILL_RETRIES", "2")))
+    live_enabled = os.getenv("CFB_CAPPER_LIVE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    test_preview_raw = os.getenv("CFB_CAPPER_TEST_PREVIEW_JSON", "").strip()
+    test_preview_marker = core.DATA_DIR / "cfb_capper_test_preview.json"
+    manual_fallback_error: str | None = None
+    try:
+        manual_fallback_picks = _manual_fallback_picks(
+            os.getenv("CFB_CAPPER_MANUAL_PICKS_JSON", "")
+        )
+    except Exception as exc:
+        manual_fallback_picks = []
+        manual_fallback_error = f"{type(exc).__name__}: {exc}"
+
+    def _load_signals() -> dict[str, Any]:
+        data = core._load(signal_file)
+        return data if isinstance(data, dict) else {}
+
+    def _save_signals(data: dict[str, Any]) -> None:
+        if len(data) > 2500:
+            ordered = sorted(
+                data.items(),
+                key=lambda item: str((item[1] or {}).get("first_seen_at") or ""),
+            )
+            data = dict(ordered[-2000:])
+        core._save(signal_file, data)
+
+    def _sync_queue_status(signals: dict[str, Any]) -> bool:
+        changed = False
+        queue = remote._queue_load()
+        for rec in signals.values():
+            manual_request_id = str(rec.get("manual_buy_request_id") or "")
+            if manual_request_id:
+                manual = queue.get(manual_request_id)
+                if manual:
+                    manual_status = str(manual.get("status") or "")
+                    manual_error = manual.get("error")
+                    manual_result = manual.get("result")
+                    if rec.get("manual_buy_status") != manual_status:
+                        rec["manual_buy_status"] = manual_status
+                        changed = True
+                    if rec.get("manual_buy_error") != manual_error:
+                        rec["manual_buy_error"] = manual_error
+                        changed = True
+                    if manual_result is not None and rec.get("manual_buy_result") != manual_result:
+                        rec["manual_buy_result"] = manual_result
+                        changed = True
+            current_status = str(rec.get("status") or "")
+            if current_status not in {"PREVIEW_QUEUED", "QUEUED", "EXECUTOR_DONE"} or not rec.get("request_id"):
+                continue
+            queued = queue.get(str(rec.get("request_id")))
+            if not queued:
+                continue
+            qstatus = str(queued.get("status") or "")
+            is_live = current_status in {"QUEUED", "EXECUTOR_DONE"}
+            no_fill = is_live and nfl._queue_result_is_no_fill(queued)
+            if no_fill and qstatus in {"DONE", "FAILED"}:
+                attempts = int(rec.get("no_fill_retries") or 0)
+                if attempts < no_fill_retry_limit:
+                    rec["status"] = "RETRYING"
+                    rec["no_fill_retries"] = attempts + 1
+                    rec["last_error"] = str(
+                        queued.get("error")
+                        or "BUY_UNFILLED_RETRYABLE: previous limit order filled 0 shares"
+                    )
+                    rec["last_no_fill_at"] = queued.get("updated_at") or _now_iso()
+                    rec.pop("request_id", None)
+                    rec.pop("completed_at", None)
+                else:
+                    rec["status"] = "EXECUTOR_FAILED"
+                    rec["last_error"] = (
+                        str(queued.get("error") or "BUY unfilled")
+                        + f"; no-fill retry limit {no_fill_retry_limit} reached"
+                    )
+                    rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                changed = True
+            elif qstatus == "DONE":
+                target = "EXECUTOR_DONE" if is_live else "PREVIEW_DONE"
+                if current_status != target:
+                    rec["status"] = target
+                    rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                    rec["result"] = queued.get("result")
+                    changed = True
+            elif qstatus == "FAILED":
+                rec["status"] = "EXECUTOR_FAILED" if is_live else "PREVIEW_FAILED"
+                rec["last_error"] = queued.get("error")
+                rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                rec["result"] = queued.get("result")
+                changed = True
+        return changed
+
+    async def _poll_once() -> None:
+        _STATUS["last_poll_at"] = _now_iso()
+        signals = _load_signals()
+        changed = _sync_queue_status(signals)
+
+        if not enabled:
+            _STATUS["last_error"] = "CFB capper preview is disabled"
+            if changed:
+                _save_signals(signals)
+            return
+
+        bridge_error: str | None = None
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.get(
+                    f"{bridge_url}/public/ncaaf",
+                    params={
+                        "minutes": feed_window_minutes,
+                        "limit": 300,
+                        "include_graded": "false",
+                        "require_fresh": "true",
+                    },
+                )
+                response.raise_for_status()
+                feed = response.json()
+        except Exception as exc:
+            bridge_error = f"{type(exc).__name__}: {exc}"
+            if not manual_fallback_picks:
+                _STATUS["last_error"] = bridge_error
+                if changed:
+                    _save_signals(signals)
+                return
+            feed = {
+                "sport": "NCAAF",
+                "generated_at": _now_iso(),
+                "freshness": {"connected": False, "ready": False, "error": bridge_error},
+                "scanned_posts": 0,
+                "detected_posts": 0,
+                "detected_picks": 0,
+                "listener_connected": False,
+                "listener_ready": False,
+                "picks": [],
+            }
+
+        bridge_picks = _normalize_bridge_picks(
+            [p for p in (feed.get("picks") or []) if isinstance(p, dict)]
+        )
+        manual_fallback_picks = [
+            row for row in (_normalize_legacy_bridge_pick(p) for p in manual_fallback_picks)
+            if row is not None
+        ]
+        manual_semantics = {_semantic_fingerprint(p) for p in manual_fallback_picks}
+        bridge_picks = [
+            p for p in bridge_picks
+            if _semantic_fingerprint(p) not in manual_semantics
+        ]
+        picks = [*bridge_picks, *[dict(p) for p in manual_fallback_picks]]
+
+        core._save(last_feed_file, {
+            "saved_at": _now_iso(),
+            "sport": feed.get("sport"),
+            "generated_at": feed.get("generated_at"),
+            "freshness": feed.get("freshness"),
+            "scanned_posts": feed.get("scanned_posts"),
+            "detected_posts": feed.get("detected_posts"),
+            "detected_picks": len(picks),
+            "listener_connected": feed.get("listener_connected"),
+            "listener_ready": feed.get("listener_ready"),
+            "manual_fallback_count": len(manual_fallback_picks),
+            "bridge_error": bridge_error,
+            "picks": picks,
+        })
+
+        picks.sort(key=lambda p: str(p.get("posted_at") or ""))
+        now = datetime.now(timezone.utc)
+
+        # Refresh current odds/lifecycle for every already matched active signal,
+        # including older signals that may no longer be in the bridge feed.
+        for existing in signals.values():
+            existing_status = str(existing.get("status") or "")
+            if existing_status in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE"}:
+                continue
+            if existing_status == "EVENT_CLOSED":
+                if await asyncio.to_thread(_refresh_unresolved_closed_result, existing):
+                    existing["updated_at"] = _now_iso()
+                    changed = True
+                continue
+            if existing.get("status") in {"MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE"}:
+                if await asyncio.to_thread(_refresh_spread_alternatives, existing):
+                    existing["updated_at"] = _now_iso()
+                    changed = True
+                continue
+            if _saved_market_match(existing) is not None:
+                if await asyncio.to_thread(_refresh_record_runtime, existing):
+                    existing["updated_at"] = _now_iso()
+                    changed = True
+
+        for pick in picks:
+            fp = _fingerprint(pick)
+            current = signals.get(fp)
+            if current and not current.get("pick"):
+                current["pick"] = pick
+                changed = True
+            if current and current.get("status") in {
+                "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
+                "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED",
+                "MATCHED_PREGAME", "MATCHED_LIVE",
+                "MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE", "EVENT_CLOSED",
+                "IGNORED_STALE", "IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE",
+            }:
+                terminal = str(current.get("status") or "")
+                if terminal in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE", "EVENT_CLOSED"}:
+                    continue
+                if terminal in {"MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE"}:
+                    continue
+                if (
+                    terminal != "IGNORED_STALE"
+                    and _saved_market_match(current) is not None
+                    and current.get("event_start_checked_at")
+                ):
+                    continue
+
+            source_label = _source_label(pick)
+            record = current or {
+                "id": fp,
+                "first_seen_at": _now_iso(),
+                "source": source_label,
+                "telegram_source": pick.get("source"),
+                "posted_at": pick.get("posted_at"),
+                "selection": pick.get("selection"),
+                "units": str(_units_for_pick(pick)),
+                "stake_usdc": str(_stake_for_pick(pick, unit_usdc)),
+                "pick": pick,
+            }
+
+            if source_label is None:
+                record["status"] = "IGNORED_UNTRACKED_SOURCE"
+                record["reason"] = "CFB feed source is not Slam or Syndicate"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            kind, reason = _classify_pick(pick)
+            if kind is None:
+                record["status"] = "IGNORED_UNSUPPORTED"
+                record["reason"] = reason
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            try:
+                saved_match = _saved_market_match(record, kind)
+                if saved_match is None or not record.get("event_start_checked_at"):
+                    saved_match = await asyncio.to_thread(_resolve_market_match, pick, kind)
+                    record.update(saved_match)
+                else:
+                    record["match_status"] = "MATCHED"
+                record["match_error"] = None
+            except Exception as exc:
+                record["match_error"] = f"{type(exc).__name__}: {exc}"
+                record["last_error"] = record["match_error"]
+                alternatives = []
+                if kind == "spread":
+                    try:
+                        alternatives = await asyncio.to_thread(_find_spread_alternatives, pick)
+                    except Exception as alt_exc:
+                        record["alternate_error"] = f"{type(alt_exc).__name__}: {alt_exc}"
+                if alternatives:
+                    record["live_alternatives"] = alternatives
+                    record["alternate_error"] = None
+                    record["match_status"] = "ALTERNATE_AVAILABLE"
+                    record["event_title"] = alternatives[0].get("event_title")
+                    record["event_start_at"] = alternatives[0].get("event_start_at")
+                    record["event_phase"] = alternatives[0].get("event_phase")
+                    record["market_url"] = alternatives[0].get("market_url")
+                    record["status"] = (
+                        "MATCHED_LIVE_ALTERNATE"
+                        if alternatives[0].get("event_phase") == "LIVE"
+                        else "MATCHED_PREGAME_ALTERNATE"
+                    )
+                    record["reason"] = (
+                        "exact original spread is unavailable; explicit current Polymarket alternatives are shown"
+                    )
+                    print(
+                        "CFB_CAPPER_ALTERNATES "
+                        + json.dumps(
+                            {
+                                "selection": record.get("selection"),
+                                "source": record.get("source"),
+                                "status": record.get("status"),
+                                "event_title": record.get("event_title"),
+                                "event_phase": record.get("event_phase"),
+                                "alternatives": [
+                                    {
+                                        "line": alt.get("spread_line"),
+                                        "best_ask": alt.get("best_ask"),
+                                        "odds": alt.get("live_odds_american"),
+                                        "relative": alt.get("relative_to_original"),
+                                    }
+                                    for alt in alternatives
+                                ],
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            default=str,
+                        ),
+                        flush=True,
+                    )
+                else:
+                    record["status"] = "RETRYING"
+                    record["match_status"] = "UNRESOLVED"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            posted = _parse_iso(pick.get("posted_at"))
+            age = (now - posted).total_seconds() if posted else float("inf")
+            if age > max_age_seconds:
+                record["event_phase"] = _event_phase(record, now)
+                if _recovery_pregame_allowed(
+                    age,
+                    max_age_seconds,
+                    recovery_max_age_seconds,
+                    record["event_phase"],
+                    live_enabled,
+                ):
+                    try:
+                        prepared = await asyncio.to_thread(
+                            _prepare_pick,
+                            pick,
+                            core=core,
+                            remote=remote,
+                            unit_usdc=unit_usdc,
+                            matched=record,
+                        )
+                        record.update(prepared)
+                        record["recovered_after_bridge_outage"] = True
+                        record["recovery_checked_at"] = _now_iso()
+                        record["updated_at"] = _now_iso()
+                        signals[fp] = record
+                        changed = True
+                        print(
+                            "CFB_CAPPER_RECOVERY "
+                            + json.dumps(record, sort_keys=True, separators=(",", ":"), default=str),
+                            flush=True,
+                        )
+                    except Exception as exc:
+                        record["status"] = "RETRYING"
+                        record["last_error"] = f"{type(exc).__name__}: {exc}"
+                        record["recovery_checked_at"] = _now_iso()
+                        record["updated_at"] = _now_iso()
+                        signals[fp] = record
+                        changed = True
+                    continue
+
+                if record["event_phase"] == "LIVE":
+                    record["status"] = "MATCHED_LIVE"
+                    record["reason"] = "game is live; matched Polymarket market remains open"
+                    try:
+                        record.update(await asyncio.to_thread(
+                            _read_live_buy_quote,
+                            str(record["asset_id"]),
+                        ))
+                        record["live_quote_error"] = None
+                    except Exception as exc:
+                        record["live_quote_error"] = f"{type(exc).__name__}: {exc}"
+                elif record["event_phase"] == "CLOSED":
+                    record["status"] = "EVENT_CLOSED"
+                    record["reason"] = "matched Polymarket event/market is closed"
+                else:
+                    record["status"] = "MATCHED_PREGAME"
+                    record["reason"] = (
+                        f"outside {max_age_seconds}s auto-trade freshness window; "
+                        "manual BUY remains available while market is open"
+                    )
+                    try:
+                        record.update(await asyncio.to_thread(
+                            _read_live_buy_quote,
+                            str(record["asset_id"]),
+                        ))
+                        record["live_quote_error"] = None
+                    except Exception as exc:
+                        record["live_quote_error"] = f"{type(exc).__name__}: {exc}"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            try:
+                prepare_fn = _prepare_pick if live_enabled else _prepare_preview
+                prepared = await asyncio.to_thread(
+                    prepare_fn,
+                    pick,
+                    core=core,
+                    remote=remote,
+                    unit_usdc=unit_usdc,
+                    matched=record,
+                )
+                record.update(prepared)
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                log_label = "CFB_CAPPER_LIVE" if live_enabled else "CFB_CAPPER_PREVIEW"
+                print(
+                    f"{log_label} "
+                    + json.dumps(record, sort_keys=True, separators=(",", ":"), default=str),
+                    flush=True,
+                )
+            except Exception as exc:
+                record["status"] = "RETRYING"
+                record["last_error"] = f"{type(exc).__name__}: {exc}"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+
+        if changed:
+            _save_signals(signals)
+
+        _STATUS["last_success_at"] = _now_iso()
+        _STATUS["last_error"] = bridge_error or manual_fallback_error
+        _STATUS["cycles"] = int(_STATUS.get("cycles") or 0) + 1
+
+    async def _run_test_preview_once() -> None:
+        if not test_preview_raw:
+            return
+
+        trigger_hash = hashlib.sha256(test_preview_raw.encode("utf-8")).hexdigest()
+        existing = core._load(test_preview_marker) if test_preview_marker.exists() else {}
+        if (
+            isinstance(existing, dict)
+            and existing.get("trigger_hash") == trigger_hash
+            and existing.get("status") in {"QUEUED", "DONE"}
+        ):
+            return
+
+        try:
+            pick = json.loads(test_preview_raw)
+            if not isinstance(pick, dict):
+                raise RuntimeError("CFB_CAPPER_TEST_PREVIEW_JSON must decode to an object")
+            pick["posted_at"] = _now_iso()
+
+            while True:
+                ready, state = live_control._executor_ready()
+                if ready:
+                    break
+                if state.get("geo_blocked"):
+                    raise RuntimeError("Termux executor is geoblocked")
+                await asyncio.sleep(2)
+
+            test_prepare_fn = _prepare_pick if live_enabled else _prepare_preview
+            result = await asyncio.to_thread(
+                test_prepare_fn,
+                pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+            )
+            marker = {
+                "trigger_hash": trigger_hash,
+                "created_at": _now_iso(),
+                "pick": pick,
+                "preview": result,
+                "status": "QUEUED",
+            }
+            core._save(test_preview_marker, marker)
+            print(
+                "CFB_CAPPER_TEST_PREVIEW "
+                + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                flush=True,
+            )
+
+            request_id = str(result.get("request_id") or "")
+            for _ in range(90):
+                await asyncio.sleep(1)
+                queued = remote._queue_load().get(request_id) if request_id else None
+                if not queued:
+                    continue
+                status = str(queued.get("status") or "")
+                if status not in {"DONE", "FAILED"}:
+                    continue
+                marker["status"] = status
+                marker["completed_at"] = queued.get("updated_at") or _now_iso()
+                marker["result"] = queued.get("result")
+                marker["error"] = queued.get("error")
+                core._save(test_preview_marker, marker)
+                print(
+                    "CFB_CAPPER_TEST_PREVIEW_RESULT "
+                    + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                    flush=True,
+                )
+                return
+        except Exception as exc:
+            marker = {
+                "trigger_hash": trigger_hash,
+                "created_at": _now_iso(),
+                "status": "FAILED",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            core._save(test_preview_marker, marker)
+            print(
+                "CFB_CAPPER_TEST_PREVIEW_RESULT "
+                + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                flush=True,
+            )
+
+    async def _loop() -> None:
+        await asyncio.sleep(4)
+        while True:
+            try:
+                await _poll_once()
+            except Exception as exc:
+                _STATUS["last_error"] = f"{type(exc).__name__}: {exc}"
+            await asyncio.sleep(poll_seconds)
+
+    original_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def _lifespan(application: Any):
+        async with original_lifespan(application):
+            task = asyncio.create_task(_loop(), name="cfb-capper-preview-poller")
+            preview_task = asyncio.create_task(
+                _run_test_preview_once(),
+                name="cfb-capper-test-preview",
+            )
+            try:
+                yield
+            finally:
+                for pending in (task, preview_task):
+                    pending.cancel()
+                for pending in (task, preview_task):
+                    try:
+                        await pending
+                    except asyncio.CancelledError:
+                        pass
+
+    app.router.lifespan_context = _lifespan
+
+    @app.get("/api/cfb-cappers/status", dependencies=[Depends(dashboard._auth)])
+    def cfb_capper_status() -> dict[str, Any]:
+        signals = _load_signals()
+        executions = core._load(core.EXECUTIONS_FILE)
+        if not isinstance(executions, dict):
+            executions = {}
+        live_marks = nfl._live_mark_map(dashboard, executions)
+        performance = nfl._stats_from_executions(
+            executions,
+            labels=SOURCE_LABELS,
+            sport="CFB",
+            live_marks=live_marks,
+        )
+        missed = nfl._missed_signal_stats(
+            signals,
+            executions,
+            labels=SOURCE_LABELS,
+            sport="CFB",
+            unit_usdc=unit_usdc,
+        )
+        for label in SOURCE_LABELS:
+            performance.setdefault(label, {}).update(missed.get(label, {}))
+        counts: dict[str, dict[str, Any]] = {}
+        for label in SOURCE_LABELS:
+            rows = [r for r in signals.values() if r.get("source") == label]
+            counts[label] = {
+                "signals": len(rows),
+                "performance": performance.get(label, {}),
+                "positions": nfl._position_items(
+                    executions,
+                    label,
+                    sport="CFB",
+                    live_marks=live_marks,
+                ),
+                "preview_done": sum(1 for r in rows if r.get("status") in {"PREVIEW_DONE", "EXECUTOR_DONE"}),
+                "preview_failed": sum(1 for r in rows if r.get("status") in {"PREVIEW_FAILED", "EXECUTOR_FAILED"}),
+                "preview_queued": sum(1 for r in rows if r.get("status") in {"PREVIEW_QUEUED", "QUEUED"}),
+                "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
+                "pregame": sum(
+                    1 for r in rows
+                    if r.get("status") in {"MATCHED_PREGAME", "MATCHED_PREGAME_ALTERNATE"}
+                ),
+                "live": sum(
+                    1 for r in rows
+                    if r.get("status") in {"MATCHED_LIVE", "MATCHED_LIVE_ALTERNATE"}
+                ),
+                "closed": sum(1 for r in rows if r.get("status") == "EVENT_CLOSED"),
+                "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
+                "all_items": _recent_all_items(rows, executions=executions),
+                "queued_items": _recent_status_items(rows, {"PREVIEW_QUEUED", "QUEUED"}, executions=executions),
+                "done_items": _recent_status_items(rows, {"PREVIEW_DONE", "EXECUTOR_DONE"}, executions=executions),
+                "previewed_items": _recent_status_items(rows, {"PREVIEW_DONE", "EXECUTOR_DONE"}, executions=executions),
+                "retrying_items": _recent_status_items(rows, "RETRYING", executions=executions),
+                "failed_items": _recent_status_items(rows, {"PREVIEW_FAILED", "EXECUTOR_FAILED"}, executions=executions),
+                "pregame_items": _recent_all_items([
+                    r for r in rows
+                    if r.get("status") in {"MATCHED_PREGAME", "MATCHED_PREGAME_ALTERNATE"}
+                ], limit=30, executions=executions),
+                "live_items": _recent_all_items([
+                    r for r in rows
+                    if r.get("status") in {"MATCHED_LIVE", "MATCHED_LIVE_ALTERNATE"}
+                ], limit=30, executions=executions),
+                "closed_items": _recent_status_items(rows, "EVENT_CLOSED", executions=executions),
+                "unsupported_items": _recent_status_items(rows, "IGNORED_UNSUPPORTED", executions=executions),
+            }
+        auto_trading = bool(core.auto_trading_enabled())
+        live_trading = bool(core.live_trading_enabled())
+        return {
+            "enabled": enabled,
+            "mode": "LIVE" if live_enabled else "PREVIEW_ONLY",
+            "poll_seconds": poll_seconds,
+            "max_pick_age_seconds": max_age_seconds,
+            "feed_window_minutes": feed_window_minutes,
+            "unit_usdc": str(unit_usdc),
+            "auto_trading": auto_trading,
+            "live_trading": live_trading,
+            "sport_live_enabled": live_enabled,
+            "auto_live": bool(enabled and live_enabled and auto_trading and live_trading),
+            "sources": counts,
+            "status": dict(_STATUS),
+        }
+
+
+    @app.post(
+        "/api/cfb-cappers/manual-buy-alternate/{signal_id}/{alternative_id}",
+        dependencies=[Depends(dashboard._auth)],
+    )
+    def cfb_capper_manual_buy_alternate(signal_id: str, alternative_id: str) -> dict[str, Any]:
+        signals = _load_signals()
+        record = signals.get(signal_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Unknown CFB signal")
+        if record.get("source") not in SOURCE_LABELS:
+            raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
+
+        pick = record.get("pick") if isinstance(record.get("pick"), dict) else None
+        if pick is None:
+            raise HTTPException(status_code=409, detail="Original CFB pick details are unavailable")
+        kind, _ = _classify_pick(pick)
+        if kind != "spread":
+            raise HTTPException(status_code=409, detail="Alternate live-line BUY is only for spread signals")
+
+        try:
+            alternatives = _find_spread_alternatives(pick, limit=8)
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=f"Could not refresh live spread alternatives: {exc}") from exc
+        selected = next(
+            (alt for alt in alternatives if str(alt.get("alternative_id") or "") == alternative_id),
+            None,
+        )
+        if selected is None:
+            raise HTTPException(
+                status_code=409,
+                detail="That live spread is no longer available; refresh the dashboard and choose a current line",
+            )
+        if _event_phase(selected) == "CLOSED":
+            raise HTTPException(status_code=409, detail="Selected Polymarket spread market is closed")
+
+        execution_pick = dict(pick)
+        execution_pick["spread_lines"] = [selected["spread_line"]]
+        execution_pick["selection"] = (
+            f"{pick.get('team_hint') or pick.get('selection')} {selected['spread_line']}"
+        )
+        try:
+            result = _prepare_manual_buy(
+                execution_pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+                matched=selected,
+                strategy_pick_id=signal_id,
+                strategy_selection=str(record.get("selection") or pick.get("selection") or ""),
+                strategy_alternate_line=str(selected["spread_line"]),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        record["manual_buy_request_id"] = result["request_id"]
+        record["manual_buy_trade_id"] = result["trade_id"]
+        record["manual_buy_status"] = "PENDING"
+        record["manual_buy_error"] = None
+        record["manual_buy_at"] = _now_iso()
+        record["manual_buy_alternate_line"] = selected["spread_line"]
+        record["manual_buy_alternative_id"] = alternative_id
+        record["live_alternatives"] = alternatives
+        record["updated_at"] = _now_iso()
+        signals[signal_id] = record
+        _save_signals(signals)
+        return {
+            "ok": True,
+            "signal_id": signal_id,
+            "original_selection": record.get("selection"),
+            "selected_live_line": selected["spread_line"],
+            "request_id": result["request_id"],
+            "trade_id": result["trade_id"],
+            "best_ask": result.get("best_ask"),
+            "live_odds_american": result.get("live_odds_american"),
+        }
+
+
+    @app.post("/api/cfb-cappers/manual-buy/{signal_id}", dependencies=[Depends(dashboard._auth)])
+    def cfb_capper_manual_buy(signal_id: str) -> dict[str, Any]:
+        signals = _load_signals()
+        record = signals.get(signal_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Unknown CFB signal")
+        if record.get("source") not in SOURCE_LABELS:
+            raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
+        if record.get("status") not in {
+            "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
+            "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED",
+            "MATCHED_PREGAME", "MATCHED_LIVE", "RETRYING"
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail=f"CFB signal is {record.get('status')}; BUY LIVE requires a matched actionable signal",
+            )
+        saved_match = _saved_market_match(record)
+        if saved_match is None:
+            raise HTTPException(
+                status_code=409,
+                detail="CFB signal has not been safely matched to a Polymarket event yet",
+            )
+        phase = _event_phase(record)
+        if phase == "CLOSED":
+            raise HTTPException(
+                status_code=409,
+                detail="CFB market is closed; BUY LIVE is no longer available",
+            )
+
+        pick = record.get("pick") if isinstance(record.get("pick"), dict) else None
+        if pick is None:
+            feed = core._load(last_feed_file)
+            for candidate in (feed.get("picks") or []) if isinstance(feed, dict) else []:
+                if isinstance(candidate, dict) and _fingerprint(candidate) == signal_id:
+                    pick = candidate
+                    break
+        if pick is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Original CFB pick details are no longer available to submit the matched market",
+            )
+
+        try:
+            result = _prepare_manual_buy(
+                pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+                matched=saved_match,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        record["manual_buy_request_id"] = result["request_id"]
+        record["manual_buy_trade_id"] = result["trade_id"]
+        record["manual_buy_status"] = "PENDING"
+        record["manual_buy_error"] = None
+        record["manual_buy_at"] = _now_iso()
+        record["updated_at"] = _now_iso()
+        signals[signal_id] = record
+        _save_signals(signals)
+        return {
+            "ok": True,
+            "manual": True,
+            "auto": False,
+            **result,
+        }
+
+    dashboard.DASHBOARD_HTML = _inject_dashboard_panel(dashboard.DASHBOARD_HTML)
++Number(p.open_value_usdc).toFixed(2))+'</div><div>Missed '+Number(p.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div></div>';
+ const active=cfbActiveTabs[sourceKey]||'signals';
+ const specs=cfbTabSpec(x);
+ const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>{
+  const selected=s[0]===active;
+  return '<button type="button" style="padding:5px 8px;min-height:34px;'+(selected?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="cfbSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+cfbEsc(s[1])+' '+s[2]+'</button>';
+ }).join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const items=spec[3]||[];
+ const body=items.length?cfbPickList(spec[1]+' signals',items,spec[4]):'<div style="margin-top:8px;opacity:.7">No '+cfbEsc(spec[1].toLowerCase())+' signals.</div>';
+ return performance+tabs+body;
+}
+async function loadCfbCapperStats(){
+ try{
+  const r=await fetch('/api/cfb-cappers/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'CFB capper status failed');
+  const state=document.getElementById('cfbCapperState'),meta=document.getElementById('cfbCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
+  if(meta)meta.textContent='1u = \u0024'+Number(d.unit_usdc||10).toFixed(2)+' · auto fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · manual pregame/live while market open · odds refresh '+(d.poll_seconds||0)+'s';
+  cfbLastSources=d.sources||{};
+  const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
+  if(s)s.innerHTML=cfbCapperLine(cfbLastSources['Slam - CFB'],'slam');
+  if(y)y.innerHTML=cfbCapperLine(cfbLastSources['Syndicate - CFB'],'syndicate');
+  cfbUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('cfbCapperState');if(state)state.textContent='Status unavailable: '+String(e);
+ }
+}
+loadCfbCapperStats();setInterval(loadCfbCapperStats,10000);
+"""
+    return html.replace("</script>", js + "\n</script>", 1)
+
+
+def install(*, app: Any, dashboard: Any, core: Any) -> None:
+    global _INSTALLED
+    if _INSTALLED:
+        return
+    _INSTALLED = True
+
+    remote = live_control.remote
+    signal_file = core.DATA_DIR / "cfb_capper_preview_signals.json"
+    last_feed_file = core.DATA_DIR / "cfb_capper_last_feed.json"
+    bridge_url = os.getenv(
+        "CFB_CAPPER_BRIDGE_URL",
+        "https://telegram-chatgpt-bridge-production-286a.up.railway.app",
+    ).rstrip("/")
+    enabled = os.getenv("CFB_CAPPER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    poll_seconds = max(5, int(os.getenv("CFB_CAPPER_POLL_SECONDS", "15")))
+    max_age_seconds = max(30, int(os.getenv("CFB_CAPPER_MAX_PICK_AGE_SECONDS", "180")))
+    recovery_max_age_seconds = max(
+        max_age_seconds,
+        int(os.getenv("CFB_CAPPER_RECOVERY_MAX_PICK_AGE_SECONDS", "86400")),
+    )
+    feed_window_minutes = max(
+        180,
+        min(4320, int(os.getenv("CFB_CAPPER_FEED_WINDOW_MINUTES", "1440"))),
+    )
+    unit_usdc = Decimal(os.getenv("CFB_CAPPER_UNIT_USDC", "10"))
+    no_fill_retry_limit = max(0, int(os.getenv("CFB_CAPPER_NO_FILL_RETRIES", "2")))
+    live_enabled = os.getenv("CFB_CAPPER_LIVE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    test_preview_raw = os.getenv("CFB_CAPPER_TEST_PREVIEW_JSON", "").strip()
+    test_preview_marker = core.DATA_DIR / "cfb_capper_test_preview.json"
+    manual_fallback_error: str | None = None
+    try:
+        manual_fallback_picks = _manual_fallback_picks(
+            os.getenv("CFB_CAPPER_MANUAL_PICKS_JSON", "")
+        )
+    except Exception as exc:
+        manual_fallback_picks = []
+        manual_fallback_error = f"{type(exc).__name__}: {exc}"
+
+    def _load_signals() -> dict[str, Any]:
+        data = core._load(signal_file)
+        return data if isinstance(data, dict) else {}
+
+    def _save_signals(data: dict[str, Any]) -> None:
+        if len(data) > 2500:
+            ordered = sorted(
+                data.items(),
+                key=lambda item: str((item[1] or {}).get("first_seen_at") or ""),
+            )
+            data = dict(ordered[-2000:])
+        core._save(signal_file, data)
+
+    def _sync_queue_status(signals: dict[str, Any]) -> bool:
+        changed = False
+        queue = remote._queue_load()
+        for rec in signals.values():
+            manual_request_id = str(rec.get("manual_buy_request_id") or "")
+            if manual_request_id:
+                manual = queue.get(manual_request_id)
+                if manual:
+                    manual_status = str(manual.get("status") or "")
+                    manual_error = manual.get("error")
+                    manual_result = manual.get("result")
+                    if rec.get("manual_buy_status") != manual_status:
+                        rec["manual_buy_status"] = manual_status
+                        changed = True
+                    if rec.get("manual_buy_error") != manual_error:
+                        rec["manual_buy_error"] = manual_error
+                        changed = True
+                    if manual_result is not None and rec.get("manual_buy_result") != manual_result:
+                        rec["manual_buy_result"] = manual_result
+                        changed = True
+            current_status = str(rec.get("status") or "")
+            if current_status not in {"PREVIEW_QUEUED", "QUEUED", "EXECUTOR_DONE"} or not rec.get("request_id"):
+                continue
+            queued = queue.get(str(rec.get("request_id")))
+            if not queued:
+                continue
+            qstatus = str(queued.get("status") or "")
+            is_live = current_status in {"QUEUED", "EXECUTOR_DONE"}
+            no_fill = is_live and nfl._queue_result_is_no_fill(queued)
+            if no_fill and qstatus in {"DONE", "FAILED"}:
+                attempts = int(rec.get("no_fill_retries") or 0)
+                if attempts < no_fill_retry_limit:
+                    rec["status"] = "RETRYING"
+                    rec["no_fill_retries"] = attempts + 1
+                    rec["last_error"] = str(
+                        queued.get("error")
+                        or "BUY_UNFILLED_RETRYABLE: previous limit order filled 0 shares"
+                    )
+                    rec["last_no_fill_at"] = queued.get("updated_at") or _now_iso()
+                    rec.pop("request_id", None)
+                    rec.pop("completed_at", None)
+                else:
+                    rec["status"] = "EXECUTOR_FAILED"
+                    rec["last_error"] = (
+                        str(queued.get("error") or "BUY unfilled")
+                        + f"; no-fill retry limit {no_fill_retry_limit} reached"
+                    )
+                    rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                changed = True
+            elif qstatus == "DONE":
+                target = "EXECUTOR_DONE" if is_live else "PREVIEW_DONE"
+                if current_status != target:
+                    rec["status"] = target
+                    rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                    rec["result"] = queued.get("result")
+                    changed = True
+            elif qstatus == "FAILED":
+                rec["status"] = "EXECUTOR_FAILED" if is_live else "PREVIEW_FAILED"
+                rec["last_error"] = queued.get("error")
+                rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                rec["result"] = queued.get("result")
+                changed = True
+        return changed
+
+    async def _poll_once() -> None:
+        _STATUS["last_poll_at"] = _now_iso()
+        signals = _load_signals()
+        changed = _sync_queue_status(signals)
+
+        if not enabled:
+            _STATUS["last_error"] = "CFB capper preview is disabled"
+            if changed:
+                _save_signals(signals)
+            return
+
+        bridge_error: str | None = None
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.get(
+                    f"{bridge_url}/public/ncaaf",
+                    params={
+                        "minutes": feed_window_minutes,
+                        "limit": 300,
+                        "include_graded": "false",
+                        "require_fresh": "true",
+                    },
+                )
+                response.raise_for_status()
+                feed = response.json()
+        except Exception as exc:
+            bridge_error = f"{type(exc).__name__}: {exc}"
+            if not manual_fallback_picks:
+                _STATUS["last_error"] = bridge_error
+                if changed:
+                    _save_signals(signals)
+                return
+            feed = {
+                "sport": "NCAAF",
+                "generated_at": _now_iso(),
+                "freshness": {"connected": False, "ready": False, "error": bridge_error},
+                "scanned_posts": 0,
+                "detected_posts": 0,
+                "detected_picks": 0,
+                "listener_connected": False,
+                "listener_ready": False,
+                "picks": [],
+            }
+
+        bridge_picks = _normalize_bridge_picks(
+            [p for p in (feed.get("picks") or []) if isinstance(p, dict)]
+        )
+        manual_fallback_picks = [
+            row for row in (_normalize_legacy_bridge_pick(p) for p in manual_fallback_picks)
+            if row is not None
+        ]
+        manual_semantics = {_semantic_fingerprint(p) for p in manual_fallback_picks}
+        bridge_picks = [
+            p for p in bridge_picks
+            if _semantic_fingerprint(p) not in manual_semantics
+        ]
+        picks = [*bridge_picks, *[dict(p) for p in manual_fallback_picks]]
+
+        core._save(last_feed_file, {
+            "saved_at": _now_iso(),
+            "sport": feed.get("sport"),
+            "generated_at": feed.get("generated_at"),
+            "freshness": feed.get("freshness"),
+            "scanned_posts": feed.get("scanned_posts"),
+            "detected_posts": feed.get("detected_posts"),
+            "detected_picks": len(picks),
+            "listener_connected": feed.get("listener_connected"),
+            "listener_ready": feed.get("listener_ready"),
+            "manual_fallback_count": len(manual_fallback_picks),
+            "bridge_error": bridge_error,
+            "picks": picks,
+        })
+
+        picks.sort(key=lambda p: str(p.get("posted_at") or ""))
+        now = datetime.now(timezone.utc)
+
+        # Refresh current odds/lifecycle for every already matched active signal,
+        # including older signals that may no longer be in the bridge feed.
+        for existing in signals.values():
+            existing_status = str(existing.get("status") or "")
+            if existing_status in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE"}:
+                continue
+            if existing_status == "EVENT_CLOSED":
+                if await asyncio.to_thread(_refresh_unresolved_closed_result, existing):
+                    existing["updated_at"] = _now_iso()
+                    changed = True
+                continue
+            if existing.get("status") in {"MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE"}:
+                if await asyncio.to_thread(_refresh_spread_alternatives, existing):
+                    existing["updated_at"] = _now_iso()
+                    changed = True
+                continue
+            if _saved_market_match(existing) is not None:
+                if await asyncio.to_thread(_refresh_record_runtime, existing):
+                    existing["updated_at"] = _now_iso()
+                    changed = True
+
+        for pick in picks:
+            fp = _fingerprint(pick)
+            current = signals.get(fp)
+            if current and not current.get("pick"):
+                current["pick"] = pick
+                changed = True
+            if current and current.get("status") in {
+                "PREVIEW_QUEUED", "PREVIEW_DONE", "PREVIEW_FAILED",
+                "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED",
+                "MATCHED_PREGAME", "MATCHED_LIVE",
+                "MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE", "EVENT_CLOSED",
+                "IGNORED_STALE", "IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE",
+            }:
+                terminal = str(current.get("status") or "")
+                if terminal in {"IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE", "EVENT_CLOSED"}:
+                    continue
+                if terminal in {"MATCHED_PREGAME_ALTERNATE", "MATCHED_LIVE_ALTERNATE"}:
+                    continue
+                if (
+                    terminal != "IGNORED_STALE"
+                    and _saved_market_match(current) is not None
+                    and current.get("event_start_checked_at")
+                ):
+                    continue
+
+            source_label = _source_label(pick)
+            record = current or {
+                "id": fp,
+                "first_seen_at": _now_iso(),
+                "source": source_label,
+                "telegram_source": pick.get("source"),
+                "posted_at": pick.get("posted_at"),
+                "selection": pick.get("selection"),
+                "units": str(_units_for_pick(pick)),
+                "stake_usdc": str(_stake_for_pick(pick, unit_usdc)),
+                "pick": pick,
+            }
+
+            if source_label is None:
+                record["status"] = "IGNORED_UNTRACKED_SOURCE"
+                record["reason"] = "CFB feed source is not Slam or Syndicate"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            kind, reason = _classify_pick(pick)
+            if kind is None:
+                record["status"] = "IGNORED_UNSUPPORTED"
+                record["reason"] = reason
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            try:
+                saved_match = _saved_market_match(record, kind)
+                if saved_match is None or not record.get("event_start_checked_at"):
+                    saved_match = await asyncio.to_thread(_resolve_market_match, pick, kind)
+                    record.update(saved_match)
+                else:
+                    record["match_status"] = "MATCHED"
+                record["match_error"] = None
+            except Exception as exc:
+                record["match_error"] = f"{type(exc).__name__}: {exc}"
+                record["last_error"] = record["match_error"]
+                alternatives = []
+                if kind == "spread":
+                    try:
+                        alternatives = await asyncio.to_thread(_find_spread_alternatives, pick)
+                    except Exception as alt_exc:
+                        record["alternate_error"] = f"{type(alt_exc).__name__}: {alt_exc}"
+                if alternatives:
+                    record["live_alternatives"] = alternatives
+                    record["alternate_error"] = None
+                    record["match_status"] = "ALTERNATE_AVAILABLE"
+                    record["event_title"] = alternatives[0].get("event_title")
+                    record["event_start_at"] = alternatives[0].get("event_start_at")
+                    record["event_phase"] = alternatives[0].get("event_phase")
+                    record["market_url"] = alternatives[0].get("market_url")
+                    record["status"] = (
+                        "MATCHED_LIVE_ALTERNATE"
+                        if alternatives[0].get("event_phase") == "LIVE"
+                        else "MATCHED_PREGAME_ALTERNATE"
+                    )
+                    record["reason"] = (
+                        "exact original spread is unavailable; explicit current Polymarket alternatives are shown"
+                    )
+                    print(
+                        "CFB_CAPPER_ALTERNATES "
+                        + json.dumps(
+                            {
+                                "selection": record.get("selection"),
+                                "source": record.get("source"),
+                                "status": record.get("status"),
+                                "event_title": record.get("event_title"),
+                                "event_phase": record.get("event_phase"),
+                                "alternatives": [
+                                    {
+                                        "line": alt.get("spread_line"),
+                                        "best_ask": alt.get("best_ask"),
+                                        "odds": alt.get("live_odds_american"),
+                                        "relative": alt.get("relative_to_original"),
+                                    }
+                                    for alt in alternatives
+                                ],
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            default=str,
+                        ),
+                        flush=True,
+                    )
+                else:
+                    record["status"] = "RETRYING"
+                    record["match_status"] = "UNRESOLVED"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            posted = _parse_iso(pick.get("posted_at"))
+            age = (now - posted).total_seconds() if posted else float("inf")
+            if age > max_age_seconds:
+                record["event_phase"] = _event_phase(record, now)
+                if _recovery_pregame_allowed(
+                    age,
+                    max_age_seconds,
+                    recovery_max_age_seconds,
+                    record["event_phase"],
+                    live_enabled,
+                ):
+                    try:
+                        prepared = await asyncio.to_thread(
+                            _prepare_pick,
+                            pick,
+                            core=core,
+                            remote=remote,
+                            unit_usdc=unit_usdc,
+                            matched=record,
+                        )
+                        record.update(prepared)
+                        record["recovered_after_bridge_outage"] = True
+                        record["recovery_checked_at"] = _now_iso()
+                        record["updated_at"] = _now_iso()
+                        signals[fp] = record
+                        changed = True
+                        print(
+                            "CFB_CAPPER_RECOVERY "
+                            + json.dumps(record, sort_keys=True, separators=(",", ":"), default=str),
+                            flush=True,
+                        )
+                    except Exception as exc:
+                        record["status"] = "RETRYING"
+                        record["last_error"] = f"{type(exc).__name__}: {exc}"
+                        record["recovery_checked_at"] = _now_iso()
+                        record["updated_at"] = _now_iso()
+                        signals[fp] = record
+                        changed = True
+                    continue
+
+                if record["event_phase"] == "LIVE":
+                    record["status"] = "MATCHED_LIVE"
+                    record["reason"] = "game is live; matched Polymarket market remains open"
+                    try:
+                        record.update(await asyncio.to_thread(
+                            _read_live_buy_quote,
+                            str(record["asset_id"]),
+                        ))
+                        record["live_quote_error"] = None
+                    except Exception as exc:
+                        record["live_quote_error"] = f"{type(exc).__name__}: {exc}"
+                elif record["event_phase"] == "CLOSED":
+                    record["status"] = "EVENT_CLOSED"
+                    record["reason"] = "matched Polymarket event/market is closed"
+                else:
+                    record["status"] = "MATCHED_PREGAME"
+                    record["reason"] = (
+                        f"outside {max_age_seconds}s auto-trade freshness window; "
+                        "manual BUY remains available while market is open"
+                    )
+                    try:
+                        record.update(await asyncio.to_thread(
+                            _read_live_buy_quote,
+                            str(record["asset_id"]),
+                        ))
+                        record["live_quote_error"] = None
+                    except Exception as exc:
+                        record["live_quote_error"] = f"{type(exc).__name__}: {exc}"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            try:
+                prepare_fn = _prepare_pick if live_enabled else _prepare_preview
+                prepared = await asyncio.to_thread(
+                    prepare_fn,
+                    pick,
+                    core=core,
+                    remote=remote,
+                    unit_usdc=unit_usdc,
+                    matched=record,
+                )
+                record.update(prepared)
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                log_label = "CFB_CAPPER_LIVE" if live_enabled else "CFB_CAPPER_PREVIEW"
+                print(
+                    f"{log_label} "
+                    + json.dumps(record, sort_keys=True, separators=(",", ":"), default=str),
+                    flush=True,
+                )
+            except Exception as exc:
+                record["status"] = "RETRYING"
+                record["last_error"] = f"{type(exc).__name__}: {exc}"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+
+        if changed:
+            _save_signals(signals)
+
+        _STATUS["last_success_at"] = _now_iso()
+        _STATUS["last_error"] = bridge_error or manual_fallback_error
+        _STATUS["cycles"] = int(_STATUS.get("cycles") or 0) + 1
+
+    async def _run_test_preview_once() -> None:
+        if not test_preview_raw:
+            return
+
+        trigger_hash = hashlib.sha256(test_preview_raw.encode("utf-8")).hexdigest()
+        existing = core._load(test_preview_marker) if test_preview_marker.exists() else {}
+        if (
+            isinstance(existing, dict)
+            and existing.get("trigger_hash") == trigger_hash
+            and existing.get("status") in {"QUEUED", "DONE"}
+        ):
+            return
+
+        try:
+            pick = json.loads(test_preview_raw)
+            if not isinstance(pick, dict):
+                raise RuntimeError("CFB_CAPPER_TEST_PREVIEW_JSON must decode to an object")
+            pick["posted_at"] = _now_iso()
+
+            while True:
+                ready, state = live_control._executor_ready()
+                if ready:
+                    break
+                if state.get("geo_blocked"):
+                    raise RuntimeError("Termux executor is geoblocked")
+                await asyncio.sleep(2)
+
+            test_prepare_fn = _prepare_pick if live_enabled else _prepare_preview
+            result = await asyncio.to_thread(
+                test_prepare_fn,
+                pick,
+                core=core,
+                remote=remote,
+                unit_usdc=unit_usdc,
+            )
+            marker = {
+                "trigger_hash": trigger_hash,
+                "created_at": _now_iso(),
+                "pick": pick,
+                "preview": result,
+                "status": "QUEUED",
+            }
+            core._save(test_preview_marker, marker)
+            print(
+                "CFB_CAPPER_TEST_PREVIEW "
+                + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                flush=True,
+            )
+
+            request_id = str(result.get("request_id") or "")
+            for _ in range(90):
+                await asyncio.sleep(1)
+                queued = remote._queue_load().get(request_id) if request_id else None
+                if not queued:
+                    continue
+                status = str(queued.get("status") or "")
+                if status not in {"DONE", "FAILED"}:
+                    continue
+                marker["status"] = status
+                marker["completed_at"] = queued.get("updated_at") or _now_iso()
+                marker["result"] = queued.get("result")
+                marker["error"] = queued.get("error")
+                core._save(test_preview_marker, marker)
+                print(
+                    "CFB_CAPPER_TEST_PREVIEW_RESULT "
+                    + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                    flush=True,
+                )
+                return
+        except Exception as exc:
+            marker = {
+                "trigger_hash": trigger_hash,
+                "created_at": _now_iso(),
+                "status": "FAILED",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            core._save(test_preview_marker, marker)
+            print(
+                "CFB_CAPPER_TEST_PREVIEW_RESULT "
+                + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str),
+                flush=True,
+            )
+
+    async def _loop() -> None:
+        await asyncio.sleep(4)
+        while True:
+            try:
+                await _poll_once()
+            except Exception as exc:
+                _STATUS["last_error"] = f"{type(exc).__name__}: {exc}"
+            await asyncio.sleep(poll_seconds)
+
+    original_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def _lifespan(application: Any):
+        async with original_lifespan(application):
+            task = asyncio.create_task(_loop(), name="cfb-capper-preview-poller")
+            preview_task = asyncio.create_task(
+                _run_test_preview_once(),
+                name="cfb-capper-test-preview",
+            )
+            try:
+                yield
+            finally:
+                for pending in (task, preview_task):
+                    pending.cancel()
+                for pending in (task, preview_task):
+                    try:
+                        await pending
+                    except asyncio.CancelledError:
+                        pass
+
+    app.router.lifespan_context = _lifespan
+
+    @app.get("/api/cfb-cappers/status", dependencies=[Depends(dashboard._auth)])
+    def cfb_capper_status() -> dict[str, Any]:
+        signals = _load_signals()
+        executions = core._load(core.EXECUTIONS_FILE)
+        if not isinstance(executions, dict):
+            executions = {}
+        live_marks = nfl._live_mark_map(dashboard, executions)
+        performance = nfl._stats_from_executions(
+            executions,
+            labels=SOURCE_LABELS,
+            sport="CFB",
+            live_marks=live_marks,
+        )
+        missed = nfl._missed_signal_stats(
+            signals,
+            executions,
+            labels=SOURCE_LABELS,
+            sport="CFB",
+            unit_usdc=unit_usdc,
+        )
+        for label in SOURCE_LABELS:
+            performance.setdefault(label, {}).update(missed.get(label, {}))
+        counts: dict[str, dict[str, Any]] = {}
+        for label in SOURCE_LABELS:
+            rows = [r for r in signals.values() if r.get("source") == label]
+            counts[label] = {
+                "signals": len(rows),
+                "performance": performance.get(label, {}),
+                "positions": nfl._position_items(
+                    executions,
+                    label,
+                    sport="CFB",
+                    live_marks=live_marks,
+                ),
                 "preview_done": sum(1 for r in rows if r.get("status") in {"PREVIEW_DONE", "EXECUTOR_DONE"}),
                 "preview_failed": sum(1 for r in rows if r.get("status") in {"PREVIEW_FAILED", "EXECUTOR_FAILED"}),
                 "preview_queued": sum(1 for r in rows if r.get("status") in {"PREVIEW_QUEUED", "QUEUED"}),
