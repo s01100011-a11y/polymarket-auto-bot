@@ -2009,7 +2009,8 @@ function nflCapperLine(x){
  const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
  const metrics='<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">Realized P/L '+pnl+'</span> · ROI '+roi+'</div><div><span class="capper-pnl '+liveClass+'">Live P/L '+livePnl+'</span> · Open value '+openValue+'</div><div>Missed '+Number(x.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div>';
  return metrics+nflPositionList(x);
-}async function loadNflCapperStats(){
+}
+async function loadNflCapperStats(){
  try{
   const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
   if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
