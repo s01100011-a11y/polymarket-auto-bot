@@ -780,5 +780,80 @@ class NflCapperRecoveryTests(unittest.TestCase):
         self.assertEqual(capper._matched_event_phase(event, market), "UNKNOWN")
 
 
+class NflStructuredSpreadAndDateResolutionTests(unittest.TestCase):
+    @staticmethod
+    def _moneyline_event(slug: str, title: str):
+        first, second = title.split(" vs ")
+        yes = SimpleNamespace(label=first, token_id=slug + "-first")
+        no = SimpleNamespace(label=second, token_id=slug + "-second")
+        market = SimpleNamespace(
+            id=slug + "-ml",
+            question=title + " moneyline",
+            slug=slug + "-moneyline",
+            sports=SimpleNamespace(sports_market_type="moneyline", line=None),
+            outcomes=SimpleNamespace(yes=yes, no=no),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        return SimpleNamespace(id=slug, slug=slug, title=title, markets=[market])
+
+    def test_complementary_structured_spread_matches_selected_team(self):
+        bengals = SimpleNamespace(label="Bengals", token_id="cin")
+        steelers = SimpleNamespace(label="Steelers", token_id="pit")
+        market = SimpleNamespace(
+            id="cin-pit-spread-3-5",
+            question="Spread: Bengals (-3.5)",
+            slug="nfl-cin-pit-2026-09-27-spread-away-3pt5",
+            sports=SimpleNamespace(sports_market_type="spread", line=-3.5),
+            outcomes=SimpleNamespace(yes=bengals, no=steelers),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        pick = _pick(
+            selection="Steelers +3.5",
+            teams=["PIT"],
+            bet_types=["spread"],
+            spread_lines=["+3.5"],
+        )
+        label, outcome = capper._select_outcome(market, pick, "spread")
+        self.assertEqual(label, "Steelers")
+        self.assertEqual(outcome.token_id, "pit")
+
+    def test_one_team_moneyline_narrows_to_current_week_event(self):
+        current = self._moneyline_event(
+            "nfl-min-tb-2026-09-27",
+            "Minnesota Vikings vs Tampa Bay Buccaneers",
+        )
+        future = self._moneyline_event(
+            "nfl-min-gb-2026-10-04",
+            "Minnesota Vikings vs Green Bay Packers",
+        )
+
+        class _Result:
+            def __init__(self, items):
+                self.items = items
+            def first_page(self):
+                return self
+
+        class _Client:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def list_events(self, **kwargs):
+                return _Result([current, future])
+
+        pick = _pick(
+            source="The Syndicate",
+            posted_at="2026-09-26T15:40:24+00:00",
+            selection="Vikings To Win",
+            teams=["MIN"],
+            bet_types=["moneyline"],
+            spread_lines=[],
+        )
+        with patch.object(capper, "PublicClient", return_value=_Client()):
+            event, _, label, _ = capper._find_market(pick, "moneyline")
+        self.assertEqual(event.slug, "nfl-min-tb-2026-09-27")
+        self.assertEqual(label, "Minnesota Vikings")
+
+
 if __name__ == "__main__":
     unittest.main()
