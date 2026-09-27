@@ -647,48 +647,11 @@ def _espn_scoreboard_events(game_day: str) -> list[dict[str, Any]]:
     return events
 
 
-def _scoreboard_snapshot_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
-    """Resolve one CFB game on ESPN and return live/final score context."""
-    kind, _ = _classify_pick(pick)
-    posted = _parse_iso(pick.get("posted_at"))
-    if kind is None or posted is None:
-        return None
-
-    hints = _event_hints_for_pick(pick, kind)
-    if not hints:
-        return None
-
-    matched: dict[str, dict[str, Any]] = {}
-    for offset in (0, -1, 1):
-        game_day = (posted + timedelta(days=offset)).strftime("%Y%m%d")
-        try:
-            events = _espn_scoreboard_events(game_day)
-        except Exception:
-            continue
-
-        for event in events:
-            competitions = event.get("competitions") or []
-            if not competitions:
-                continue
-            competition = competitions[0] or {}
-            competitors = competition.get("competitors") or []
-            if len(competitors) != 2:
-                continue
-            if not all(
-                any(_espn_hint_matches_competitor(hint, comp) for comp in competitors)
-                for hint in hints
-            ):
-                continue
-            event_id = str(event.get("id") or "")
-            if event_id:
-                matched[event_id] = event
-
-    if len(matched) != 1:
-        return None
-
-    event = next(iter(matched.values()))
+def _scoreboard_snapshot_from_event(event: dict[str, Any]) -> dict[str, Any] | None:
     competition = (event.get("competitions") or [{}])[0] or {}
     competitors = competition.get("competitors") or []
+    if len(competitors) != 2:
+        return None
     try:
         scores = [Decimal(str(comp.get("score"))) for comp in competitors]
     except Exception:
@@ -737,6 +700,94 @@ def _scoreboard_snapshot_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None
         "_scores": [str(score) for score in scores],
     }
 
+
+def _scoreboard_snapshot_for_pick(
+    pick: dict[str, Any],
+    *,
+    event_start_at: Any = None,
+    espn_event_id: Any = None,
+) -> dict[str, Any] | None:
+    """Resolve one CFB game on ESPN and return live/final score context.
+
+    Prefer the persisted matched event date when available. Telegram picks can
+    be posted several days early, so a lookup anchored only to posted_at can
+    miss the actual game and leave a completed row looking live until
+    Polymarket closes. A previously stored ESPN event id is authoritative and
+    is reused to avoid re-resolving a one-team hint ambiguously.
+    """
+    kind, _ = _classify_pick(pick)
+    if kind is None:
+        return None
+
+    hints = _event_hints_for_pick(pick, kind)
+    if not hints:
+        return None
+
+    anchors: list[date] = []
+    for value in (event_start_at, pick.get("posted_at")):
+        parsed = _parse_iso(value)
+        if parsed is None:
+            continue
+        anchor_day = parsed.date()
+        if anchor_day not in anchors:
+            anchors.append(anchor_day)
+    if not anchors:
+        return None
+
+    stored_event_id = str(espn_event_id or "").strip()
+    for anchor_day in anchors:
+        matched: dict[str, dict[str, Any]] = {}
+        exact_event: dict[str, Any] | None = None
+
+        for offset in (0, -1, 1):
+            game_day = (anchor_day + timedelta(days=offset)).strftime("%Y%m%d")
+            try:
+                events = _espn_scoreboard_events(game_day)
+            except Exception:
+                continue
+
+            for event in events:
+                event_id = str(event.get("id") or "")
+                if stored_event_id:
+                    if event_id == stored_event_id:
+                        exact_event = event
+                        break
+                    continue
+
+                competitions = event.get("competitions") or []
+                if not competitions:
+                    continue
+                competition = competitions[0] or {}
+                competitors = competition.get("competitors") or []
+                if len(competitors) != 2:
+                    continue
+                if not all(
+                    any(_espn_hint_matches_competitor(hint, comp) for comp in competitors)
+                    for hint in hints
+                ):
+                    continue
+                if event_id:
+                    matched[event_id] = event
+
+            if exact_event is not None:
+                break
+
+        if exact_event is not None:
+            return _scoreboard_snapshot_from_event(exact_event)
+
+        if stored_event_id:
+            # The stored id is safer than falling back to a different team-name
+            # match inside the same date window. Try the next anchor instead.
+            continue
+
+        if len(matched) == 1:
+            return _scoreboard_snapshot_from_event(next(iter(matched.values())))
+        if len(matched) > 1:
+            # Fail closed rather than attach a pick to the wrong same-window
+            # game when a short team hint matches multiple ESPN events.
+            return None
+
+    return None
 
 def _scoreboard_result_from_snapshot(
     pick: dict[str, Any],
@@ -823,9 +874,18 @@ def _scoreboard_result_from_snapshot(
     }
 
 
-def _scoreboard_result_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
+def _scoreboard_result_for_pick(
+    pick: dict[str, Any],
+    *,
+    event_start_at: Any = None,
+    espn_event_id: Any = None,
+) -> dict[str, Any] | None:
     """Grade a completed CFB pick from ESPN even if no Polymarket match was saved."""
-    snapshot = _scoreboard_snapshot_for_pick(pick)
+    snapshot = _scoreboard_snapshot_for_pick(
+        pick,
+        event_start_at=event_start_at,
+        espn_event_id=espn_event_id,
+    )
     if not snapshot:
         return None
     return _scoreboard_result_from_snapshot(pick, snapshot)
@@ -838,7 +898,11 @@ def _apply_scoreboard_snapshot(
     source_pick = pick if isinstance(pick, dict) else record.get("pick")
     if not isinstance(source_pick, dict):
         return False
-    snapshot = _scoreboard_snapshot_for_pick(source_pick)
+    snapshot = _scoreboard_snapshot_for_pick(
+        source_pick,
+        event_start_at=record.get("event_start_at"),
+        espn_event_id=record.get("espn_event_id"),
+    )
     if not snapshot:
         return False
 
@@ -881,7 +945,11 @@ def _apply_scoreboard_result(record: dict[str, Any], pick: dict[str, Any] | None
     source_pick = pick if isinstance(pick, dict) else record.get("pick")
     if not isinstance(source_pick, dict):
         return False
-    resolved = _scoreboard_result_for_pick(source_pick)
+    resolved = _scoreboard_result_for_pick(
+        source_pick,
+        event_start_at=record.get("event_start_at"),
+        espn_event_id=record.get("espn_event_id"),
+    )
     if not resolved:
         return False
     changed = False
