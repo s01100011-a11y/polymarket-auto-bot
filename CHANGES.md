@@ -1,5 +1,13 @@
 # CHANGES
 
+## 2026-09-27 — Retry zero-fill capper BUYs safely (#134)
+
+- Railway now treats a Termux BUY as successful only when the wallet actually gained positive shares; an old worker response with outer `ok=true` can no longer turn a 0-share fill into `DONE`.
+- Zero-fill canceled limit orders are marked with `BUY_UNFILLED_RETRYABLE` and NFL/CFB workers can retry twice by default, refreshing the exact market, best ask, spread, budget, executor, and geoblock gates on every attempt.
+- Existing 0-share `DONE` requests are migrated by the capper status sync, allowing Browns/Vikings incident signals to retry without duplicating the already-filled Steelers/Saints positions.
+- Future Termux worker installs also return top-level failure for an unfilled BUY.
+
+
 ## 2026-09-27 — NFL exact-market resolution hardening (#132)
 
 - NFL spreads now use Polymarket's structured `sports.line` and correctly invert the complementary outcome, matching alternate lines such as Steelers +3.5 when the market is encoded as Bengals -3.5.
