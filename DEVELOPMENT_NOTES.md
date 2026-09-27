@@ -1,3 +1,12 @@
+## 2026-09-28 — NFL safer alternate-spread fallback (#148)
+
+- Production symptom: after Telegram recovered, SLAM `COMMANDERS +7` and `DOLPHINS +10` were ingested correctly but looped in `RETRYING` because Polymarket did not expose those exact spread lines.
+- Exact matching remains the primary path. The new fallback is opt-in and considers only open full-game spread markets on the same unique nearby NFL event.
+- Automatic substitution is allowed only when the selected-team line is numerically better than the Telegram line and within the configured maximum distance. For example, +7 may use +7.5, while +6.5 is never auto-selected.
+- Every fallback trade still reuses the normal current best-ask/spread, budget, executor, and master LIVE/AUTO gates.
+- Audit fields: `strategy_requested_spread_line`, `strategy_executed_spread_line`, and `strategy_alternate_spread_fallback`.
+- Runtime controls: `NFL_CAPPER_BETTER_SPREAD_FALLBACK_ENABLED` (default false) and `NFL_CAPPER_ALT_SPREAD_MAX_POINTS` (default 1.0).
+
 # DEVELOPMENT NOTES
 
 ## 2026-09-27 — Persist CFB cross-sport cleanup before reconciliation (#144)
