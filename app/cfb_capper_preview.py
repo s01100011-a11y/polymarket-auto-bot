@@ -219,25 +219,23 @@ def _legacy_bridge_nfl_collision(pick: dict[str, Any]) -> bool:
     return False
 
 
+def _normalize_legacy_pick_text(value: Any) -> str:
+    text = str(value or "")
+    text = re.sub(r"^\s*\d{1,2}-\d{1,2}\s+TYPE\s+GAME[.:]?\s*", "", text, flags=re.I)
+    text = re.sub(r"\bTEXAS\s+TEXCH\b", "TEXAS TECH", text, flags=re.I)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _normalize_legacy_bridge_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
     row = dict(pick)
     for key in ("selection", "team_hint"):
-        value = str(row.get(key) or "")
-        value = re.sub(r"^\s*\d{1,2}-\d{1,2}\s+TYPE\s+GAME[.:]?\s*", "", value, flags=re.I)
-        value = re.sub(r"\bTEXAS\s+TEXCH\b", "TEXAS TECH", value, flags=re.I)
+        value = _normalize_legacy_pick_text(row.get(key))
         if value:
-            row[key] = re.sub(r"\s+", " ", value).strip()
+            row[key] = value
 
     hints = []
     for hint in row.get("event_hints") or []:
-        value = re.sub(
-            r"^\s*\d{1,2}-\d{1,2}\s+TYPE\s+GAME[.:]?\s*",
-            "",
-            str(hint),
-            flags=re.I,
-        )
-        value = re.sub(r"\bTEXAS\s+TEXCH\b", "TEXAS TECH", value, flags=re.I)
-        value = re.sub(r"\s+", " ", value).strip()
+        value = _normalize_legacy_pick_text(hint)
         if value:
             hints.append(value)
     if hints:
@@ -252,6 +250,202 @@ def _normalize_legacy_bridge_pick(pick: dict[str, Any]) -> dict[str, Any] | None
     if _legacy_bridge_nfl_collision(row):
         return None
     return row
+
+
+def _infer_pick_from_persisted_record(record: dict[str, Any]) -> dict[str, Any] | None:
+    """Rebuild enough pick metadata to reconcile legacy dashboard rows.
+
+    Older signal rows were saved before the full normalized Telegram pick was
+    persisted. They still contain source/selection/posted_at, which is enough
+    for ordinary full-game moneyline/spread/total reconciliation.
+    """
+    selection = _normalize_legacy_pick_text(record.get("selection"))
+    posted_at = record.get("posted_at")
+    if not selection or _parse_iso(posted_at) is None:
+        return None
+
+    source = str(record.get("telegram_source") or record.get("source") or "").strip()
+    if not source:
+        return None
+
+    pick: dict[str, Any] = {
+        "source": source,
+        "source_key": record.get("source_key"),
+        "source_id": record.get("source_id"),
+        "posted_at": posted_at,
+        "selection": selection,
+        "team_hint": None,
+        "event_hints": [],
+        "bet_types": [],
+        "period": None,
+        "spread_lines": [],
+        "total_side": None,
+        "total_line": None,
+        "units": record.get("units"),
+        "status": "active",
+        "reconstructed_from_persisted_signal": True,
+    }
+
+    total_match = re.search(r"\b(OVER|UNDER)\s*(\d{1,3}(?:\.\d+)?)\b", selection, re.I)
+    spread_match = re.search(r"(?<!\d)([+-]\d{1,2}(?:\.\d+)?)(?!\d)", selection)
+    ml_match = re.search(r"\b(?:ML|MONEYLINE|MONEY\s+LINE|TO\s+WIN)\b", selection, re.I)
+
+    # A compound spread+total selection is not a supported single market. Keep
+    # both types so _classify_pick fails closed rather than guessing.
+    if total_match and spread_match:
+        base = _strip_wager_suffix(selection)
+        pick["team_hint"] = base or None
+        pick["event_hints"] = [base] if base else []
+        pick["bet_types"] = ["spread", "total"]
+        pick["spread_lines"] = [spread_match.group(1)]
+        pick["total_side"] = total_match.group(1).upper()
+        pick["total_line"] = float(total_match.group(2))
+    elif total_match:
+        pick["bet_types"] = ["total"]
+        pick["total_side"] = total_match.group(1).upper()
+        pick["total_line"] = float(total_match.group(2))
+        pick["event_hints"] = _inline_matchup_hints(selection)
+    elif spread_match:
+        team = selection[: spread_match.start()].strip(" -@,;:.")
+        team = re.sub(r"\bMAX\b\s*$", "", team, flags=re.I).strip()
+        pick["bet_types"] = ["spread"]
+        pick["team_hint"] = team or None
+        pick["event_hints"] = [team] if team else []
+        pick["spread_lines"] = [spread_match.group(1)]
+    elif ml_match:
+        team = _strip_wager_suffix(selection)
+        pick["bet_types"] = ["moneyline"]
+        pick["team_hint"] = team or None
+        pick["event_hints"] = [team] if team else []
+    else:
+        return None
+
+    return _normalize_legacy_bridge_pick(pick)
+
+
+def _persisted_record_pick(record: dict[str, Any]) -> dict[str, Any] | None:
+    pick = record.get("pick")
+    if isinstance(pick, dict):
+        normalized = _normalize_legacy_bridge_pick(pick)
+        if normalized is not None:
+            return normalized
+    return _infer_pick_from_persisted_record(record)
+
+
+def _record_nfl_collision(record: dict[str, Any]) -> bool:
+    """Detect old NFL leakage even when the historical row has no pick object."""
+    pick = record.get("pick")
+    if isinstance(pick, dict) and _legacy_bridge_nfl_collision(pick):
+        return True
+
+    selection = _normalize_legacy_pick_text(
+        (pick or {}).get("selection") if isinstance(pick, dict) else record.get("selection")
+    )
+    if not selection:
+        return False
+
+    # Persisted legacy metadata can itself be corrupted (the original leak
+    # sometimes carried unrelated event_hints), so classify the visible wager
+    # text rather than trusting those stale hints. An explicit college matchup
+    # will not reduce to a bare NFL nickname here.
+    base = _strip_wager_suffix(selection)
+    base_norm = _norm_text(base)
+    if not base_norm:
+        return False
+    for abbr in nfl.NFL_TEAMS:
+        for alias in nfl._team_aliases(abbr):
+            if base_norm == _norm_text(alias):
+                return True
+    return False
+
+
+def _record_has_trade_state(record: dict[str, Any]) -> bool:
+    status = str(record.get("status") or "").upper()
+    manual = str(record.get("manual_buy_status") or "").upper()
+    return bool(
+        record.get("trade_id")
+        or record.get("request_id")
+        or manual in {"PENDING", "LEASED", "DONE"}
+        or status in {
+            "PREVIEW_QUEUED", "PREVIEW_DONE", "QUEUED",
+            "EXECUTOR_DONE", "EXECUTOR_FAILED",
+        }
+    )
+
+
+def _record_quality(record: dict[str, Any]) -> tuple[int, str]:
+    score = 0
+    if str(record.get("pick_result") or "").upper() in {"WIN", "LOSS", "PUSH"}:
+        score += 100
+    if _saved_market_match(record) is not None:
+        score += 50
+    if str(record.get("espn_phase") or "").upper() == "CLOSED":
+        score += 40
+    elif str(record.get("espn_phase") or "").upper() == "LIVE":
+        score += 30
+    if isinstance(record.get("pick"), dict):
+        score += 20
+    if str(record.get("match_status") or "") in {"MATCHED", "ALTERNATE_AVAILABLE", "SCOREBOARD_ONLY"}:
+        score += 10
+    selection = _normalize_legacy_pick_text(record.get("selection"))
+    if selection and selection == str(record.get("selection") or "").strip():
+        score += 2
+    return score, str(record.get("updated_at") or record.get("first_seen_at") or "")
+
+
+def _dedupe_persisted_signals(signals: dict[str, Any]) -> list[str]:
+    """Remove non-traded duplicate legacy rows for the same wager/game window."""
+    by_semantic: dict[str, list[tuple[str, dict[str, Any], dict[str, Any]]]] = {}
+    for signal_id, record in signals.items():
+        if not isinstance(record, dict) or _record_has_trade_state(record):
+            continue
+        pick = _persisted_record_pick(record)
+        if pick is None:
+            continue
+        semantic = _semantic_fingerprint(pick)
+        by_semantic.setdefault(semantic, []).append((str(signal_id), record, pick))
+
+    removed: list[str] = []
+    for rows in by_semantic.values():
+        if len(rows) < 2:
+            continue
+        # Only collapse rows that are clearly the same game-window repost/reparse.
+        rows.sort(key=lambda item: str(item[2].get("posted_at") or ""))
+        clusters: list[list[tuple[str, dict[str, Any], dict[str, Any]]]] = []
+        for item in rows:
+            posted = _parse_iso(item[2].get("posted_at"))
+            placed = False
+            for cluster in clusters:
+                anchor = _parse_iso(cluster[0][2].get("posted_at"))
+                if posted is not None and anchor is not None and abs((posted - anchor).total_seconds()) <= 36 * 3600:
+                    cluster.append(item)
+                    placed = True
+                    break
+            if not placed:
+                clusters.append([item])
+
+        for cluster in clusters:
+            if len(cluster) < 2:
+                continue
+            winner = max(cluster, key=lambda item: _record_quality(item[1]))
+            winner_id, winner_record, winner_pick = winner
+            winner_record["pick"] = winner_pick
+            winner_record["selection"] = winner_pick.get("selection") or winner_record.get("selection")
+            for signal_id, record, _ in cluster:
+                if signal_id == winner_id:
+                    continue
+                # Preserve useful outcome/score metadata if the winner lacks it.
+                for key in (
+                    "pick_result", "result_source", "result_event_id", "result_event_title",
+                    "final_score", "selected_final_score", "opponent_final_score",
+                    "espn_event_id", "espn_event_title", "espn_phase", "espn_status",
+                    "espn_score", "live_score",
+                ):
+                    if winner_record.get(key) in {None, ""} and record.get(key) not in {None, ""}:
+                        winner_record[key] = record.get(key)
+                removed.append(str(record.get("selection") or signal_id))
+                signals.pop(signal_id, None)
+    return removed
 
 
 def _normalize_bridge_picks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -269,16 +463,12 @@ def _normalize_bridge_picks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return normalized
 
 def _purge_misrouted_nfl_signals(signals: dict[str, Any]) -> list[str]:
-    """Remove old NFL rows that were persisted before the CFB ingest guard existed."""
+    """Remove old NFL rows, including pre-pick-schema persisted records."""
     removed: list[str] = []
     for signal_id, record in list(signals.items()):
-        if not isinstance(record, dict):
+        if not isinstance(record, dict) or not _record_nfl_collision(record):
             continue
-        pick = record.get("pick")
-        if not isinstance(pick, dict):
-            continue
-        if not _legacy_bridge_nfl_collision(pick):
-            continue
+        pick = record.get("pick") if isinstance(record.get("pick"), dict) else {}
         removed.append(str(record.get("selection") or pick.get("selection") or signal_id))
         signals.pop(signal_id, None)
     return removed
@@ -286,17 +476,20 @@ def _purge_misrouted_nfl_signals(signals: dict[str, Any]) -> list[str]:
 
 def _signal_key_by_semantic(signals: dict[str, Any], pick: dict[str, Any]) -> str | None:
     target = _semantic_fingerprint(pick)
+    posted = _parse_iso(pick.get("posted_at"))
     for signal_id, record in signals.items():
         if not isinstance(record, dict):
             continue
-        existing_pick = record.get("pick")
-        if not isinstance(existing_pick, dict):
+        existing_pick = _persisted_record_pick(record)
+        if existing_pick is None:
             continue
-        normalized = _normalize_legacy_bridge_pick(existing_pick)
-        if normalized is None:
+        if _semantic_fingerprint(existing_pick) != target:
             continue
-        if _semantic_fingerprint(normalized) == target:
-            return str(signal_id)
+        existing_posted = _parse_iso(existing_pick.get("posted_at"))
+        if posted is not None and existing_posted is not None:
+            if abs((posted - existing_posted).total_seconds()) > 36 * 3600:
+                continue
+        return str(signal_id)
     return None
 
 
@@ -1597,9 +1790,15 @@ def _refresh_record_runtime(record: dict[str, Any]) -> bool:
             record["event_metadata_error"] = error
             changed = True
 
-    source_pick = record.get("pick")
-    if isinstance(source_pick, dict) and _apply_scoreboard_snapshot(record, source_pick):
-        changed = True
+    source_pick = _persisted_record_pick(record)
+    if source_pick is not None:
+        if not isinstance(record.get("pick"), dict):
+            record["pick"] = source_pick
+            record["selection"] = source_pick.get("selection") or record.get("selection")
+            record["reconstructed_pick_at"] = _now_iso()
+            changed = True
+        if _apply_scoreboard_snapshot(record, source_pick):
+            changed = True
 
     match = _saved_market_match(record) or match
     espn_phase = str(record.get("espn_phase") or "").upper()
@@ -1665,20 +1864,18 @@ def _refresh_record_runtime(record: dict[str, Any]) -> bool:
 
 def _refresh_unmatched_record(record: dict[str, Any]) -> bool:
     """Retry exact/alternate matching and reconcile live/final ESPN state."""
-    pick = record.get("pick")
-    if not isinstance(pick, dict):
+    original_pick = record.get("pick")
+    pick = _persisted_record_pick(record)
+    if pick is None:
         return False
 
     changed = False
-    normalized = _normalize_legacy_bridge_pick(pick)
-    if normalized is None:
-        return False
-    if normalized != pick:
-        record["pick"] = normalized
-        record["selection"] = normalized.get("selection") or record.get("selection")
-        record["telegram_source"] = normalized.get("source") or record.get("telegram_source")
+    if not isinstance(original_pick, dict) or pick != original_pick:
+        record["pick"] = pick
+        record["selection"] = pick.get("selection") or record.get("selection")
+        record["telegram_source"] = pick.get("source") or record.get("telegram_source")
+        record["reconstructed_pick_at"] = _now_iso()
         changed = True
-    pick = normalized
 
     kind, reason = _classify_pick(pick)
     if kind is None:
@@ -1691,6 +1888,9 @@ def _refresh_unmatched_record(record: dict[str, Any]) -> bool:
     if _apply_scoreboard_snapshot(record, pick):
         changed = True
     espn_phase = str(record.get("espn_phase") or "").upper()
+    if espn_phase in {"PREGAME", "LIVE", "CLOSED"} and record.get("event_phase") != espn_phase:
+        record["event_phase"] = espn_phase
+        changed = True
     if espn_phase == "CLOSED":
         if record.get("status") != "EVENT_CLOSED":
             record["status"] = "EVENT_CLOSED"
@@ -1760,7 +1960,9 @@ def _refresh_unmatched_record(record: dict[str, Any]) -> bool:
         retry_reason = (
             "game is live on ESPN; exact Polymarket market is not matched and no alternate spread is open"
             if espn_phase == "LIVE"
-            else "exact Polymarket market is not matched; will retry exact market and alternate spreads"
+            else "game is pending on ESPN; exact Polymarket market is not matched and alternate spreads will be retried"
+            if espn_phase == "PREGAME"
+            else "ESPN game state is unresolved; exact Polymarket market and alternate spreads will be retried"
         )
         if record.get("reason") != retry_reason:
             record["reason"] = retry_reason
@@ -2666,10 +2868,14 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         _STATUS["last_poll_at"] = _now_iso()
         signals = _load_signals()
         purged_nfl = _purge_misrouted_nfl_signals(signals)
+        deduped = _dedupe_persisted_signals(signals)
         if purged_nfl:
             _STATUS["purged_nfl_signals"] = purged_nfl
             _STATUS["purged_nfl_at"] = _now_iso()
-        changed = bool(purged_nfl) or _sync_queue_status(signals)
+        if deduped:
+            _STATUS["deduped_cfb_signals"] = deduped
+            _STATUS["deduped_cfb_at"] = _now_iso()
+        changed = bool(purged_nfl or deduped) or _sync_queue_status(signals)
 
         if not enabled:
             _STATUS["last_error"] = "CFB capper preview is disabled"
