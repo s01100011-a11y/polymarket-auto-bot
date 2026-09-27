@@ -1,5 +1,13 @@
 # CHANGES
 
+## 2026-09-27 — Legacy CFB cleanup and game-state reconciliation (#142)
+
+- CFB now purges persisted NFL nickname rows even when the old record has no normalized `pick` object or contains corrupted legacy event hints.
+- Persisted CFB rows can reconstruct a minimal full-game pick from source, timestamp, and selection text (moneyline/spread/total) so older records are no longer stuck forever in RETRYING.
+- ESPN game state is checked before Polymarket retry: pending rows are marked PREGAME, live rows LIVE, and finished rows CLOSED and graded WIN/LOSS/PUSH from the original line.
+- Non-traded duplicate rows caused by parser/manual-fallback reprocessing are collapsed within the same game window, preferring graded/matched records and preserving score/result metadata.
+- Reconciliation remains read/repair-only and does not enqueue a trade.
+
 ## 2026-09-27 — Reconcile CFB signals, alternate lines, ESPN scores (#140)
 
 - Persisted NFL picks that leaked into the CFB store before the cross-sport ingest guard are now removed automatically on the next CFB poll.
