@@ -1594,5 +1594,92 @@ class CfbNoFillHelperTests(unittest.TestCase):
         )
 
 
+
+class CfbLegacyBridgeNormalizationTests(unittest.TestCase):
+    def test_inline_total_matchups_are_recovered(self):
+        texas = capper._normalize_legacy_bridge_pick(
+            _pick(
+                selection="TEXAS/ TENNESSEE UNDER 55",
+                team_hint=None,
+                event_hints=[],
+                bet_types=["total"],
+                spread_lines=[],
+                total_side="UNDER",
+                total_line=55,
+            )
+        )
+        self.assertEqual(texas["event_hints"], ["TEXAS", "TENNESSEE"])
+
+        hawaii = capper._normalize_legacy_bridge_pick(
+            _pick(
+                selection="Hawaii Rainbow Warriors v Wyoming Cowboys Under 45.5 Points",
+                team_hint=None,
+                event_hints=[],
+                bet_types=["total"],
+                spread_lines=[],
+                total_side="UNDER",
+                total_line=45.5,
+            )
+        )
+        self.assertEqual(
+            hawaii["event_hints"],
+            ["Hawaii Rainbow Warriors", "Wyoming Cowboys"],
+        )
+
+    def test_texas_tech_typo_is_normalized(self):
+        row = capper._normalize_legacy_bridge_pick(
+            _pick(
+                selection="TEXAS TEXCH -34.5",
+                team_hint="TEXAS TEXCH",
+                event_hints=["TEXAS TEXCH"],
+                spread_lines=["-34.5"],
+            )
+        )
+        self.assertEqual(row["selection"], "TEXAS TECH -34.5")
+        self.assertEqual(row["team_hint"], "TEXAS TECH")
+        self.assertEqual(row["event_hints"], ["TEXAS TECH"])
+
+    def test_score_commentary_duplicate_is_deduped(self):
+        rows = capper._normalize_bridge_picks(
+            [
+                _pick(selection="AUBURN -10", team_hint="AUBURN", spread_lines=["-10"]),
+                _pick(
+                    selection="34-20 TYPE GAME. AUBURN -10.",
+                    team_hint="34-20 TYPE GAME. AUBURN",
+                    spread_lines=["-10"],
+                ),
+            ]
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["selection"], "AUBURN -10")
+
+    def test_bare_nfl_nickname_leak_is_blocked(self):
+        for name in ("Browns", "Steelers", "Vikings", "Saints"):
+            row = capper._normalize_legacy_bridge_pick(
+                _pick(
+                    selection=f"{name} +3.5",
+                    team_hint=name,
+                    event_hints=[name],
+                    spread_lines=["+3.5"],
+                )
+            )
+            self.assertIsNone(row)
+
+    def test_explicit_college_cowboys_matchup_is_not_blocked(self):
+        row = capper._normalize_legacy_bridge_pick(
+            _pick(
+                selection="Hawaii Rainbow Warriors v Wyoming Cowboys Under 45.5 Points",
+                team_hint=None,
+                event_hints=[],
+                bet_types=["total"],
+                spread_lines=[],
+                total_side="UNDER",
+                total_line=45.5,
+            )
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual(len(row["event_hints"]), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
