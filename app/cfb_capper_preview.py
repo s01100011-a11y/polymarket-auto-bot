@@ -173,6 +173,95 @@ def _manual_fallback_picks(raw: str) -> list[dict[str, Any]]:
     return picks
 
 
+
+def _strip_wager_suffix(value: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"\b(?:over|under)\s*\d+(?:\.\d+)?\b.*$", "", text, flags=re.I)
+    text = re.sub(r"(?<!\d)[+-]\d{1,2}(?:\.\d+)?(?!\d).*$", "", text)
+    text = re.sub(r"\b(?:ml|moneyline|money line|to win)\b.*$", "", text, flags=re.I)
+    return re.sub(r"\s+", " ", text).strip(" -@,;:.")
+
+
+def _inline_matchup_hints(selection: str) -> list[str]:
+    text = str(selection or "").strip()
+    match = re.match(r"(.+?)\s*(?:/|\bvs\.?\b|\bv\.?\b|\s@\s)\s*(.+)", text, re.I)
+    if not match:
+        return []
+    hints = []
+    for side in match.groups():
+        value = _strip_wager_suffix(side)
+        if value and len(value) <= 80:
+            hints.append(value)
+    return hints if len(hints) == 2 else []
+
+
+def _legacy_bridge_nfl_collision(pick: dict[str, Any]) -> bool:
+    """Fail closed on a bare NFL-nickname game pick leaking from the old NCAAF parser."""
+    selection = str(pick.get("selection") or "").strip()
+    team_hint = str(pick.get("team_hint") or "").strip()
+    if not selection or not team_hint:
+        return False
+    if len([x for x in (pick.get("event_hints") or []) if str(x).strip()]) >= 2:
+        return False
+    base = _strip_wager_suffix(selection)
+    base_norm = _norm_text(base)
+    hint_norm = _norm_text(team_hint)
+    if not base_norm or base_norm != hint_norm:
+        return False
+
+    # A bare nickname that is also an NFL alias is ambiguous in an NCAAF feed.
+    # Blocking it is safer than guessing; explicit two-team college matchups are
+    # retained because they carry enough context for exact event resolution.
+    for abbr in nfl.NFL_TEAMS:
+        for alias in nfl._team_aliases(abbr):
+            if base_norm == _norm_text(alias):
+                return True
+    return False
+
+
+def _normalize_legacy_bridge_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
+    row = dict(pick)
+    for key in ("selection", "team_hint"):
+        value = str(row.get(key) or "")
+        value = re.sub(r"^\s*\d{1,2}-\d{1,2}\s+TYPE\s+GAME[.:]?\s*", "", value, flags=re.I)
+        value = re.sub(r"\bTEXAS\s+TEXCH\b", "TEXAS TECH", value, flags=re.I)
+        if value:
+            row[key] = re.sub(r"\s+", " ", value).strip()
+
+    hints = []
+    for hint in row.get("event_hints") or []:
+        value = re.sub(r"\bTEXAS\s+TEXCH\b", "TEXAS TECH", str(hint), flags=re.I)
+        value = re.sub(r"\s+", " ", value).strip()
+        if value:
+            hints.append(value)
+    if hints:
+        row["event_hints"] = hints
+
+    types = {str(x).lower() for x in (row.get("bet_types") or [])}
+    if "total" in types and len(row.get("event_hints") or []) != 2:
+        inferred = _inline_matchup_hints(str(row.get("selection") or ""))
+        if inferred:
+            row["event_hints"] = inferred
+
+    if _legacy_bridge_nfl_collision(row):
+        return None
+    return row
+
+
+def _normalize_bridge_picks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for pick in rows:
+        row = _normalize_legacy_bridge_pick(pick)
+        if row is None:
+            continue
+        semantic = _semantic_fingerprint(row)
+        if semantic in seen:
+            continue
+        seen.add(semantic)
+        normalized.append(row)
+    return normalized
+
 def _semantic_fingerprint(pick: dict[str, Any]) -> str:
     """Fingerprint wager identity without transport timestamp/odds for outage dedupe."""
     canonical = {
@@ -2263,7 +2352,13 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "picks": [],
             }
 
-        bridge_picks = [p for p in (feed.get("picks") or []) if isinstance(p, dict)]
+        bridge_picks = _normalize_bridge_picks(
+            [p for p in (feed.get("picks") or []) if isinstance(p, dict)]
+        )
+        manual_fallback_picks = [
+            row for row in (_normalize_legacy_bridge_pick(p) for p in manual_fallback_picks)
+            if row is not None
+        ]
         manual_semantics = {_semantic_fingerprint(p) for p in manual_fallback_picks}
         bridge_picks = [
             p for p in bridge_picks
