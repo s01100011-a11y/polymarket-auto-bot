@@ -1931,7 +1931,7 @@ def _inject_dashboard_panel(html: str) -> str:
 """
     html = html.replace('  <div class="tabs">', panel + '  <div class="tabs">', 1)
     css = r"""
-.cfb-capper-performance{font-size:15px;line-height:1.75;margin:3px 0 9px;color:var(--muted)}.cfb-capper-performance .capper-pnl{font-size:18px;font-weight:900}.cfb-capper-performance .capper-pnl.positive,.cfb-result-line.positive{color:#86efac}.cfb-capper-performance .capper-pnl.negative,.cfb-result-line.negative{color:#fca5a5}.cfb-capper-performance .capper-pnl.flat,.cfb-result-line.flat{color:var(--muted)}.cfb-result-line{font-size:16px;font-weight:900;margin-top:6px;line-height:1.35}@media(max-width:650px){.cfb-capper-performance{font-size:16px}.cfb-capper-performance .capper-pnl{font-size:19px}.cfb-result-line{font-size:17px}}
+.cfb-capper-performance{font-size:15px;line-height:1.75;margin:3px 0 9px;color:var(--muted)}.cfb-capper-performance .capper-pnl{font-size:18px;font-weight:900}.cfb-capper-performance .capper-pnl.positive,.cfb-result-line.positive{color:#86efac}.cfb-capper-performance .capper-pnl.negative,.cfb-result-line.negative{color:#fca5a5}.cfb-capper-performance .capper-pnl.flat,.cfb-result-line.flat{color:var(--muted)}.cfb-result-line{font-size:16px;font-weight:900;margin-top:6px;line-height:1.35}.cfb-open-position{margin-top:7px;padding:9px 10px;border-radius:8px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.46);border-left:4px solid #f59e0b}.cfb-open-position .live-pnl{font-size:16px;font-weight:900}@media(max-width:650px){.cfb-capper-performance{font-size:16px}.cfb-capper-performance .capper-pnl{font-size:19px}.cfb-result-line{font-size:17px}}
 """
     html = html.replace("</style>", css + "</style>", 1)
 
@@ -2155,6 +2155,22 @@ function cfbSetTab(sourceKey,tab){
  const el=document.getElementById(sourceKey==='slam'?'cfbCapperSlam':'cfbCapperSyndicate');
  if(el&&x)el.innerHTML=cfbCapperLine(x,sourceKey);
 }
+function cfbOpenPositionList(x){
+ const items=(Array.isArray(x.positions)?x.positions:[]).filter(item=>item.sell_available);
+ if(!items.length)return '<div style="margin-top:9px"><b>Open positions</b><div style="margin-top:7px;opacity:.7">No open positions.</div></div>';
+ return '<div style="margin-top:9px"><b>Open positions</b>'+items.map(item=>{
+  const raw=item.live_pnl_usdc===null||item.live_pnl_usdc===undefined?null:Number(item.live_pnl_usdc);
+  const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
+  const pnl=raw===null?'—':(raw>0?'+':'')+'$'+raw.toFixed(2)+(item.live_pnl_pct===null||item.live_pnl_pct===undefined?'':' ('+Number(item.live_pnl_pct).toFixed(1)+'%)');
+  const entry=item.entry_price===null||item.entry_price===undefined?'—':(Number(item.entry_price)*100).toFixed(1)+'¢';
+  const live=item.current_price===null||item.current_price===undefined?'—':(Number(item.current_price)*100).toFixed(1)+'¢';
+  const shares=item.shares===null||item.shares===undefined?'—':Number(item.shares).toFixed(2);
+  const cost=item.open_cost_basis_usdc||item.stake_usdc;
+  const value=item.current_value_usdc===null||item.current_value_usdc===undefined?'—':'$'+Number(item.current_value_usdc).toFixed(2);
+  const sell=item.trade_id?'<button type="button" style="margin-top:6px" data-trade-id="'+cfbEsc(item.trade_id)+'" onclick="cfbSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  return '<div class="cfb-open-position"><b style="font-size:15px">'+cfbEsc(item.selection||item.market||'CFB position')+' · OPEN</b><br><span>'+cfbEsc(item.outcome||'')+' · Entry '+entry+' · Live '+live+'</span><br><span>Shares '+shares+' · Cost $'+Number(cost||0).toFixed(2)+' · Value '+value+'</span><div class="live-pnl '+cls+'">Live P/L '+pnl+'</div>'+sell+'</div>';
+ }).join('')+'</div>';
+}
 function cfbCapperLine(x,sourceKey){
  if(!x)return 'No tracked signals yet';
  const p=x.performance||{};
@@ -2166,7 +2182,11 @@ function cfbCapperLine(x,sourceKey){
  const missedRaw=Number(p.missed_pnl_usdc||0);
  const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
  const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
- const performance='<div class="cfb-capper-performance"><div>Bets '+(p.bets||0)+' · Open '+(p.open||0)+' · W-L-P '+(p.wins||0)+'-'+(p.losses||0)+'-'+(p.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(p.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">P/L '+pnl+'</span> · ROI '+roi+'</div><div>Missed '+Number(p.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div></div>';
+ const liveRaw=p.live_pnl_usdc===null||p.live_pnl_usdc===undefined?null:Number(p.live_pnl_usdc);
+ const livePnl=liveRaw===null?'—':(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
+ const liveClass=liveRaw===null||liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
+ const openValue=p.open_value_usdc===null||p.open_value_usdc===undefined?'—':'$'+Number(p.open_value_usdc).toFixed(2);
+ const performance='<div class="cfb-capper-performance"><div>Bets '+(p.bets||0)+' · Open '+(p.open||0)+' · W-L-P '+(p.wins||0)+'-'+(p.losses||0)+'-'+(p.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(p.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">Realized P/L '+pnl+'</span> · ROI '+roi+'</div><div><span class="capper-pnl '+liveClass+'">Live P/L '+livePnl+'</span> · Open value '+openValue+'</div><div>Missed '+Number(p.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div></div>';
  const active=cfbActiveTabs[sourceKey]||'signals';
  const specs=cfbTabSpec(x);
  const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>{
@@ -2176,9 +2196,8 @@ function cfbCapperLine(x,sourceKey){
  const spec=specs.find(s=>s[0]===active)||specs[0];
  const items=spec[3]||[];
  const body=items.length?cfbPickList(spec[1]+' signals',items,spec[4]):'<div style="margin-top:8px;opacity:.7">No '+cfbEsc(spec[1].toLowerCase())+' signals.</div>';
- return performance+tabs+body;
-}
-async function loadCfbCapperStats(){
+ return performance+cfbOpenPositionList(x)+tabs+body;
+}async function loadCfbCapperStats(){
  try{
   const r=await fetch('/api/cfb-cappers/status',{cache:'no-store'}),d=await r.json();
   if(!r.ok)throw new Error(d.detail||'CFB capper status failed');
@@ -2760,10 +2779,12 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         executions = core._load(core.EXECUTIONS_FILE)
         if not isinstance(executions, dict):
             executions = {}
+        live_marks = nfl._live_mark_map(dashboard, executions)
         performance = nfl._stats_from_executions(
             executions,
             labels=SOURCE_LABELS,
             sport="CFB",
+            live_marks=live_marks,
         )
         missed = nfl._missed_signal_stats(
             signals,
@@ -2780,6 +2801,12 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             counts[label] = {
                 "signals": len(rows),
                 "performance": performance.get(label, {}),
+                "positions": nfl._position_items(
+                    executions,
+                    label,
+                    sport="CFB",
+                    live_marks=live_marks,
+                ),
                 "preview_done": sum(1 for r in rows if r.get("status") in {"PREVIEW_DONE", "EXECUTOR_DONE"}),
                 "preview_failed": sum(1 for r in rows if r.get("status") in {"PREVIEW_FAILED", "EXECUTOR_FAILED"}),
                 "preview_queued": sum(1 for r in rows if r.get("status") in {"PREVIEW_QUEUED", "QUEUED"}),
