@@ -2102,6 +2102,30 @@ class CfbLegacyBridgeNormalizationTests(unittest.TestCase):
             )
             self.assertIsNone(row)
 
+    def test_bare_nfl_nickname_without_team_hint_is_blocked(self):
+        row = capper._normalize_legacy_bridge_pick(
+            _pick(
+                selection="Saints To Win",
+                team_hint=None,
+                event_hints=[],
+                bet_types=["moneyline"],
+                spread_lines=[],
+            )
+        )
+        self.assertIsNone(row)
+
+    def test_bare_nfl_nickname_with_corrupt_two_team_hints_is_blocked(self):
+        row = capper._normalize_legacy_bridge_pick(
+            _pick(
+                selection="Vikings To Win",
+                team_hint="Vikings",
+                event_hints=["Vikings", "DAL"],
+                bet_types=["moneyline"],
+                spread_lines=[],
+            )
+        )
+        self.assertIsNone(row)
+
     def test_explicit_college_cowboys_matchup_is_not_blocked(self):
         row = capper._normalize_legacy_bridge_pick(
             _pick(
