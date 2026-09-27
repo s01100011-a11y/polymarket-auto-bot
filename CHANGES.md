@@ -1,5 +1,14 @@
 # CHANGES
 
+## 2026-09-27 — Normalize legacy CFB bridge output in the bot (#136)
+
+- Added an execution-side compatibility layer so CFB no longer depends on the bridge being on the newest parser build.
+- Reconstructs explicit two-team matchup hints for slash/v/vs/@ totals such as Texas/Tennessee Under 55 and Hawaii/Wyoming Under 45.5.
+- Normalizes the observed `TEXAS TEXCH` typo, strips score-prediction prefixes, and semantically deduplicates repeated picks.
+- Bare NFL-nickname game picks leaking from the old NCAAF parser are failed closed, while explicit two-team college matchups remain eligible for exact CFB resolution.
+- Existing CFB lifecycle, exact-market, price/spread, stake, budget, executor, and geoblock gates are unchanged.
+
+
 ## 2026-09-27 — Retry zero-fill capper BUYs safely (#134)
 
 - Railway now treats a Termux BUY as successful only when the wallet actually gained positive shares; an old worker response with outer `ok=true` can no longer turn a 0-share fill into `DONE`.
