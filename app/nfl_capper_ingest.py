@@ -6,7 +6,7 @@ import json
 import os
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -511,6 +511,93 @@ def _type_matches(actual: str, wanted: str) -> bool:
     return any(word in actual for word in aliases[wanted])
 
 
+def _full_game_market_type_matches(actual: str, kind: str) -> bool:
+    normalized = _norm(actual)
+    allowed = {
+        "moneyline": {"moneyline"},
+        "spread": {"spread", "spreads"},
+        "total": {"total", "totals"},
+    }
+    return normalized in allowed.get(kind, set())
+
+
+def _event_date(event: Any) -> date | None:
+    schedule = getattr(event, "schedule", None)
+    for source in (schedule, event):
+        if source is None:
+            continue
+        for attr in (
+            "event_date", "eventDate",
+            "start_time", "startTime",
+            "start_date", "startDate",
+            "end_date", "endDate",
+        ):
+            value = getattr(source, attr, None)
+            if isinstance(value, date) and not isinstance(value, datetime):
+                return value
+            parsed = _parse_iso(value)
+            if parsed is not None:
+                return parsed.date()
+
+    text = " ".join([
+        str(getattr(event, "slug", "") or ""),
+        str(getattr(event, "title", "") or ""),
+    ])
+    match = re.search(r"\b(20\d{2})-(\d{2})-(\d{2})\b", text)
+    if not match:
+        return None
+    try:
+        return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return None
+
+
+def _event_key(event: Any) -> str:
+    return str(
+        getattr(event, "id", "")
+        or getattr(event, "slug", "")
+        or getattr(event, "title", "")
+    )
+
+
+def _narrow_one_team_events_by_posted_date(
+    ranked: list[tuple[int, Any, Any, str, Any]],
+    pick: dict[str, Any],
+) -> list[tuple[int, Any, Any, str, Any]]:
+    """Choose one nearby NFL game for a one-team pick without future-week guessing."""
+    posted = _parse_iso(pick.get("posted_at"))
+    if posted is None:
+        return ranked
+
+    candidates: dict[str, int] = {}
+    posted_day = posted.date()
+    for row in ranked:
+        key = _event_key(row[1])
+        event_day = _event_date(row[1])
+        if not key or event_day is None:
+            continue
+        delta_days = (event_day - posted_day).days
+        if -1 <= delta_days <= 4:
+            candidates[key] = delta_days
+
+    if not candidates:
+        return []
+
+    def priority(delta_days: int) -> tuple[int, int]:
+        return (0 if delta_days >= 0 else 1, abs(delta_days))
+
+    best_priority = min(priority(delta) for delta in candidates.values())
+    best_keys = {
+        key for key, delta in candidates.items()
+        if priority(delta) == best_priority
+    }
+    if len(best_keys) != 1:
+        return [row for row in ranked if _event_key(row[1]) in best_keys]
+
+    best_key = next(iter(best_keys))
+    return [row for row in ranked if _event_key(row[1]) == best_key]
+
+
 def _outcomes(market: Any) -> list[tuple[str, Any]]:
     outcomes = getattr(market, "outcomes", None)
     return [
@@ -548,6 +635,71 @@ def _structured_line_matches(market: Any, value: Any) -> bool | None:
         return False
 
 
+def _spread_outcome_any_line(
+    market: Any,
+    pick: dict[str, Any],
+) -> tuple[str, Any, Decimal] | None:
+    """Resolve the selected NFL team and its effective structured spread line."""
+    outcomes = [(label, obj) for label, obj in _outcomes(market) if obj is not None]
+    if len(outcomes) != 2:
+        return None
+    teams = [str(x).upper() for x in (pick.get("teams") or []) if str(x).upper() in NFL_TEAMS]
+    if not teams:
+        return None
+    selected_team = teams[0]
+
+    selected_indexes = [
+        i for i, (label, _) in enumerate(outcomes)
+        if _contains_alias(label, selected_team)
+    ]
+    if len(selected_indexes) != 1:
+        return None
+    selected_index = selected_indexes[0]
+
+    question = str(getattr(market, "question", "") or "")
+    subject_match = re.search(
+        r"(?:^|\b)Spread:\s*(.+?)\s*\(\s*([+-]\d{1,2}(?:\.\d+)?)\s*\)\s*$",
+        question,
+        re.I,
+    )
+    if not subject_match:
+        return None
+    subject = subject_match.group(1).strip()
+    try:
+        question_line = Decimal(subject_match.group(2))
+    except Exception:
+        return None
+
+    structured_raw = getattr(getattr(market, "sports", None), "line", None)
+    if structured_raw is not None:
+        try:
+            structured_line = Decimal(str(structured_raw))
+        except Exception:
+            return None
+        if structured_line != question_line:
+            return None
+        base_line = structured_line
+    else:
+        base_line = question_line
+
+    subject_indexes = []
+    subject_norm = _norm(subject)
+    for i, (label, _) in enumerate(outcomes):
+        label_norm = _norm(label)
+        if subject_norm and (
+            subject_norm == label_norm
+            or f" {subject_norm} " in f" {label_norm} "
+            or f" {label_norm} " in f" {subject_norm} "
+        ):
+            subject_indexes.append(i)
+    if len(subject_indexes) != 1:
+        return None
+
+    effective_line = base_line if selected_index == subject_indexes[0] else -base_line
+    label, obj = outcomes[selected_index]
+    return label, obj, effective_line
+
+
 def _select_outcome(market: Any, pick: dict[str, Any], kind: str) -> tuple[str, Any] | None:
     mtext = _market_text(market)
     teams = [str(x).upper() for x in (pick.get("teams") or [])]
@@ -565,16 +717,18 @@ def _select_outcome(market: Any, pick: dict[str, Any], kind: str) -> tuple[str, 
         return None
 
     if kind == "spread":
-        team = teams[0]
-        line = list(pick.get("spread_lines") or [None])[0]
-        if not _line_matches(mtext, line, signed=True):
+        requested = list(pick.get("spread_lines") or [None])[0]
+        try:
+            requested_line = Decimal(str(requested))
+        except Exception:
             return None
-        for label, obj in outcomes:
-            if _contains_alias(label, team) and _line_matches(label + " " + mtext, line, signed=True):
-                return label, obj
-        if _contains_alias(mtext, team) and _norm(outcomes[0][0]) == "yes":
-            return outcomes[0]
-        return None
+        selected = _spread_outcome_any_line(market, pick)
+        if selected is None:
+            return None
+        label, obj, effective_line = selected
+        if effective_line != requested_line:
+            return None
+        return label, obj
 
     if kind == "total":
         side = str(pick.get("total_side") or "").upper()
@@ -675,7 +829,7 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
                 continue
             for market in getattr(event, "markets", ()) or ():
                 actual = _market_type(market)
-                if not _type_matches(actual, kind):
+                if not _full_game_market_type_matches(actual, kind):
                     continue
                 outcome = _select_outcome(market, pick, kind)
                 if outcome is None:
@@ -692,6 +846,13 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
 
     if not ranked:
         raise ValueError(f"No exact open Polymarket NFL {kind} market matched '{pick.get('selection')}'")
+
+    if len(teams) == 1:
+        ranked = _narrow_one_team_events_by_posted_date(ranked, pick)
+        if not ranked:
+            raise ValueError(
+                "No unique nearby NFL event matched the one-team pick; unattended trade blocked"
+            )
 
     # When Telegram gives us only one team for a game total, the exact line
     # must still identify exactly one NFL event. Never use ranking heuristics
