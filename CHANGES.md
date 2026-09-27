@@ -1,5 +1,16 @@
 # CHANGES
 
+## 2026-09-27 — Safe Telegram outage recovery for NFL/CFB (#129)
+
+- Expanded NFL bridge lookback to 24 hours by default so picks missed during a Telegram outage can be rediscovered after reconnect.
+- Added a bounded 24-hour recovery window for NFL and CFB while preserving the normal 180-second fast-path freshness window.
+- Delayed recovery can enqueue a real BUY only when the exact matched event is still confirmed pregame; live, closed, or lifecycle-unknown NFL events fail closed.
+- CFB recovery likewise requires a matched PREGAME event plus `CFB_CAPPER_LIVE_ENABLED`.
+- Every recovery BUY still passes the existing LIVE/AUTO gates, exact market/outcome matching, current best-ask and spread limits, per-trade cap, daily budget, executor readiness, and Termux geoblock checks.
+- Existing stale NFL records are allowed one recovery re-check so picks missed during the incident are not permanently stranded.
+- Added recovery-window and pregame lifecycle regression tests.
+
+
 ## 2026-09-27 — NBA/WNBA Slack PW failover hardening (#127)
 
 - Confirmed the production Tailnet direct-feed outage is upstream of Railway: the Railway Tailscale node is healthy while TLS handshakes to the NBAMonitor host time out on both MagicDNS and the peer IP.

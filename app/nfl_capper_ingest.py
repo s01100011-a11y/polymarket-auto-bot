@@ -716,6 +716,56 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
     return best[1], best[2], best[3], best[4]
 
 
+def _matched_event_phase(event: Any, market: Any, now: datetime | None = None) -> str:
+    """Fail closed when deciding whether an outage-recovered NFL pick is still pregame."""
+    current = now or datetime.now(timezone.utc)
+    state = getattr(event, "state", None)
+    schedule = getattr(event, "schedule", None)
+    event_sports = getattr(event, "sports", None)
+    market_sports = getattr(market, "sports", None)
+    market_state = getattr(market, "state", None)
+
+    status = _norm(
+        getattr(event_sports, "game_status", "")
+        or getattr(market_sports, "game_status", "")
+    )
+    if bool(getattr(state, "closed", False)) or bool(getattr(state, "ended", False)):
+        return "CLOSED"
+    if getattr(market_state, "accepting_orders", None) is False:
+        return "CLOSED"
+    if status in {"final", "finished", "ended", "complete", "completed", "closed", "post", "postgame"} or status.startswith("final"):
+        return "CLOSED"
+    if bool(getattr(state, "live", False)) or status in {"live", "in progress", "inprogress", "halftime", "half time"}:
+        return "LIVE"
+
+    for source in (market_sports, schedule, event):
+        if source is None:
+            continue
+        for attr in (
+            "event_start_time", "eventStartTime",
+            "game_start_time", "gameStartTime",
+            "start_time", "startTime",
+            "scheduled_at", "scheduledAt",
+            "start_date", "startDate",
+        ):
+            value = getattr(source, attr, None)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+                continue
+            parsed = _parse_iso(value)
+            if parsed is not None:
+                return "LIVE" if current >= parsed else "PREGAME"
+
+    # Missing kickoff metadata is not enough to authorize a delayed unattended BUY.
+    return "UNKNOWN"
+
+
+def _is_recovery_age(age_seconds: float, normal_max: int, recovery_max: int) -> bool:
+    return age_seconds > normal_max and age_seconds <= recovery_max
+
+
 def _pending_auto_budget(remote: Any) -> Decimal:
     total = Decimal("0")
     try:
@@ -738,6 +788,7 @@ def _prepare_pick(
     core: Any,
     remote: Any,
     unit_usdc: Decimal,
+    recovery: bool = False,
 ) -> dict[str, Any]:
     kind, reason = _classify_pick(pick)
     if kind is None:
@@ -761,6 +812,15 @@ def _prepare_pick(
         )
 
     event, market, outcome_label, outcome_obj = _find_market(pick, kind)
+    recovery_phase = _matched_event_phase(event, market) if recovery else None
+    if recovery and recovery_phase != "PREGAME":
+        return {
+            "status": "IGNORED_STALE",
+            "reason": f"outage recovery requires a confirmed pregame market; phase={recovery_phase}",
+            "recovery_checked_at": _now_iso(),
+            "recovery_phase": recovery_phase,
+        }
+
     asset_id = str(getattr(outcome_obj, "token_id", None) or getattr(outcome_obj, "position_id", None) or "")
     if not asset_id:
         raise RuntimeError("Matched Polymarket market has no tradable outcome token")
@@ -818,6 +878,7 @@ def _prepare_pick(
         "strategy_posted_at": pick.get("posted_at"),
         "strategy_selection": pick.get("selection"),
         "strategy_telegram_source": pick.get("source"),
+        "strategy_recovered_after_bridge_outage": bool(recovery),
     }
     queued = remote._enqueue("BUY", payload)
     return {
@@ -834,6 +895,8 @@ def _prepare_pick(
         "stake_usdc": str(stake),
         "max_price": str(max_price),
         "spread": str(spread),
+        "recovered_after_bridge_outage": bool(recovery),
+        "recovery_phase": recovery_phase,
     }
 
 
@@ -1098,6 +1161,14 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     enabled = os.getenv("NFL_CAPPER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
     poll_seconds = max(5, int(os.getenv("NFL_CAPPER_POLL_SECONDS", "15")))
     max_age_seconds = max(30, int(os.getenv("NFL_CAPPER_MAX_PICK_AGE_SECONDS", "180")))
+    recovery_max_age_seconds = max(
+        max_age_seconds,
+        int(os.getenv("NFL_CAPPER_RECOVERY_MAX_PICK_AGE_SECONDS", "86400")),
+    )
+    feed_window_minutes = max(
+        180,
+        min(4320, int(os.getenv("NFL_CAPPER_FEED_WINDOW_MINUTES", "1440"))),
+    )
     unit_usdc = Decimal(os.getenv("NFL_CAPPER_UNIT_USDC", "10"))
     test_preview_raw = os.getenv("NFL_CAPPER_TEST_PREVIEW_JSON", "").strip()
     test_preview_marker = core.DATA_DIR / "nfl_capper_test_preview.json"
@@ -1153,7 +1224,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 response = await client.get(
                     f"{bridge_url}/public/nfl",
                     params={
-                        "minutes": 180,
+                        "minutes": feed_window_minutes,
                         "limit": 120,
                         "include_graded": "false",
                         "require_fresh": "true",
@@ -1241,9 +1312,15 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 current["pick"] = pick
                 changed = True
             if current and current.get("status") in {
-                "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED", "IGNORED_STALE",
+                "QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED",
                 "IGNORED_UNSUPPORTED", "IGNORED_UNTRACKED_SOURCE",
             }:
+                continue
+            if (
+                current
+                and current.get("status") == "IGNORED_STALE"
+                and current.get("recovery_checked_at")
+            ):
                 continue
 
             source_label = _source_label(pick)
@@ -1277,9 +1354,13 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
 
             posted = _parse_iso(pick.get("posted_at"))
             age = (now - posted).total_seconds() if posted else float("inf")
-            if age > max_age_seconds:
+            recovery = _is_recovery_age(age, max_age_seconds, recovery_max_age_seconds)
+            if age > recovery_max_age_seconds:
                 base_record["status"] = "IGNORED_STALE"
-                base_record["reason"] = f"pick age exceeds {max_age_seconds}s freshness limit"
+                base_record["reason"] = (
+                    f"pick age exceeds {recovery_max_age_seconds}s outage-recovery limit"
+                )
+                base_record["recovery_checked_at"] = _now_iso()
                 base_record["updated_at"] = _now_iso()
                 signals[fp] = base_record
                 changed = True
@@ -1310,8 +1391,17 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 continue
 
             try:
-                result = await asyncio.to_thread(_prepare_pick, pick, core=core, remote=remote, unit_usdc=unit_usdc)
+                result = await asyncio.to_thread(
+                    _prepare_pick,
+                    pick,
+                    core=core,
+                    remote=remote,
+                    unit_usdc=unit_usdc,
+                    recovery=recovery,
+                )
                 base_record.update(result)
+                if recovery:
+                    base_record["recovery_checked_at"] = _now_iso()
                 base_record["updated_at"] = _now_iso()
                 base_record.pop("last_error", None)
                 signals[fp] = base_record
@@ -1320,7 +1410,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     "NFL_CAPPER_SIGNAL "
                     f"status={base_record.get('status')} source={source_label!r} "
                     f"telegram_source={pick.get('source')!r} selection={pick.get('selection')!r} "
-                    f"request_id={base_record.get('request_id')!r}",
+                    f"request_id={base_record.get('request_id')!r} recovery={recovery}",
                     flush=True,
                 )
             except Exception as exc:
