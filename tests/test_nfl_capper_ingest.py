@@ -847,6 +847,103 @@ class NflStructuredSpreadAndDateResolutionTests(unittest.TestCase):
         self.assertEqual(label, "Steelers")
         self.assertEqual(outcome.token_id, "pit")
 
+    def test_better_spread_fallback_chooses_nearest_safer_same_game_line(self):
+        cowboys_65 = SimpleNamespace(label="Cowboys", token_id="dal-65")
+        commanders_65 = SimpleNamespace(label="Commanders", token_id="was-65")
+        market_65 = SimpleNamespace(
+            id="dal-was-spread-6-5",
+            question="Spread: Cowboys (-6.5)",
+            slug="nfl-dal-was-2026-09-27-spread-6pt5",
+            sports=SimpleNamespace(sports_market_type="spread", line=-6.5),
+            outcomes=SimpleNamespace(yes=cowboys_65, no=commanders_65),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        cowboys_75 = SimpleNamespace(label="Cowboys", token_id="dal-75")
+        commanders_75 = SimpleNamespace(label="Commanders", token_id="was-75")
+        market_75 = SimpleNamespace(
+            id="dal-was-spread-7-5",
+            question="Spread: Cowboys (-7.5)",
+            slug="nfl-dal-was-2026-09-27-spread-7pt5",
+            sports=SimpleNamespace(sports_market_type="spread", line=-7.5),
+            outcomes=SimpleNamespace(yes=cowboys_75, no=commanders_75),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        event = SimpleNamespace(
+            id="dal-was-2026-09-27",
+            slug="nfl-dal-was-2026-09-27",
+            title="Dallas Cowboys vs Washington Commanders",
+            markets=[market_65, market_75],
+        )
+        pick = _pick(
+            posted_at="2026-09-27T18:54:45+00:00",
+            selection="COMMANDERS +7",
+            teams=["WAS"],
+            bet_types=["spread"],
+            spread_lines=["+7"],
+        )
+
+        with patch.object(
+            capper,
+            "PublicClient",
+            return_value=NflCapperMarketResolutionTests._client([event]),
+        ):
+            matched_event, matched_market, label, outcome, line = capper._find_better_spread_fallback(
+                pick,
+                max_distance=Decimal("1.0"),
+            )
+
+        self.assertEqual(matched_event.slug, "nfl-dal-was-2026-09-27")
+        self.assertEqual(matched_market.id, "dal-was-spread-7-5")
+        self.assertEqual(label, "Commanders")
+        self.assertEqual(outcome.token_id, "was-75")
+        self.assertEqual(line, Decimal("7.5"))
+
+    def test_better_spread_fallback_rejects_worse_or_too_distant_lines(self):
+        cowboys_65 = SimpleNamespace(label="Cowboys", token_id="dal-65")
+        commanders_65 = SimpleNamespace(label="Commanders", token_id="was-65")
+        market_65 = SimpleNamespace(
+            id="dal-was-spread-6-5",
+            question="Spread: Cowboys (-6.5)",
+            slug="nfl-dal-was-2026-09-27-spread-6pt5",
+            sports=SimpleNamespace(sports_market_type="spread", line=-6.5),
+            outcomes=SimpleNamespace(yes=cowboys_65, no=commanders_65),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        cowboys_85 = SimpleNamespace(label="Cowboys", token_id="dal-85")
+        commanders_85 = SimpleNamespace(label="Commanders", token_id="was-85")
+        market_85 = SimpleNamespace(
+            id="dal-was-spread-8-5",
+            question="Spread: Cowboys (-8.5)",
+            slug="nfl-dal-was-2026-09-27-spread-8pt5",
+            sports=SimpleNamespace(sports_market_type="spread", line=-8.5),
+            outcomes=SimpleNamespace(yes=cowboys_85, no=commanders_85),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        event = SimpleNamespace(
+            id="dal-was-2026-09-27",
+            slug="nfl-dal-was-2026-09-27",
+            title="Dallas Cowboys vs Washington Commanders",
+            markets=[market_65, market_85],
+        )
+        pick = _pick(
+            posted_at="2026-09-27T18:54:45+00:00",
+            selection="COMMANDERS +7",
+            teams=["WAS"],
+            bet_types=["spread"],
+            spread_lines=["+7"],
+        )
+
+        with patch.object(
+            capper,
+            "PublicClient",
+            return_value=NflCapperMarketResolutionTests._client([event]),
+        ):
+            with self.assertRaisesRegex(ValueError, "No safer same-game NFL spread"):
+                capper._find_better_spread_fallback(
+                    pick,
+                    max_distance=Decimal("1.0"),
+                )
+
     def test_one_team_moneyline_narrows_to_current_week_event(self):
         current = self._moneyline_event(
             "nfl-min-tb-2026-09-27",

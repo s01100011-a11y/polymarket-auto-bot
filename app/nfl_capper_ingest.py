@@ -700,6 +700,118 @@ def _spread_outcome_any_line(
     return label, obj, effective_line
 
 
+def _format_signed_spread_line(value: Decimal) -> str:
+    number = value.normalize()
+    body = format(abs(number), "f")
+    if "." in body:
+        body = body.rstrip("0").rstrip(".")
+    return ("+" if number >= 0 else "-") + body
+
+
+def _find_better_spread_fallback(
+    pick: dict[str, Any],
+    *,
+    max_distance: Decimal,
+) -> tuple[Any, Any, str, Any, Decimal]:
+    """Resolve the nearest open same-game spread that is strictly better for the picked team."""
+    teams = [str(x).upper() for x in (pick.get("teams") or []) if str(x).upper() in NFL_TEAMS]
+    if not teams:
+        raise ValueError("NFL spread fallback needs one recognized team")
+    try:
+        requested = Decimal(str(list(pick.get("spread_lines") or [None])[0]))
+    except Exception as exc:
+        raise ValueError("NFL spread fallback needs one requested spread line") from exc
+    if max_distance <= 0:
+        raise ValueError("NFL safer-spread fallback distance is disabled")
+
+    search_queries: list[str] = []
+    for candidate in (_team_name(teams[0]), *_team_aliases(teams[0])):
+        text = str(candidate or "").strip()
+        if text and text.casefold() not in {q.casefold() for q in search_queries}:
+            search_queries.append(text)
+
+    rows: list[tuple[int, Any, Any, str, Any, Decimal]] = []
+    with PublicClient() as client:
+        events_by_key: dict[str, Any] = {}
+        for query in search_queries:
+            result = client.list_events(
+                title_search=query,
+                closed=False,
+                page_size=30,
+            ).first_page()
+            for event in result.items:
+                key = _event_key(event)
+                if key:
+                    events_by_key[key] = event
+
+        for event in events_by_key.values():
+            event_slug = _norm(getattr(event, "slug", ""))
+            if event_slug and not event_slug.startswith("nfl-"):
+                continue
+            etext = _norm(
+                " ".join(
+                    [
+                        str(getattr(event, "title", "") or ""),
+                        str(getattr(event, "slug", "") or ""),
+                    ]
+                )
+            )
+            if not all(_contains_alias(etext, team) for team in teams[:2]):
+                continue
+            for market in getattr(event, "markets", ()) or ():
+                if not _full_game_market_type_matches(_market_type(market), "spread"):
+                    continue
+                if not getattr(getattr(market, "state", None), "accepting_orders", False):
+                    continue
+                selected = _spread_outcome_any_line(market, pick)
+                if selected is None:
+                    continue
+                label, obj, line = selected
+                if line == requested:
+                    continue
+                distance = abs(line - requested)
+                rows.append((int(distance * 1000), event, market, label, obj, line))
+
+    if len(teams) == 1:
+        rows = _narrow_one_team_events_by_posted_date(rows, pick)  # type: ignore[arg-type]
+
+    if not rows:
+        raise ValueError("No open same-game NFL spread alternatives were found")
+
+    event_keys = {_event_key(row[1]) for row in rows}
+    event_keys.discard("")
+    if len(event_keys) != 1:
+        raise ValueError("NFL spread alternatives matched multiple nearby events; unattended trade blocked")
+
+    available = sorted({row[5] for row in rows})
+    safer = [
+        row
+        for row in rows
+        if row[5] > requested and (row[5] - requested) <= max_distance
+    ]
+    if not safer:
+        available_text = ", ".join(_format_signed_spread_line(line) for line in available)
+        raise ValueError(
+            "No safer same-game NFL spread is available within "
+            + _format_signed_spread_line(max_distance).lstrip("+")
+            + " points; open alternatives: "
+            + available_text
+        )
+
+    safer.sort(key=lambda row: (row[0], row[5]))
+    best = safer[0]
+    best_line = best[5]
+    same_line = [row for row in safer if row[5] == best_line]
+    market_ids = {
+        str(getattr(row[2], "id", "") or getattr(row[2], "slug", ""))
+        for row in same_line
+    }
+    market_ids.discard("")
+    if len(market_ids) > 1:
+        raise ValueError("Multiple Polymarket markets expose the same safer NFL spread; unattended trade blocked")
+    return best[1], best[2], best[3], best[4], best_line
+
+
 def _select_outcome(market: Any, pick: dict[str, Any], kind: str) -> tuple[str, Any] | None:
     mtext = _market_text(market)
     teams = [str(x).upper() for x in (pick.get("teams") or [])]
@@ -975,6 +1087,8 @@ def _prepare_pick(
     remote: Any,
     unit_usdc: Decimal,
     recovery: bool = False,
+    better_spread_fallback_enabled: bool = False,
+    max_alt_spread_points: Decimal = Decimal("1.0"),
 ) -> dict[str, Any]:
     kind, reason = _classify_pick(pick)
     if kind is None:
@@ -997,7 +1111,31 @@ def _prepare_pick(
             + " exceeds MAX_AUTO_TRADE_USDC=$" + str(core.MAX_AUTO_TRADE_USDC)
         )
 
-    event, market, outcome_label, outcome_obj = _find_market(pick, kind)
+    requested_spread_line: str | None = None
+    executed_spread_line: str | None = None
+    alternate_spread_fallback = False
+    try:
+        event, market, outcome_label, outcome_obj = _find_market(pick, kind)
+    except ValueError as exact_exc:
+        if kind != "spread" or not better_spread_fallback_enabled:
+            raise
+        try:
+            event, market, outcome_label, outcome_obj, fallback_line = _find_better_spread_fallback(
+                pick,
+                max_distance=max_alt_spread_points,
+            )
+        except Exception as fallback_exc:
+            raise ValueError(f"{exact_exc}; safer spread fallback failed: {fallback_exc}") from fallback_exc
+        requested = Decimal(str(list(pick.get("spread_lines") or [None])[0]))
+        requested_spread_line = _format_signed_spread_line(requested)
+        executed_spread_line = _format_signed_spread_line(fallback_line)
+        alternate_spread_fallback = True
+
+    if kind == "spread" and requested_spread_line is None:
+        requested = Decimal(str(list(pick.get("spread_lines") or [None])[0]))
+        requested_spread_line = _format_signed_spread_line(requested)
+        executed_spread_line = requested_spread_line
+
     recovery_phase = _matched_event_phase(event, market) if recovery else None
     if recovery and recovery_phase != "PREGAME":
         return {
@@ -1065,6 +1203,9 @@ def _prepare_pick(
         "strategy_selection": pick.get("selection"),
         "strategy_telegram_source": pick.get("source"),
         "strategy_recovered_after_bridge_outage": bool(recovery),
+        "strategy_requested_spread_line": requested_spread_line,
+        "strategy_executed_spread_line": executed_spread_line,
+        "strategy_alternate_spread_fallback": alternate_spread_fallback,
     }
     queued = remote._enqueue("BUY", payload)
     return {
@@ -1083,6 +1224,9 @@ def _prepare_pick(
         "spread": str(spread),
         "recovered_after_bridge_outage": bool(recovery),
         "recovery_phase": recovery_phase,
+        "requested_spread_line": requested_spread_line,
+        "executed_spread_line": executed_spread_line,
+        "alternate_spread_fallback": alternate_spread_fallback,
     }
 
 
@@ -1438,6 +1582,14 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         min(4320, int(os.getenv("NFL_CAPPER_FEED_WINDOW_MINUTES", "1440"))),
     )
     unit_usdc = Decimal(os.getenv("NFL_CAPPER_UNIT_USDC", "10"))
+    better_spread_fallback_enabled = os.getenv(
+        "NFL_CAPPER_BETTER_SPREAD_FALLBACK_ENABLED",
+        "false",
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    max_alt_spread_points = max(
+        Decimal("0"),
+        Decimal(os.getenv("NFL_CAPPER_ALT_SPREAD_MAX_POINTS", "1.0")),
+    )
     no_fill_retry_limit = max(0, int(os.getenv("NFL_CAPPER_NO_FILL_RETRIES", "2")))
     test_preview_raw = os.getenv("NFL_CAPPER_TEST_PREVIEW_JSON", "").strip()
     test_preview_marker = core.DATA_DIR / "nfl_capper_test_preview.json"
@@ -1692,6 +1844,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     remote=remote,
                     unit_usdc=unit_usdc,
                     recovery=recovery,
+                    better_spread_fallback_enabled=better_spread_fallback_enabled,
+                    max_alt_spread_points=max_alt_spread_points,
                 )
                 base_record.update(result)
                 if recovery:
@@ -1881,6 +2035,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             "unit_usdc": str(unit_usdc),
             "poll_seconds": poll_seconds,
             "max_pick_age_seconds": max_age_seconds,
+            "better_spread_fallback_enabled": better_spread_fallback_enabled,
+            "max_alt_spread_points": str(max_alt_spread_points),
             "auto_trading": auto_trading,
             "live_trading": live_trading,
             "auto_live": bool(enabled and auto_trading and live_trading),

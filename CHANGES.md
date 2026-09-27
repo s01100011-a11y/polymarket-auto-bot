@@ -1,5 +1,15 @@
 # CHANGES
 
+## 2026-09-28 — Safer NFL alternate-spread outage recovery (#148)
+
+- NFL still requires the exact Telegram spread first. When the exact line is not listed, an opt-in fallback can resolve only the same unique nearby NFL event and choose the nearest **strictly better** spread for the selected team.
+- The fallback is bounded by `NFL_CAPPER_ALT_SPREAD_MAX_POINTS` (default 1.0 point) and is disabled by default via `NFL_CAPPER_BETTER_SPREAD_FALLBACK_ENABLED=false`.
+- Worse lines are never auto-substituted. Ambiguous events, duplicate markets, closed markets, and alternatives outside the configured distance remain blocked.
+- Existing LIVE/AUTO, Termux executor/geoblock, MAX_PRICE, MAX_SPREAD, stake cap, daily budget, and duplicate-position controls remain unchanged.
+- Execution audit records now retain requested vs executed spread line plus whether the safer-line fallback was used.
+- Added regressions for nearest-safer selection and rejecting worse/too-distant alternatives.
+
+
 ## 2026-09-27 — Close finished CFB games from matched event date (#146)
 
 - ESPN reconciliation now prefers the persisted matched CFB `event_start_at` date instead of relying only on the Telegram post date, so early-posted picks still find the actual game after it finishes.
