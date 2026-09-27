@@ -344,12 +344,10 @@ def _record_nfl_collision(record: dict[str, Any]) -> bool:
     if not selection:
         return False
 
-    event_hints = []
-    if isinstance(pick, dict):
-        event_hints = [x for x in (pick.get("event_hints") or []) if str(x).strip()]
-    if len(event_hints) >= 2:
-        return False
-
+    # Persisted legacy metadata can itself be corrupted (the original leak
+    # sometimes carried unrelated event_hints), so classify the visible wager
+    # text rather than trusting those stale hints. An explicit college matchup
+    # will not reduce to a bare NFL nickname here.
     base = _strip_wager_suffix(selection)
     base_norm = _norm_text(base)
     if not base_norm:
