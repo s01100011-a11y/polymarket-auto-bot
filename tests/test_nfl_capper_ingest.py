@@ -496,7 +496,16 @@ class NflCapperStatsTests(unittest.TestCase):
                 "settlement": {"result": "PUSH"},
             },
         }
-        stats = capper._stats_from_executions(executions)
+        live_marks = {
+            "slam-open": {
+                "id": "slam-open",
+                "entry_price": "0.50",
+                "current_price": "0.625",
+                "shares": "20",
+                "estimated_pnl": "2.50",
+            }
+        }
+        stats = capper._stats_from_executions(executions, live_marks=live_marks)
         slam = stats["Slam - NFL"]
         syndicate = stats["Syndicate - NFL"]
 
@@ -505,6 +514,9 @@ class NflCapperStatsTests(unittest.TestCase):
         self.assertEqual(slam["wins"], 1)
         self.assertEqual(slam["losses"], 0)
         self.assertEqual(slam["realized_pnl_usdc"], "15.00")
+        self.assertEqual(slam["live_pnl_usdc"], "2.50")
+        self.assertEqual(slam["open_cost_basis_usdc"], "10.00")
+        self.assertEqual(slam["open_value_usdc"], "12.50")
         self.assertEqual(slam["roi_pct"], "75.0")
 
         self.assertEqual(syndicate["bets"], 2)
@@ -727,12 +739,30 @@ class NflCapperPositionTests(unittest.TestCase):
             },
         }
 
-        items = capper._position_items(executions, "Slam - NFL", sport="NFL")
+        live_marks = {
+            "open": {
+                "id": "open",
+                "entry_price": "0.50",
+                "current_price": "0.60",
+                "shares": "20",
+                "estimated_pnl": "2.00",
+            }
+        }
+        items = capper._position_items(
+            executions,
+            "Slam - NFL",
+            sport="NFL",
+            live_marks=live_marks,
+        )
         by_id = {item["trade_id"]: item for item in items}
 
         self.assertEqual(set(by_id), {"open", "win"})
         self.assertTrue(by_id["open"]["sell_available"])
         self.assertFalse(by_id["open"]["finished"])
+        self.assertEqual(by_id["open"]["live_pnl_usdc"], "2.00")
+        self.assertEqual(by_id["open"]["live_pnl_pct"], "20.0")
+        self.assertEqual(by_id["open"]["current_value_usdc"], "12.00")
+        self.assertEqual(by_id["open"]["open_cost_basis_usdc"], "10.00")
         self.assertFalse(by_id["win"]["sell_available"])
         self.assertTrue(by_id["win"]["finished"])
         self.assertEqual(by_id["win"]["result"], "WIN")
