@@ -9,6 +9,30 @@ from app import termux_executor_dashboard as remote
 
 
 class ExecutorQueueSafetyTests(unittest.TestCase):
+    def test_buy_result_requires_positive_fill_even_if_outer_body_says_ok(self):
+        self.assertFalse(
+            remote._effective_executor_result_ok(
+                "BUY",
+                True,
+                {"ok": False, "filled_shares": "0", "status": "TEST_BUY_UNFILLED_CANCELED"},
+            )
+        )
+        self.assertFalse(
+            remote._effective_executor_result_ok(
+                "BUY",
+                True,
+                {"filled_shares": "0"},
+            )
+        )
+        self.assertTrue(
+            remote._effective_executor_result_ok(
+                "BUY",
+                True,
+                {"filled_shares": "1.25"},
+            )
+        )
+        self.assertTrue(remote._effective_executor_result_ok("PREVIEW", True, {}))
+
     def test_pending_buy_expires(self):
         data = {
             "exec-test": {
