@@ -1890,6 +1890,9 @@ def _refresh_unmatched_record(record: dict[str, Any]) -> bool:
     if _apply_scoreboard_snapshot(record, pick):
         changed = True
     espn_phase = str(record.get("espn_phase") or "").upper()
+    if espn_phase in {"PREGAME", "LIVE", "CLOSED"} and record.get("event_phase") != espn_phase:
+        record["event_phase"] = espn_phase
+        changed = True
     if espn_phase == "CLOSED":
         if record.get("status") != "EVENT_CLOSED":
             record["status"] = "EVENT_CLOSED"
