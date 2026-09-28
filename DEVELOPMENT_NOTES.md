@@ -1,3 +1,11 @@
+## 2026-09-28 — Remove Termux phone emergency ceiling
+
+- Removed the independent local `EXECUTOR_EMERGENCY_MAX_USDC` / legacy `EXECUTOR_MAX_USDC` hard ceiling from `scripts/termux_executor.py`.
+- Termux still requires the server-stamped current dashboard `MAX_AUTO_TRADE_USDC` authorization and rejects any order whose budget exceeds that server cap.
+- Existing market-type, exact-token, geoblock, max-price, max-spread, order-book, minimum-size, duplicate/journal, and server budget controls are unchanged.
+- Added regression coverage proving a budget above the former $500 phone ceiling is allowed when it remains within the server-stamped dashboard cap.
+- Runtime note: an already-running phone executor must pull this commit and restart before the removed local ceiling takes effect.
+
 ## 2026-09-28 — Immutable call-time unit snapshots for missed P/L
 
 - Root cause: `_missed_signal_stats()` accepted each capper's current unit value as a fallback, while active signal rows also refreshed top-level sizing fields from the current fixed/AUTO % setting. That could make historical missed calls move when the current unit changed.
