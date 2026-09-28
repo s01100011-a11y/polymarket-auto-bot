@@ -34,9 +34,11 @@ class CfbSourceAndSizingTests(unittest.TestCase):
         self.assertEqual(capper._source_label(_pick(source="The Syndicate")), "Syndicate - CFB")
         self.assertIsNone(capper._source_label(_pick(source="Blacksmith Bets Standard VIP")))
 
-    def test_two_units_is_twenty_dollars(self):
-        self.assertEqual(capper._stake_for_pick(_pick(units=2)), Decimal("20.00"))
-        self.assertEqual(capper._stake_for_pick(_pick(units=None)), Decimal("10.00"))
+    def test_posted_units_are_profit_targets_not_flat_stakes(self):
+        self.assertEqual(capper.nfl._target_profit_for_pick(_pick(units=2)), Decimal("20.00"))
+        self.assertEqual(capper.nfl._target_profit_for_pick(_pick(units=None)), Decimal("10.00"))
+        self.assertEqual(capper._stake_for_pick(_pick(units=2)), Decimal("23.00"))
+        self.assertEqual(capper._stake_for_pick(_pick(units=None)), Decimal("11.50"))
 
     def test_manual_fallback_is_marked_and_keeps_normal_source_mapping(self):
         rows = capper._manual_fallback_picks(
@@ -1058,11 +1060,15 @@ class CfbPreviewSafetyTests(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "PREVIEW_QUEUED")
-        self.assertEqual(result["stake_usdc"], "20.00")
+        self.assertEqual(result["stake_usdc"], "15.09")
+        self.assertEqual(result["target_profit_usdc"], "20.00")
+        self.assertEqual(result["sizing_mode"], "TO_WIN")
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][0], "PREVIEW")
         self.assertEqual(calls[0][1]["market_type"], "total")
-        self.assertEqual(calls[0][1]["budget_usdc"], "20.00")
+        self.assertEqual(calls[0][1]["budget_usdc"], "15.09")
+        self.assertEqual(calls[0][1]["strategy_target_profit_usdc"], "20.00")
+        self.assertEqual(calls[0][1]["strategy_sizing_mode"], "TO_WIN")
         self.assertTrue(calls[0][1]["trade_id"].startswith("cfb-capper-"))
         self.assertFalse(calls[0][1]["auto"])
 
@@ -1143,6 +1149,9 @@ class CfbPreviewSafetyTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["strategy_execution_mode"], "manual")
         self.assertEqual(calls[0][1]["asset_id"], "baylor-token")
         self.assertEqual(calls[0][1]["max_price"], "0.47")
+        self.assertEqual(calls[0][1]["budget_usdc"], "17.74")
+        self.assertEqual(calls[0][1]["strategy_target_profit_usdc"], "20.00")
+        self.assertEqual(calls[0][1]["strategy_sizing_mode"], "TO_WIN")
 
     def test_manual_buy_uses_saved_match_without_re_resolving_event(self):
         saved = {
