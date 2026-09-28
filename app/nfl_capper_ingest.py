@@ -7,11 +7,11 @@ import os
 import re
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP, ROUND_UP
 from typing import Any
 
 import httpx
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from polymarket import PublicClient
 
 from app import dashboard_live_control_v4 as live_control
@@ -161,8 +161,82 @@ def _units_for_pick(pick: dict[str, Any]) -> Decimal:
     return Decimal("1") if units <= 1 else units
 
 
-def _stake_for_pick(pick: dict[str, Any], unit_usdc: Decimal = Decimal("10")) -> Decimal:
-    return (_units_for_pick(pick) * unit_usdc).quantize(Decimal("0.01"))
+def _target_profit_for_pick(
+    pick: dict[str, Any],
+    unit_usdc: Decimal = Decimal("10"),
+) -> Decimal:
+    """Dollar profit target represented by the posted unit count."""
+    amount = Decimal(str(unit_usdc))
+    if amount <= 0:
+        raise ValueError("unit size must be positive")
+    return (_units_for_pick(pick) * amount).quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP,
+    )
+
+
+def _stake_to_win_at_price(target_profit_usdc: Any, price: Any) -> Decimal:
+    """Cash budget required at a binary-market price to win the target profit."""
+    target = Decimal(str(target_profit_usdc))
+    p = Decimal(str(price))
+    if target <= 0:
+        raise ValueError("target profit must be positive")
+    if p <= 0 or p >= 1:
+        raise ValueError(f"price must be between 0 and 1, got {p}")
+    # shares = stake / p; winning profit = shares - stake.
+    # stake = target * p / (1 - p). Round up so the target is never undersized.
+    return (target * p / (Decimal("1") - p)).quantize(
+        Decimal("0.01"),
+        rounding=ROUND_UP,
+    )
+
+
+def _stake_for_pick(
+    pick: dict[str, Any],
+    unit_usdc: Decimal = Decimal("10"),
+) -> Decimal:
+    """Posted-odds stake required to win the requested unit profit target."""
+    target = _target_profit_for_pick(pick, unit_usdc)
+    decimal_odds = _decimal_odds_for_pick(pick)
+    profit_multiple = decimal_odds - Decimal("1")
+    if profit_multiple <= 0:
+        raise ValueError(f"invalid decimal odds {decimal_odds}")
+    return (target / profit_multiple).quantize(
+        Decimal("0.01"),
+        rounding=ROUND_UP,
+    )
+
+
+def _capper_unit_settings_path(core: Any):
+    return core.DATA_DIR / "capper_unit_sizes.json"
+
+
+def _load_capper_unit_settings(core: Any) -> dict[str, Any]:
+    data = core._load(_capper_unit_settings_path(core))
+    return data if isinstance(data, dict) else {}
+
+
+def _capper_unit_usdc(core: Any, label: str, default: Decimal) -> Decimal:
+    """Persistent per-capper 1u profit target, falling back to the sport default."""
+    settings = _load_capper_unit_settings(core)
+    try:
+        value = Decimal(str(settings.get(label, default)))
+    except Exception:
+        value = Decimal(str(default))
+    if value <= 0:
+        value = Decimal(str(default))
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _set_capper_unit_usdc(core: Any, label: str, value: Any) -> Decimal:
+    amount = Decimal(str(value))
+    if amount <= 0 or amount > Decimal("10000"):
+        raise ValueError("unit size must be greater than 0 and no more than $10,000")
+    amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    settings = _load_capper_unit_settings(core)
+    settings[label] = str(amount)
+    core._save(_capper_unit_settings_path(core), settings)
+    return amount
 
 
 def _decimal_odds_for_pick(pick: dict[str, Any]) -> Decimal:
@@ -193,6 +267,7 @@ def _missed_signal_stats(
     labels: tuple[str, ...] = SOURCE_LABELS,
     sport: str = "NFL",
     unit_usdc: Decimal = Decimal("10"),
+    unit_usdc_by_label: dict[str, Decimal] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Hypothetical P/L for graded Telegram calls that never became real trades."""
     traded_signal_ids: set[str] = set()
@@ -210,6 +285,7 @@ def _missed_signal_stats(
     for label in labels:
         graded = wins = losses = pushes = 0
         missed_pnl = Decimal("0")
+        label_unit = (unit_usdc_by_label or {}).get(label, unit_usdc)
         for record in signals.values():
             if not isinstance(record, dict) or record.get("source") != label:
                 continue
@@ -223,16 +299,31 @@ def _missed_signal_stats(
 
             pick = record.get("pick") if isinstance(record.get("pick"), dict) else {}
             try:
+                record_unit = Decimal(str(record.get("unit_usdc")))
+                if record_unit <= 0:
+                    raise ValueError("non-positive unit")
+            except Exception:
+                record_unit = Decimal(str(label_unit))
+            target_profit = _target_profit_for_pick(pick, record_unit)
+            try:
+                stored_target = Decimal(str(record.get("target_profit_usdc")))
+                if stored_target > 0:
+                    target_profit = stored_target
+            except Exception:
+                pass
+            try:
+                if str(record.get("sizing_mode") or "").upper() != "TO_WIN":
+                    raise ValueError("legacy sizing")
                 stake = Decimal(str(record.get("stake_usdc")))
                 if stake <= 0:
                     raise ValueError("non-positive stake")
             except Exception:
-                stake = _stake_for_pick(pick, unit_usdc)
+                stake = _stake_for_pick(pick, record_unit)
 
             graded += 1
             if result == "WIN":
                 wins += 1
-                missed_pnl += stake * (_decimal_odds_for_pick(pick) - Decimal("1"))
+                missed_pnl += target_profit
             elif result == "LOSS":
                 losses += 1
                 missed_pnl -= stake
@@ -1104,12 +1195,7 @@ def _prepare_pick(
         raise RuntimeError("Termux executor is offline")
 
     units = _units_for_pick(pick)
-    stake = _stake_for_pick(pick, unit_usdc)
-    if stake > core.MAX_AUTO_TRADE_USDC:
-        raise RuntimeError(
-            "Requested " + str(units) + "u = $" + str(stake)
-            + " exceeds MAX_AUTO_TRADE_USDC=$" + str(core.MAX_AUTO_TRADE_USDC)
-        )
+    target_profit = _target_profit_for_pick(pick, unit_usdc)
 
     requested_spread_line: str | None = None
     executed_spread_line: str | None = None
@@ -1166,6 +1252,15 @@ def _prepare_pick(
     if spread > core.MAX_SPREAD:
         raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
 
+    stake = _stake_to_win_at_price(target_profit, max_price)
+    if stake > core.MAX_AUTO_TRADE_USDC:
+        raise RuntimeError(
+            "Requested " + str(units) + "u targets $" + str(target_profit)
+            + " profit and requires $" + str(stake) + " stake at "
+            + str(max_price) + "; exceeds MAX_AUTO_TRADE_USDC=$"
+            + str(core.MAX_AUTO_TRADE_USDC)
+        )
+
     used = core._daily_budget_used()
     pending = _pending_auto_budget(remote)
     if used + pending + stake > core.MAX_DAILY_BUDGET_USDC:
@@ -1198,6 +1293,10 @@ def _prepare_pick(
         "strategy_sport": "NFL",
         "strategy_units": str(units),
         "strategy_unit_usdc": str(unit_usdc),
+        "strategy_target_profit_usdc": str(target_profit),
+        "strategy_sizing_mode": "TO_WIN",
+        "strategy_target_profit_usdc": str(target_profit),
+        "strategy_sizing_mode": "TO_WIN",
         "strategy_pick_id": fp,
         "strategy_posted_at": pick.get("posted_at"),
         "strategy_selection": pick.get("selection"),
@@ -1219,7 +1318,10 @@ def _prepare_pick(
         "outcome": outcome_label,
         "asset_id": asset_id,
         "units": str(units),
+        "unit_usdc": str(unit_usdc),
+        "target_profit_usdc": str(target_profit),
         "stake_usdc": str(stake),
+        "sizing_mode": "TO_WIN",
         "max_price": str(max_price),
         "spread": str(spread),
         "recovered_after_bridge_outage": bool(recovery),
@@ -1253,12 +1355,7 @@ def _prepare_test_preview(
         raise RuntimeError("Termux executor is offline")
 
     units = _units_for_pick(pick)
-    stake = _stake_for_pick(pick, unit_usdc)
-    if stake > core.MAX_AUTO_TRADE_USDC:
-        raise RuntimeError(
-            "Requested " + str(units) + "u = $" + str(stake)
-            + " exceeds MAX_AUTO_TRADE_USDC=$" + str(core.MAX_AUTO_TRADE_USDC)
-        )
+    target_profit = _target_profit_for_pick(pick, unit_usdc)
 
     try:
         event, market, outcome_label, outcome_obj = _find_market(pick, kind)
@@ -1298,6 +1395,15 @@ def _prepare_test_preview(
         raise RuntimeError(f"Current best ask {best_ask} exceeds MAX_PRICE={core.MAX_PRICE}")
     if spread > core.MAX_SPREAD:
         raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
+
+    stake = _stake_to_win_at_price(target_profit, max_price)
+    if stake > core.MAX_AUTO_TRADE_USDC:
+        raise RuntimeError(
+            "Requested " + str(units) + "u targets $" + str(target_profit)
+            + " profit and requires $" + str(stake) + " stake at "
+            + str(max_price) + "; exceeds MAX_AUTO_TRADE_USDC=$"
+            + str(core.MAX_AUTO_TRADE_USDC)
+        )
 
     used = core._daily_budget_used()
     pending = _pending_auto_budget(remote)
@@ -1345,7 +1451,10 @@ def _prepare_test_preview(
         "outcome": outcome_label,
         "asset_id": asset_id,
         "units": str(units),
+        "unit_usdc": str(unit_usdc),
+        "target_profit_usdc": str(target_profit),
         "stake_usdc": str(stake),
+        "sizing_mode": "TO_WIN",
         "current_buy_price": str(buy_price),
         "best_ask": str(best_ask),
         "max_price": str(best_ask),
@@ -1898,6 +2007,11 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 continue
 
             source_label = _source_label(pick)
+            effective_unit_usdc = (
+                _capper_unit_usdc(core, source_label, unit_usdc)
+                if source_label is not None
+                else unit_usdc
+            )
             base_record = current or {
                 "id": fp,
                 "first_seen_at": _now_iso(),
@@ -1908,9 +2022,17 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "posted_at": pick.get("posted_at"),
                 "selection": pick.get("selection"),
                 "units": str(_units_for_pick(pick)),
-                "stake_usdc": str(_stake_for_pick(pick, unit_usdc)),
+                "unit_usdc": str(effective_unit_usdc),
+                "target_profit_usdc": str(_target_profit_for_pick(pick, effective_unit_usdc)),
+                "sizing_mode": "TO_WIN",
                 "pick": pick,
             }
+            if current:
+                base_record["unit_usdc"] = str(effective_unit_usdc)
+                base_record["target_profit_usdc"] = str(
+                    _target_profit_for_pick(pick, effective_unit_usdc)
+                )
+                base_record["sizing_mode"] = "TO_WIN"
 
             if source_label is None:
                 base_record["status"] = "IGNORED_UNTRACKED_SOURCE"
@@ -1970,7 +2092,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     pick,
                     core=core,
                     remote=remote,
-                    unit_usdc=unit_usdc,
+                    unit_usdc=effective_unit_usdc,
                     recovery=recovery,
                     better_spread_fallback_enabled=better_spread_fallback_enabled,
                     max_alt_spread_points=max_alt_spread_points,
@@ -2039,12 +2161,18 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 await asyncio.sleep(2)
 
             pick["posted_at"] = _now_iso()
+            test_source = _source_label(pick)
+            test_unit_usdc = (
+                _capper_unit_usdc(core, test_source, unit_usdc)
+                if test_source is not None
+                else unit_usdc
+            )
             result = await asyncio.to_thread(
                 _prepare_test_preview,
                 pick,
                 core=core,
                 remote=remote,
-                unit_usdc=unit_usdc,
+                unit_usdc=test_unit_usdc,
             )
             marker = {
                 "trigger_hash": trigger_hash,
@@ -2133,15 +2261,22 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         signals = _load_signals()
         live_marks = _live_mark_map(dashboard, executions)
         stats = _stats_from_executions(executions, live_marks=live_marks)
+        unit_by_label = {
+            label: _capper_unit_usdc(core, label, unit_usdc)
+            for label in SOURCE_LABELS
+        }
         missed = _missed_signal_stats(
             signals,
             executions,
             labels=SOURCE_LABELS,
             sport="NFL",
             unit_usdc=unit_usdc,
+            unit_usdc_by_label=unit_by_label,
         )
         for label in SOURCE_LABELS:
             stats.setdefault(label, {}).update(missed.get(label, {}))
+            stats[label]["unit_usdc"] = str(unit_by_label[label])
+            stats[label]["sizing_mode"] = "TO_WIN"
             stats[label]["positions"] = _position_items(
                 executions,
                 label,
@@ -2202,6 +2337,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         return {
             "enabled": enabled,
             "unit_usdc": str(unit_usdc),
+            "sizing_mode": "TO_WIN",
             "poll_seconds": poll_seconds,
             "max_pick_age_seconds": max_age_seconds,
             "feed_window_minutes": feed_window_minutes,
@@ -2218,6 +2354,26 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     @app.get("/api/nfl-cappers/stats", dependencies=[Depends(dashboard._auth)])
     def nfl_capper_stats():
         return _stats_payload()
+
+    @app.put("/api/nfl-cappers/unit-size/{capper_key}", dependencies=[Depends(dashboard._auth)])
+    def nfl_capper_unit_size(capper_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        label = {
+            "slam": "Slam - NFL",
+            "syndicate": "Syndicate - NFL",
+        }.get(str(capper_key).strip().lower())
+        if label is None:
+            raise HTTPException(status_code=404, detail="Unknown NFL capper")
+        try:
+            amount = _set_capper_unit_usdc(core, label, payload.get("unit_usdc"))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "capper": label,
+            "unit_usdc": str(amount),
+            "sizing_mode": "TO_WIN",
+            "note": "Applies to new/retried orders; existing queued/open positions are unchanged.",
+        }
 
     base_snapshot = dashboard._dashboard_snapshot
 
@@ -2406,6 +2562,32 @@ function nflPickList(title,items,kind){
  }).join('');
  return '<div style="margin-top:8px"><b>'+nflEsc(title)+'</b>'+rows+'</div>';
 }
+async function nflSetUnitSize(sourceKey,btn){
+ const input=document.getElementById('nflUnitSize-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-size/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
 function nflCapperLine(x,sourceKey){
  if(!x)return 'No tracked signals yet';
  const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
@@ -2426,7 +2608,9 @@ function nflCapperLine(x,sourceKey){
  const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>'<button type="button" style="padding:5px 8px;min-height:34px;'+(s[0]===active?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+nflEsc(s[1])+' '+s[2]+'</button>').join('')+'</div>';
  const spec=specs.find(s=>s[0]===active)||specs[0];
  const body=(spec[3]||[]).length?nflPickList(spec[1]+' signals',spec[3],spec[4]):'<div style="margin-top:8px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div>';
- return metrics+nflPositionList(x)+tabs+body;
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const unitControl='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 9px"><b style="font-size:12px">1u WIN $</b><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+unitValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><span style="font-size:11px;opacity:.72">new orders · sized to win posted units</span></div>';
+ return unitControl+metrics+nflPositionList(x)+tabs+body;
 }
 async function loadNflCapperStats(){
  try{
@@ -2434,7 +2618,20 @@ async function loadNflCapperStats(){
   if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
   const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
   if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
-  if(meta)meta.textContent='1u = $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win   nflLastCappers=d.cappers||{};
+  const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
+  if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
+  if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL'],'syndicate');
+  nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
   nflLastCappers=d.cappers||{};
   const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
   if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
