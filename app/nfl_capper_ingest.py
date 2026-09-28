@@ -2022,7 +2022,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         queue = remote._queue_load()
         for rec in signals.values():
             current_status = str(rec.get("status") or "")
-            if current_status not in {"QUEUED", "EXECUTOR_DONE"} or not rec.get("request_id"):
+            if current_status not in {"QUEUED", "EXECUTOR_DONE", "EXECUTOR_FAILED"} or not rec.get("request_id"):
                 continue
             queued = queue.get(str(rec.get("request_id")))
             if not queued:
