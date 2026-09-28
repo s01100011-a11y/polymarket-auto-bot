@@ -1010,5 +1010,59 @@ class NflNoFillRetryTests(unittest.TestCase):
         )
 
 
+class NflDashboardSignalItemTests(unittest.TestCase):
+    def test_graded_untraded_signal_is_closed_and_marked_not_executed(self):
+        record = {
+            "id": "signal-1",
+            "source": "Slam - NFL",
+            "selection": "BRONCOS +1.5",
+            "posted_at": "2026-09-27T23:00:00+00:00",
+            "status": "EXECUTOR_FAILED",
+            "units": "3",
+            "stake_usdc": "30.00",
+            "pick_result": "WIN",
+            "result_event_title": "Rams at Broncos",
+            "final_score": "Rams 26 - Broncos 30",
+        }
+
+        item = capper._nfl_signal_dashboard_item(record, {})
+
+        self.assertEqual(item["event_phase"], "CLOSED")
+        self.assertEqual(item["pick_result"], "WIN")
+        self.assertFalse(item["trade_executed"])
+        self.assertIsNone(item["trade_id"])
+
+    def test_signal_item_links_execution_for_trade_result_and_sell_state(self):
+        record = {
+            "id": "signal-2",
+            "source": "Syndicate - NFL",
+            "selection": "EAGLES ML",
+            "posted_at": "2026-09-28T20:00:00+00:00",
+            "status": "EXECUTOR_DONE",
+            "market": "Eagles vs Bears moneyline",
+            "market_url": "https://polymarket.com/sports/nfl/nfl-phi-chi-2026-09-28",
+            "outcome": "Philadelphia Eagles",
+            "asset_id": "asset-1",
+        }
+        executions = {
+            "trade-2": {
+                "id": "trade-2",
+                "strategy_pick_id": "signal-2",
+                "strategy_source": "Syndicate - NFL",
+                "strategy_sport": "NFL",
+                "status": "ORDER_SUBMITTED",
+                "budget_usdc": "10.00",
+            }
+        }
+
+        item = capper._nfl_signal_dashboard_item(record, executions)
+
+        self.assertEqual(item["match_status"], "MATCHED")
+        self.assertTrue(item["trade_executed"])
+        self.assertEqual(item["trade_id"], "trade-2")
+        self.assertTrue(item["sell_available"])
+
+
+
 if __name__ == "__main__":
     unittest.main()
