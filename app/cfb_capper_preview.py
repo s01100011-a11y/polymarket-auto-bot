@@ -2438,10 +2438,16 @@ def _status_pick_item(
         "updated_at": record.get("updated_at"),
         "signal_age_seconds": age_seconds,
         "units": record.get("units"),
-        "unit_usdc": record.get("unit_usdc"),
-        "target_profit_usdc": record.get("target_profit_usdc"),
-        "stake_usdc": record.get("stake_usdc"),
+        "unit_usdc": record.get("unit_usdc_at_call") or record.get("unit_usdc"),
+        "target_profit_usdc": (
+            record.get("target_profit_usdc_at_call")
+            or record.get("target_profit_usdc")
+        ),
+        "stake_usdc": record.get("stake_usdc_at_call") or record.get("stake_usdc"),
         "sizing_mode": record.get("sizing_mode"),
+        "unit_mode_at_call": record.get("unit_mode_at_call"),
+        "portfolio_pct_at_call": record.get("portfolio_pct_at_call"),
+        "portfolio_value_usdc_at_call": record.get("portfolio_value_usdc_at_call"),
         "match_status": (
             record.get("match_status")
             if record.get("match_status") == "INVALID_FUTURE_MATCH"
@@ -3206,6 +3212,13 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "portfolio_value_usdc": unit_config["portfolio_value_usdc"],
                 "pick": pick,
             }
+            if nfl._ensure_signal_call_unit_snapshot(
+                record,
+                pick,
+                unit_config=unit_config,
+                effective_unit_usdc=effective_unit_usdc,
+            ):
+                changed = True
             if current:
                 record["unit_usdc"] = str(effective_unit_usdc)
                 record["target_profit_usdc"] = str(
@@ -3341,6 +3354,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                             matched=record,
                         )
                         record.update(prepared)
+                        if not record.get("stake_usdc_at_call") and prepared.get("stake_usdc"):
+                            record["stake_usdc_at_call"] = prepared.get("stake_usdc")
                         record["recovered_after_bridge_outage"] = True
                         record["recovery_checked_at"] = _now_iso()
                         record["updated_at"] = _now_iso()
@@ -3404,6 +3419,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     matched=record,
                 )
                 record.update(prepared)
+                if not record.get("stake_usdc_at_call") and prepared.get("stake_usdc"):
+                    record["stake_usdc_at_call"] = prepared.get("stake_usdc")
                 record["updated_at"] = _now_iso()
                 signals[fp] = record
                 changed = True
