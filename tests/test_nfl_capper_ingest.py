@@ -122,6 +122,51 @@ class NflCapperPortfolioUnitTests(unittest.TestCase):
             self.assertEqual(config["portfolio_value_usdc"], "650.00")
             self.assertEqual(config["unit_usdc"], "65.00")
 
+    def test_call_unit_snapshot_is_immutable_after_unit_setting_changes(self):
+        record = {
+            "id": "signal-1",
+            "first_seen_at": "2026-09-28T01:00:00+00:00",
+            "unit_usdc": "10.00",
+            "target_profit_usdc": "10.00",
+            "unit_mode": "fixed",
+        }
+        pick = _pick(units=1, decimal_odds=2.0)
+        first_config = {
+            "mode": "fixed",
+            "unit_usdc": "10.00",
+            "portfolio_pct": "10.00",
+            "portfolio_value_usdc": "100.00",
+        }
+        changed = capper._ensure_signal_call_unit_snapshot(
+            record,
+            pick,
+            unit_config=first_config,
+            effective_unit_usdc=Decimal("10"),
+        )
+        self.assertTrue(changed)
+        self.assertEqual(record["unit_usdc_at_call"], "10.00")
+        self.assertEqual(record["target_profit_usdc_at_call"], "10.00")
+
+        record["unit_usdc"] = "50.00"
+        record["target_profit_usdc"] = "50.00"
+        record["unit_mode"] = "portfolio_pct"
+        second_config = {
+            "mode": "portfolio_pct",
+            "unit_usdc": "50.00",
+            "portfolio_pct": "10.00",
+            "portfolio_value_usdc": "500.00",
+        }
+        changed = capper._ensure_signal_call_unit_snapshot(
+            record,
+            pick,
+            unit_config=second_config,
+            effective_unit_usdc=Decimal("50"),
+        )
+        self.assertFalse(changed)
+        self.assertEqual(record["unit_usdc_at_call"], "10.00")
+        self.assertEqual(record["target_profit_usdc_at_call"], "10.00")
+        self.assertEqual(record["unit_mode_at_call"], "fixed")
+
     def test_fixed_button_switches_portfolio_mode_off(self):
         core = self._core()
         with patch.object(
@@ -702,6 +747,61 @@ class NflMissedPnlTests(unittest.TestCase):
         self.assertEqual(stats["Slam - NFL"]["missed_pnl_usdc"], "-1.30")
         self.assertEqual(stats["Syndicate - NFL"]["missed_graded"], 1)
         self.assertEqual(stats["Syndicate - NFL"]["missed_pnl_usdc"], "12.40")
+
+    def test_missed_pnl_uses_each_signals_call_time_unit_not_current_unit(self):
+        signals = {
+            "old-win": {
+                "id": "old-win",
+                "source": "Slam - NFL",
+                "unit_usdc_at_call": "10.00",
+                "target_profit_usdc_at_call": "10.00",
+                "unit_usdc": "50.00",
+                "target_profit_usdc": "50.00",
+                "pick_result": "WIN",
+                "pick": _pick(units=1, decimal_odds=2.0),
+            },
+            "later-loss": {
+                "id": "later-loss",
+                "source": "Slam - NFL",
+                "unit_usdc_at_call": "20.00",
+                "target_profit_usdc_at_call": "40.00",
+                "stake_usdc_at_call": "40.00",
+                "unit_usdc": "50.00",
+                "target_profit_usdc": "100.00",
+                "stake_usdc": "100.00",
+                "pick_result": "LOSS",
+                "pick": _pick(units=2, decimal_odds=2.0),
+            },
+        }
+
+        stats = capper._missed_signal_stats(
+            signals,
+            {},
+            unit_usdc=Decimal("10"),
+            unit_usdc_by_label={"Slam - NFL": Decimal("50")},
+        )
+
+        self.assertEqual(stats["Slam - NFL"]["missed_graded"], 2)
+        self.assertEqual(stats["Slam - NFL"]["missed_pnl_usdc"], "-30.00")
+
+    def test_legacy_missed_call_does_not_fall_back_to_current_dynamic_unit(self):
+        signals = {
+            "legacy-win": {
+                "id": "legacy-win",
+                "source": "Slam - NFL",
+                "pick_result": "WIN",
+                "pick": _pick(units=1, decimal_odds=2.0),
+            }
+        }
+
+        stats = capper._missed_signal_stats(
+            signals,
+            {},
+            unit_usdc=Decimal("10"),
+            unit_usdc_by_label={"Slam - NFL": Decimal("75")},
+        )
+
+        self.assertEqual(stats["Slam - NFL"]["missed_pnl_usdc"], "10.00")
 
     def test_paper_execution_does_not_hide_a_missed_real_trade(self):
         signals = {
