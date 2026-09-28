@@ -222,12 +222,12 @@ def _portfolio_value_usdc() -> Decimal | None:
         state = live_control.remote._state()
         cash_raw = state.get("usdc_balance")
         positions_raw = state.get("portfolio_value")
-        if (cash_raw is None or cash_raw == "") and (
-            positions_raw is None or positions_raw == ""
-        ):
+        # Percentage sizing needs the full wallet value. If either component is
+        # unavailable, fail closed rather than silently undercounting the base.
+        if cash_raw is None or cash_raw == "" or positions_raw is None or positions_raw == "":
             return None
-        cash = Decimal(str(cash_raw or "0"))
-        positions = Decimal(str(positions_raw or "0"))
+        cash = Decimal(str(cash_raw))
+        positions = Decimal(str(positions_raw))
         return (cash + positions).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     except Exception:
         return None
