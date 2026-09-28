@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -81,6 +82,69 @@ class NflCapperFeedLoggingTests(unittest.TestCase):
         right = dict(left)
         right["picks"] = [{"source": "SLAM - All Access", "selection": "ATL +3.5"}]
         self.assertNotEqual(capper._feed_content_signature(left), capper._feed_content_signature(right))
+
+
+class NflCapperPortfolioUnitTests(unittest.TestCase):
+    @staticmethod
+    def _core():
+        storage = {}
+
+        def _load(path):
+            return storage.get(str(path), {})
+
+        def _save(path, value):
+            storage[str(path)] = value
+
+        return SimpleNamespace(
+            DATA_DIR=Path("/tmp/capper-unit-test"),
+            _load=_load,
+            _save=_save,
+        )
+
+    def test_portfolio_mode_defaults_to_ten_percent_and_recalculates(self):
+        core = self._core()
+        state = {"usdc_balance": "300", "portfolio_value": "200"}
+        with patch.object(capper.live_control.remote, "_state", return_value=state):
+            config = capper._capper_unit_config(core, "Slam - NFL", Decimal("10"))
+            self.assertEqual(config["mode"], "fixed")
+            self.assertEqual(config["portfolio_pct"], "10.00")
+            self.assertEqual(config["unit_usdc"], "10.00")
+
+            capper._set_capper_portfolio_pct(core, "Slam - NFL", Decimal("10"))
+            config = capper._capper_unit_config(core, "Slam - NFL", Decimal("10"))
+            self.assertEqual(config["mode"], "portfolio_pct")
+            self.assertEqual(config["portfolio_value_usdc"], "500.00")
+            self.assertEqual(config["unit_usdc"], "50.00")
+
+            state["usdc_balance"] = "400"
+            state["portfolio_value"] = "250"
+            config = capper._capper_unit_config(core, "Slam - NFL", Decimal("10"))
+            self.assertEqual(config["portfolio_value_usdc"], "650.00")
+            self.assertEqual(config["unit_usdc"], "65.00")
+
+    def test_fixed_button_switches_portfolio_mode_off(self):
+        core = self._core()
+        with patch.object(
+            capper.live_control.remote,
+            "_state",
+            return_value={"usdc_balance": "300", "portfolio_value": "200"},
+        ):
+            capper._set_capper_portfolio_pct(core, "Slam - NFL", Decimal("10"))
+            capper._set_capper_unit_usdc(core, "Slam - NFL", Decimal("25"))
+            config = capper._capper_unit_config(core, "Slam - NFL", Decimal("10"))
+        self.assertEqual(config["mode"], "fixed")
+        self.assertEqual(config["unit_usdc"], "25.00")
+        self.assertEqual(config["portfolio_pct"], "10.00")
+
+    def test_portfolio_mode_fails_closed_when_wallet_value_is_unavailable(self):
+        core = self._core()
+        with patch.object(capper.live_control.remote, "_state", return_value={}):
+            capper._set_capper_portfolio_pct(core, "Slam - NFL", Decimal("10"))
+            config = capper._capper_unit_config(core, "Slam - NFL", Decimal("10"))
+            self.assertEqual(config["mode"], "portfolio_pct")
+            self.assertIsNotNone(config["error"])
+            with self.assertRaisesRegex(RuntimeError, "Portfolio value is unavailable"):
+                capper._capper_unit_usdc(core, "Slam - NFL", Decimal("10"))
 
 
 class NflCapperSizingTests(unittest.TestCase):
