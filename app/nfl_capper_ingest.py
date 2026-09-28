@@ -1295,8 +1295,6 @@ def _prepare_pick(
         "strategy_unit_usdc": str(unit_usdc),
         "strategy_target_profit_usdc": str(target_profit),
         "strategy_sizing_mode": "TO_WIN",
-        "strategy_target_profit_usdc": str(target_profit),
-        "strategy_sizing_mode": "TO_WIN",
         "strategy_pick_id": fp,
         "strategy_posted_at": pick.get("posted_at"),
         "strategy_selection": pick.get("selection"),
@@ -1396,7 +1394,7 @@ def _prepare_test_preview(
     if spread > core.MAX_SPREAD:
         raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
 
-    stake = _stake_to_win_at_price(target_profit, max_price)
+    stake = _stake_to_win_at_price(target_profit, best_ask)
     if stake > core.MAX_AUTO_TRADE_USDC:
         raise RuntimeError(
             "Requested " + str(units) + "u targets $" + str(target_profit)
@@ -1435,6 +1433,8 @@ def _prepare_test_preview(
         "strategy_sport": "NFL",
         "strategy_units": str(units),
         "strategy_unit_usdc": str(unit_usdc),
+        "strategy_target_profit_usdc": str(target_profit),
+        "strategy_sizing_mode": "TO_WIN",
         "strategy_selection": pick.get("selection"),
         "strategy_telegram_source": pick.get("source"),
     }
@@ -2618,20 +2618,7 @@ async function loadNflCapperStats(){
   if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
   const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
   if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
-  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win   nflLastCappers=d.cappers||{};
-  const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
-  if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
-  if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL'],'syndicate');
-  nflUpdateFinishedToggle();
- }catch(e){
-  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
- }
-}
-loadNflCapperStats();setInterval(loadNflCapperStats,10000);
-"""
-        html = html.replace("</script>", js + "\n</script>", 1)
-        dashboard.DASHBOARD_HTML = html
-+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
   nflLastCappers=d.cappers||{};
   const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
   if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
