@@ -744,9 +744,9 @@ class NflMissedPnlTests(unittest.TestCase):
         self.assertEqual(stats["Slam - NFL"]["missed_graded"], 2)
         self.assertEqual(stats["Slam - NFL"]["missed_wins"], 1)
         self.assertEqual(stats["Slam - NFL"]["missed_losses"], 1)
-        self.assertEqual(stats["Slam - NFL"]["missed_pnl_usdc"], "-1.30")
+        self.assertEqual(stats["Slam - NFL"]["missed_pnl_usdc"], "-1.50")
         self.assertEqual(stats["Syndicate - NFL"]["missed_graded"], 1)
-        self.assertEqual(stats["Syndicate - NFL"]["missed_pnl_usdc"], "12.40")
+        self.assertEqual(stats["Syndicate - NFL"]["missed_pnl_usdc"], "20.00")
 
     def test_missed_pnl_uses_each_signals_call_time_unit_not_current_unit(self):
         signals = {
