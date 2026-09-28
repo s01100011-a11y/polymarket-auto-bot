@@ -2438,7 +2438,10 @@ def _status_pick_item(
         "updated_at": record.get("updated_at"),
         "signal_age_seconds": age_seconds,
         "units": record.get("units"),
+        "unit_usdc": record.get("unit_usdc"),
+        "target_profit_usdc": record.get("target_profit_usdc"),
         "stake_usdc": record.get("stake_usdc"),
+        "sizing_mode": record.get("sizing_mode"),
         "match_status": (
             record.get("match_status")
             if record.get("match_status") == "INVALID_FUTURE_MATCH"
@@ -2632,7 +2635,8 @@ function cfbPickList(title,items,kind){
  const rows=visible.map(item=>{
   const meta=[];
   if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(cfbEsc(item.units)+'u');
-  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('\u0024'+Number(item.stake_usdc).toFixed(2));
+  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('risk \u0024'+Number(item.stake_usdc).toFixed(2));
+  if(item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!=='')meta.push('to win \u0024'+Number(item.target_profit_usdc).toFixed(2));
   if(item.posted_at)meta.push('posted '+cfbPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+cfbAge(item.signal_age_seconds):''));
   if(item.market&&String(item.match_status||'')!=='INVALID_FUTURE_MATCH')meta.push('Matched: '+cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
   if(item.result_event_title)meta.push('Game '+cfbEsc(item.result_event_title));
