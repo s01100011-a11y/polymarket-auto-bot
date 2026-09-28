@@ -216,27 +216,113 @@ def _load_capper_unit_settings(core: Any) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _capper_unit_usdc(core: Any, label: str, default: Decimal) -> Decimal:
-    """Persistent per-capper 1u profit target, falling back to the sport default."""
+def _portfolio_value_usdc() -> Decimal | None:
+    """Current total wallet value = available USDC + marked Polymarket positions."""
+    try:
+        state = live_control.remote._state()
+        cash_raw = state.get("usdc_balance")
+        positions_raw = state.get("portfolio_value")
+        if (cash_raw is None or cash_raw == "") and (
+            positions_raw is None or positions_raw == ""
+        ):
+            return None
+        cash = Decimal(str(cash_raw or "0"))
+        positions = Decimal(str(positions_raw or "0"))
+        return (cash + positions).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except Exception:
+        return None
+
+
+def _capper_unit_config(
+    core: Any,
+    label: str,
+    default: Decimal,
+) -> dict[str, Any]:
+    """Return fixed/portfolio-percent unit configuration and the live effective 1u."""
     settings = _load_capper_unit_settings(core)
     try:
-        value = Decimal(str(settings.get(label, default)))
+        fixed = Decimal(str(settings.get(label, default)))
     except Exception:
-        value = Decimal(str(default))
-    if value <= 0:
-        value = Decimal(str(default))
-    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        fixed = Decimal(str(default))
+    if fixed <= 0:
+        fixed = Decimal(str(default))
+    fixed = fixed.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    mode = str(settings.get(f"{label}::mode", "fixed") or "fixed").strip().lower()
+    if mode not in {"fixed", "portfolio_pct"}:
+        mode = "fixed"
+
+    try:
+        portfolio_pct = Decimal(
+            str(settings.get(f"{label}::portfolio_pct", "10"))
+        )
+    except Exception:
+        portfolio_pct = Decimal("10")
+    if portfolio_pct <= 0 or portfolio_pct > 100:
+        portfolio_pct = Decimal("10")
+    portfolio_pct = portfolio_pct.quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP,
+    )
+
+    portfolio = _portfolio_value_usdc()
+    effective = fixed
+    error = None
+    if mode == "portfolio_pct":
+        if portfolio is None:
+            error = "Portfolio value is unavailable; percentage unit sizing is waiting for a wallet heartbeat."
+        elif portfolio <= 0:
+            error = "Portfolio value must be greater than $0 for percentage unit sizing."
+        else:
+            effective = (
+                portfolio * portfolio_pct / Decimal("100")
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if effective <= 0:
+                error = "Calculated percentage unit size is not positive."
+
+    return {
+        "mode": mode,
+        "unit_usdc": str(effective),
+        "fixed_unit_usdc": str(fixed),
+        "portfolio_pct": str(portfolio_pct),
+        "portfolio_value_usdc": str(portfolio) if portfolio is not None else None,
+        "error": error,
+    }
+
+
+def _capper_unit_usdc(core: Any, label: str, default: Decimal) -> Decimal:
+    """Resolve the current 1u profit target; fail closed if dynamic sizing has no portfolio."""
+    config = _capper_unit_config(core, label, default)
+    if config["mode"] == "portfolio_pct" and config.get("error"):
+        raise RuntimeError(str(config["error"]))
+    return Decimal(str(config["unit_usdc"]))
 
 
 def _set_capper_unit_usdc(core: Any, label: str, value: Any) -> Decimal:
+    """Set a fixed dollar 1u profit target and disable portfolio-percentage mode."""
     amount = Decimal(str(value))
     if amount <= 0 or amount > Decimal("10000"):
         raise ValueError("unit size must be greater than 0 and no more than $10,000")
     amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     settings = _load_capper_unit_settings(core)
     settings[label] = str(amount)
+    settings[f"{label}::mode"] = "fixed"
+    settings.setdefault(f"{label}::portfolio_pct", "10.00")
     core._save(_capper_unit_settings_path(core), settings)
     return amount
+
+
+def _set_capper_portfolio_pct(core: Any, label: str, value: Any) -> Decimal:
+    """Enable live portfolio-percentage unit sizing for one capper."""
+    pct = Decimal(str(value if value is not None else "10"))
+    if pct <= 0 or pct > 100:
+        raise ValueError("portfolio percentage must be greater than 0 and no more than 100")
+    pct = pct.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    settings = _load_capper_unit_settings(core)
+    settings[f"{label}::portfolio_pct"] = str(pct)
+    settings[f"{label}::mode"] = "portfolio_pct"
+    core._save(_capper_unit_settings_path(core), settings)
+    return pct
 
 
 def _decimal_odds_for_pick(pick: dict[str, Any]) -> Decimal:
