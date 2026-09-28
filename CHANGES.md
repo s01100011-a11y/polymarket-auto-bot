@@ -1,5 +1,15 @@
 # CHANGES
 
+## 2026-09-28 — Capper units are profit targets with per-capper controls
+
+- NFL and CFB Slam/Syndicate cards now each have an independent **1u WIN $** control with a **SET 1U** button. Overrides persist on the Railway data volume and apply to new/retried orders without changing already queued/open positions.
+- Posted capper units now mean **profit to win**, not flat amount staked. A 1u call with a $10 unit targets $10 profit; a 2u call targets $20 profit.
+- The required cash stake is calculated from the current executable Polymarket best ask using binary payout economics. Example: at 54¢, a $10 profit target risks $11.74; at 64¢, a $20 profit target risks $35.56.
+- MAX_AUTO_TRADE_USDC, daily budget, max-price/spread, executor/geoblock, and duplicate-position gates still apply to the calculated cash stake.
+- Signal cards now show posted units, **risk $**, and **to win $** separately, and execution audit fields store the unit value, target profit, and `TO_WIN` sizing mode.
+- Missed-P/L calculations use the same profit-target unit semantics and each capper's configured unit value.
+
+
 ## 2026-09-28 — Safer NFL alternate-spread outage recovery (#148)
 
 - NFL still requires the exact Telegram spread first. When the exact line is not listed, an opt-in fallback can resolve only the same unique nearby NFL event and choose the nearest **strictly better** spread for the selected team.
