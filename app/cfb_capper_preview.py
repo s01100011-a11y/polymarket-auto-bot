@@ -3526,9 +3526,13 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             sport="CFB",
             live_marks=live_marks,
         )
-        unit_by_label = {
-            label: nfl._capper_unit_usdc(core, label, unit_usdc)
+        unit_config_by_label = {
+            label: nfl._capper_unit_config(core, label, unit_usdc)
             for label in SOURCE_LABELS
+        }
+        unit_by_label = {
+            label: Decimal(str(config["unit_usdc"]))
+            for label, config in unit_config_by_label.items()
         }
         missed = nfl._missed_signal_stats(
             signals,
@@ -3543,9 +3547,15 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         counts: dict[str, dict[str, Any]] = {}
         for label in SOURCE_LABELS:
             rows = [r for r in signals.values() if r.get("source") == label]
+            unit_config = unit_config_by_label[label]
             counts[label] = {
                 "signals": len(rows),
-                "unit_usdc": str(unit_by_label[label]),
+                "unit_usdc": unit_config["unit_usdc"],
+                "fixed_unit_usdc": unit_config["fixed_unit_usdc"],
+                "unit_mode": unit_config["mode"],
+                "portfolio_pct": unit_config["portfolio_pct"],
+                "portfolio_value_usdc": unit_config["portfolio_value_usdc"],
+                "unit_error": unit_config["error"],
                 "sizing_mode": "TO_WIN",
                 "performance": performance.get(label, {}),
                 "positions": nfl._position_items(
@@ -3613,15 +3623,37 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         if label is None:
             raise HTTPException(status_code=404, detail="Unknown CFB capper")
         try:
-            amount = nfl._set_capper_unit_usdc(core, label, payload.get("unit_usdc"))
+            nfl._set_capper_unit_usdc(core, label, payload.get("unit_usdc"))
+            config = nfl._capper_unit_config(core, label, unit_usdc)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
             "ok": True,
             "capper": label,
-            "unit_usdc": str(amount),
+            **config,
             "sizing_mode": "TO_WIN",
-            "note": "Applies to new/retried orders; existing queued/open positions are unchanged.",
+            "note": "Fixed mode enabled. Applies to new/retried orders; existing queued/open positions are unchanged.",
+        }
+
+    @app.put("/api/cfb-cappers/unit-percent/{capper_key}", dependencies=[Depends(dashboard._auth)])
+    def cfb_capper_unit_percent(capper_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        label = {
+            "slam": "Slam - CFB",
+            "syndicate": "Syndicate - CFB",
+        }.get(str(capper_key).strip().lower())
+        if label is None:
+            raise HTTPException(status_code=404, detail="Unknown CFB capper")
+        try:
+            nfl._set_capper_portfolio_pct(core, label, payload.get("portfolio_pct", 10))
+            config = nfl._capper_unit_config(core, label, unit_usdc)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "capper": label,
+            **config,
+            "sizing_mode": "TO_WIN",
+            "note": "Portfolio-percentage mode enabled. 1u recalculates from the latest total wallet value for every new/retried order.",
         }
 
 
