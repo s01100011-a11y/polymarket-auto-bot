@@ -1,3 +1,11 @@
+## 2026-09-28 — Termux online-but-not-polling startup fix
+
+- Production showed fresh authenticated `/api/executor/heartbeat` traffic from the phone while `/api/executor/next` had stopped completely, leaving the recovered Syndicate Bears +4 order queued but unclaimed.
+- Root cause in the worker startup sequence: after a successful full wallet heartbeat during startup, `main()` initialized `last_heartbeat=0`, forcing another potentially slow wallet/portfolio heartbeat before the first queue poll.
+- The startup heartbeat now seeds `last_heartbeat` with the current time, so the first worker-loop network action is the executor queue poll. Normal 20-second heartbeat cadence then resumes.
+- The Termux supervisor now kills any stale directly launched `termux_executor_v2.py` process before starting its supervised worker and logs the exact worker path/bridge at startup.
+- The launcher continues to use the saved `~/.polymarket_executor.env` credentials and saved executor pairing token; no wallet/private-key re-entry is required.
+
 ## 2026-09-28 — Remove Termux phone emergency ceiling
 
 - Removed the independent local `EXECUTOR_EMERGENCY_MAX_USDC` / legacy `EXECUTOR_MAX_USDC` hard ceiling from `scripts/termux_executor.py`.
