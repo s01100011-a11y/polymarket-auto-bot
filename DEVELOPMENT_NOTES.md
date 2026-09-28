@@ -1,3 +1,15 @@
+## 2026-09-28 — Dynamic portfolio-percentage units for NFL/CFB cappers
+
+- Added a second sizing control beside fixed `SET 1U`: each Slam/Syndicate card now has a percentage input and `AUTO %` button. The percentage defaults to 10%.
+- Dynamic mode defines the **1u profit target** as a percentage of total wallet value, where total wallet value = available USDC + current marked Polymarket positions. Example: $500 portfolio at 10% => 1u WIN $50; $650 portfolio => 1u WIN $65.
+- Dynamic unit size is recomputed from the latest executor wallet heartbeat whenever capper sizing/status is evaluated, including before new/retried NFL and CFB orders. Existing queued/open positions are not resized.
+- Clicking `SET 1U` switches the capper back to fixed-dollar mode. Each of Slam-NFL, Syndicate-NFL, Slam-CFB, and Syndicate-CFB persists its own mode/value in `capper_unit_sizes.json`.
+- Percentage sizing fails closed when a usable total wallet value is unavailable. It does not silently place a trade using a stale fixed-dollar fallback.
+- The existing TO-WIN staking rule remains unchanged: percentage mode sets the unit profit target; required cash risk is calculated from executable Polymarket odds and is still constrained by max-trade, daily-budget, price/spread, executor/geoblock, and duplicate-position guards.
+- Dashboard cards show which mode is active and, in AUTO mode, show the current portfolio, percentage, and calculated dollar value of 1u.
+- Added regression coverage for the 10% default, $500 => $50 calculation, automatic recalculation as portfolio changes, fixed-mode switching, and fail-closed behavior when wallet value is unavailable.
+- Files changed: `app/nfl_capper_ingest.py`, `app/cfb_capper_preview.py`, `app/dashboard_filters_v5.py`, `tests/test_nfl_capper_ingest.py`, `tests/test_cfb_capper_preview.py`, `.env.example`, `README.md`, `docs/index.html`, `CHANGES.md`, and `DEVELOPMENT_NOTES.md`.
+
 # DEVELOPMENT NOTES
 
 ## 2026-09-28 — NFL safer alternate-spread fallback (#148)

@@ -216,27 +216,113 @@ def _load_capper_unit_settings(core: Any) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _capper_unit_usdc(core: Any, label: str, default: Decimal) -> Decimal:
-    """Persistent per-capper 1u profit target, falling back to the sport default."""
+def _portfolio_value_usdc() -> Decimal | None:
+    """Current total wallet value = available USDC + marked Polymarket positions."""
+    try:
+        state = live_control.remote._state()
+        cash_raw = state.get("usdc_balance")
+        positions_raw = state.get("portfolio_value")
+        # Percentage sizing needs the full wallet value. If either component is
+        # unavailable, fail closed rather than silently undercounting the base.
+        if cash_raw is None or cash_raw == "" or positions_raw is None or positions_raw == "":
+            return None
+        cash = Decimal(str(cash_raw))
+        positions = Decimal(str(positions_raw))
+        return (cash + positions).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except Exception:
+        return None
+
+
+def _capper_unit_config(
+    core: Any,
+    label: str,
+    default: Decimal,
+) -> dict[str, Any]:
+    """Return fixed/portfolio-percent unit configuration and the live effective 1u."""
     settings = _load_capper_unit_settings(core)
     try:
-        value = Decimal(str(settings.get(label, default)))
+        fixed = Decimal(str(settings.get(label, default)))
     except Exception:
-        value = Decimal(str(default))
-    if value <= 0:
-        value = Decimal(str(default))
-    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        fixed = Decimal(str(default))
+    if fixed <= 0:
+        fixed = Decimal(str(default))
+    fixed = fixed.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    mode = str(settings.get(f"{label}::mode", "fixed") or "fixed").strip().lower()
+    if mode not in {"fixed", "portfolio_pct"}:
+        mode = "fixed"
+
+    try:
+        portfolio_pct = Decimal(
+            str(settings.get(f"{label}::portfolio_pct", "10"))
+        )
+    except Exception:
+        portfolio_pct = Decimal("10")
+    if portfolio_pct <= 0 or portfolio_pct > 100:
+        portfolio_pct = Decimal("10")
+    portfolio_pct = portfolio_pct.quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP,
+    )
+
+    portfolio = _portfolio_value_usdc()
+    effective = fixed
+    error = None
+    if mode == "portfolio_pct":
+        if portfolio is None:
+            error = "Portfolio value is unavailable; percentage unit sizing is waiting for a wallet heartbeat."
+        elif portfolio <= 0:
+            error = "Portfolio value must be greater than $0 for percentage unit sizing."
+        else:
+            effective = (
+                portfolio * portfolio_pct / Decimal("100")
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if effective <= 0:
+                error = "Calculated percentage unit size is not positive."
+
+    return {
+        "mode": mode,
+        "unit_usdc": str(effective),
+        "fixed_unit_usdc": str(fixed),
+        "portfolio_pct": str(portfolio_pct),
+        "portfolio_value_usdc": str(portfolio) if portfolio is not None else None,
+        "error": error,
+    }
+
+
+def _capper_unit_usdc(core: Any, label: str, default: Decimal) -> Decimal:
+    """Resolve the current 1u profit target; fail closed if dynamic sizing has no portfolio."""
+    config = _capper_unit_config(core, label, default)
+    if config["mode"] == "portfolio_pct" and config.get("error"):
+        raise RuntimeError(str(config["error"]))
+    return Decimal(str(config["unit_usdc"]))
 
 
 def _set_capper_unit_usdc(core: Any, label: str, value: Any) -> Decimal:
+    """Set a fixed dollar 1u profit target and disable portfolio-percentage mode."""
     amount = Decimal(str(value))
     if amount <= 0 or amount > Decimal("10000"):
         raise ValueError("unit size must be greater than 0 and no more than $10,000")
     amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     settings = _load_capper_unit_settings(core)
     settings[label] = str(amount)
+    settings[f"{label}::mode"] = "fixed"
+    settings.setdefault(f"{label}::portfolio_pct", "10.00")
     core._save(_capper_unit_settings_path(core), settings)
     return amount
+
+
+def _set_capper_portfolio_pct(core: Any, label: str, value: Any) -> Decimal:
+    """Enable live portfolio-percentage unit sizing for one capper."""
+    pct = Decimal(str(value if value is not None else "10"))
+    if pct <= 0 or pct > 100:
+        raise ValueError("portfolio percentage must be greater than 0 and no more than 100")
+    pct = pct.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    settings = _load_capper_unit_settings(core)
+    settings[f"{label}::portfolio_pct"] = str(pct)
+    settings[f"{label}::mode"] = "portfolio_pct"
+    core._save(_capper_unit_settings_path(core), settings)
+    return pct
 
 
 def _decimal_odds_for_pick(pick: dict[str, Any]) -> Decimal:
@@ -2010,11 +2096,19 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 continue
 
             source_label = _source_label(pick)
-            effective_unit_usdc = (
-                _capper_unit_usdc(core, source_label, unit_usdc)
-                if source_label is not None
-                else unit_usdc
-            )
+            if source_label is not None:
+                unit_config = _capper_unit_config(core, source_label, unit_usdc)
+                effective_unit_usdc = Decimal(str(unit_config["unit_usdc"]))
+            else:
+                unit_config = {
+                    "mode": "fixed",
+                    "unit_usdc": str(unit_usdc),
+                    "fixed_unit_usdc": str(unit_usdc),
+                    "portfolio_pct": "10.00",
+                    "portfolio_value_usdc": None,
+                    "error": None,
+                }
+                effective_unit_usdc = unit_usdc
             base_record = current or {
                 "id": fp,
                 "first_seen_at": _now_iso(),
@@ -2028,6 +2122,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "unit_usdc": str(effective_unit_usdc),
                 "target_profit_usdc": str(_target_profit_for_pick(pick, effective_unit_usdc)),
                 "sizing_mode": "TO_WIN",
+                "unit_mode": unit_config["mode"],
+                "portfolio_pct": unit_config["portfolio_pct"],
+                "portfolio_value_usdc": unit_config["portfolio_value_usdc"],
                 "pick": pick,
             }
             if current:
@@ -2036,6 +2133,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     _target_profit_for_pick(pick, effective_unit_usdc)
                 )
                 base_record["sizing_mode"] = "TO_WIN"
+                base_record["unit_mode"] = unit_config["mode"]
+                base_record["portfolio_pct"] = unit_config["portfolio_pct"]
+                base_record["portfolio_value_usdc"] = unit_config["portfolio_value_usdc"]
 
             if source_label is None:
                 base_record["status"] = "IGNORED_UNTRACKED_SOURCE"
@@ -2047,6 +2147,21 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     "NFL_CAPPER_SOURCE_IGNORED "
                     f"source={pick.get('source')!r} source_id={pick.get('source_id')!r} "
                     f"source_key={pick.get('source_key')!r} selection={pick.get('selection')!r}",
+                    flush=True,
+                )
+                continue
+
+            if unit_config.get("error"):
+                base_record["status"] = "RETRYING"
+                base_record["last_error"] = str(unit_config["error"])
+                base_record["updated_at"] = _now_iso()
+                signals[fp] = base_record
+                changed = True
+                print(
+                    "NFL_CAPPER_SIGNAL "
+                    f"status=RETRYING source={source_label!r} "
+                    f"selection={pick.get('selection')!r} "
+                    f"reason={base_record['last_error']!r}",
                     flush=True,
                 )
                 continue
@@ -2264,9 +2379,13 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         signals = _load_signals()
         live_marks = _live_mark_map(dashboard, executions)
         stats = _stats_from_executions(executions, live_marks=live_marks)
-        unit_by_label = {
-            label: _capper_unit_usdc(core, label, unit_usdc)
+        unit_config_by_label = {
+            label: _capper_unit_config(core, label, unit_usdc)
             for label in SOURCE_LABELS
+        }
+        unit_by_label = {
+            label: Decimal(str(config["unit_usdc"]))
+            for label, config in unit_config_by_label.items()
         }
         missed = _missed_signal_stats(
             signals,
@@ -2277,8 +2396,14 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             unit_usdc_by_label=unit_by_label,
         )
         for label in SOURCE_LABELS:
+            unit_config = unit_config_by_label[label]
             stats.setdefault(label, {}).update(missed.get(label, {}))
-            stats[label]["unit_usdc"] = str(unit_by_label[label])
+            stats[label]["unit_usdc"] = unit_config["unit_usdc"]
+            stats[label]["fixed_unit_usdc"] = unit_config["fixed_unit_usdc"]
+            stats[label]["unit_mode"] = unit_config["mode"]
+            stats[label]["portfolio_pct"] = unit_config["portfolio_pct"]
+            stats[label]["portfolio_value_usdc"] = unit_config["portfolio_value_usdc"]
+            stats[label]["unit_error"] = unit_config["error"]
             stats[label]["sizing_mode"] = "TO_WIN"
             stats[label]["positions"] = _position_items(
                 executions,
@@ -2367,15 +2492,37 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         if label is None:
             raise HTTPException(status_code=404, detail="Unknown NFL capper")
         try:
-            amount = _set_capper_unit_usdc(core, label, payload.get("unit_usdc"))
+            _set_capper_unit_usdc(core, label, payload.get("unit_usdc"))
+            config = _capper_unit_config(core, label, unit_usdc)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
             "ok": True,
             "capper": label,
-            "unit_usdc": str(amount),
+            **config,
             "sizing_mode": "TO_WIN",
-            "note": "Applies to new/retried orders; existing queued/open positions are unchanged.",
+            "note": "Fixed mode enabled. Applies to new/retried orders; existing queued/open positions are unchanged.",
+        }
+
+    @app.put("/api/nfl-cappers/unit-percent/{capper_key}", dependencies=[Depends(dashboard._auth)])
+    def nfl_capper_unit_percent(capper_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        label = {
+            "slam": "Slam - NFL",
+            "syndicate": "Syndicate - NFL",
+        }.get(str(capper_key).strip().lower())
+        if label is None:
+            raise HTTPException(status_code=404, detail="Unknown NFL capper")
+        try:
+            _set_capper_portfolio_pct(core, label, payload.get("portfolio_pct", 10))
+            config = _capper_unit_config(core, label, unit_usdc)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "capper": label,
+            **config,
+            "sizing_mode": "TO_WIN",
+            "note": "Portfolio-percentage mode enabled. 1u recalculates from the latest total wallet value for every new/retried order.",
         }
 
     base_snapshot = dashboard._dashboard_snapshot
@@ -2592,6 +2739,32 @@ async function nflSetUnitSize(sourceKey,btn){
   alert(String(e.message||e));
  }
 }
+async function nflSetPortfolioPct(sourceKey,btn){
+ const input=document.getElementById('nflPortfolioPct-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-percent/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
 function nflCapperLine(x,sourceKey){
  if(!x)return 'No tracked signals yet';
  const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
@@ -2613,7 +2786,16 @@ function nflCapperLine(x,sourceKey){
  const spec=specs.find(s=>s[0]===active)||specs[0];
  const body=(spec[3]||[]).length?nflPickList(spec[1]+' signals',spec[3],spec[4]):'<div style="margin-top:8px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div>';
  const unitValue=Number(x.unit_usdc||10).toFixed(2);
- const unitControl='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 9px"><b style="font-size:12px">1u WIN $</b><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+unitValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><span style="font-size:11px;opacity:.72">new orders · sized to win posted units</span></div>';
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div style="margin:6px 0 9px"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:12px">FIXED 1u WIN $</b><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px;'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><b style="font-size:12px;margin-left:4px">% PORTFOLIO</b><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'" style="width:72px"><button type="button" style="padding:5px 8px;min-height:34px;'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button></div><div style="font-size:11px;opacity:.78;margin-top:3px">'+modeText+' · percentage mode recalculates before each new/retried order; risk still varies by odds</div></div>';
  return unitControl+metrics+nflPositionList(x)+tabs+body;
 }
 async function loadNflCapperStats(){

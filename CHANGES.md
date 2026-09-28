@@ -1,5 +1,15 @@
 # CHANGES
 
+## 2026-09-28 — Automatic portfolio-percentage capper units
+
+- Added an **AUTO %** control next to the fixed **SET 1U** control for Slam and Syndicate on both NFL and CFB cards.
+- The percentage input defaults to **10%**. Example: a $500 total wallet value produces a $50 **1u WIN** target; if the wallet moves to $650, 1u automatically becomes $65 without another manual update.
+- Total wallet value is available USDC plus the current marked value of Polymarket positions. The calculation refreshes from the latest executor wallet heartbeat whenever capper status/sizing is evaluated.
+- Clicking **SET 1U** switches that capper back to fixed-dollar mode. Clicking **AUTO %** enables/updates dynamic percentage mode. Each sport/capper keeps its own setting.
+- Percentage mode fails closed when a usable portfolio value is unavailable, so it will not silently fall back to a stale fixed size for a new trade.
+- Portfolio percentage controls the **unit profit target**, not the cash risk. Required risk is still calculated from current executable odds and remains subject to max-trade, daily-budget, price/spread, executor, and duplicate-position guards.
+
+
 ## 2026-09-28 — Capper units are profit targets with per-capper controls
 
 - NFL and CFB Slam/Syndicate cards now each have an independent **1u WIN $** control with a **SET 1U** button. Overrides persist on the Railway data volume and apply to new/retried orders without changing already queued/open positions.

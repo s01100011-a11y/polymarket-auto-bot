@@ -64,7 +64,9 @@ def _total_missed_pnl(executions: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(signals, dict):
             signals = {}
         unit_by_label = {
-            label: capper._capper_unit_usdc(core, label, unit_usdc)
+            label: Decimal(
+                str(capper._capper_unit_config(core, label, unit_usdc)["unit_usdc"])
+            )
             for label in labels
         }
         stats = capper._missed_signal_stats(

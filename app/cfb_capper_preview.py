@@ -2826,6 +2826,32 @@ async function cfbSetUnitSize(sourceKey,btn){
   alert(String(e.message||e));
  }
 }
+async function cfbSetPortfolioPct(sourceKey,btn){
+ const input=document.getElementById('cfbPortfolioPct-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/cfb-cappers/unit-percent/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadCfbCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
 function cfbCapperLine(x,sourceKey){
  if(!x)return 'No tracked signals yet';
  const p=x.performance||{};
@@ -2852,7 +2878,16 @@ function cfbCapperLine(x,sourceKey){
  const items=spec[3]||[];
  const body=items.length?cfbPickList(spec[1]+' signals',items,spec[4]):'<div style="margin-top:8px;opacity:.7">No '+cfbEsc(spec[1].toLowerCase())+' signals.</div>';
  const unitValue=Number(x.unit_usdc||10).toFixed(2);
- const unitControl='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 9px"><b style="font-size:12px">1u WIN $</b><input id="cfbUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+unitValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px" onclick="cfbSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><span style="font-size:11px;opacity:.72">new orders · sized to win posted units</span></div>';
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+cfbEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div style="margin:6px 0 9px"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:12px">FIXED 1u WIN $</b><input id="cfbUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px;'+fixedBtnStyle+'" onclick="cfbSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><b style="font-size:12px;margin-left:4px">% PORTFOLIO</b><input id="cfbPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'" style="width:72px"><button type="button" style="padding:5px 8px;min-height:34px;'+autoBtnStyle+'" onclick="cfbSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button></div><div style="font-size:11px;opacity:.78;margin-top:3px">'+modeText+' · percentage mode recalculates before each new/retried order; risk still varies by odds</div></div>';
  return unitControl+performance+cfbOpenPositionList(x)+tabs+body;
 }
 async function loadCfbCapperStats(){
@@ -3140,11 +3175,19 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     continue
 
             source_label = _source_label(pick)
-            effective_unit_usdc = (
-                nfl._capper_unit_usdc(core, source_label, unit_usdc)
-                if source_label is not None
-                else unit_usdc
-            )
+            if source_label is not None:
+                unit_config = nfl._capper_unit_config(core, source_label, unit_usdc)
+                effective_unit_usdc = Decimal(str(unit_config["unit_usdc"]))
+            else:
+                unit_config = {
+                    "mode": "fixed",
+                    "unit_usdc": str(unit_usdc),
+                    "fixed_unit_usdc": str(unit_usdc),
+                    "portfolio_pct": "10.00",
+                    "portfolio_value_usdc": None,
+                    "error": None,
+                }
+                effective_unit_usdc = unit_usdc
             record = current or {
                 "id": fp,
                 "first_seen_at": _now_iso(),
@@ -3158,6 +3201,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     nfl._target_profit_for_pick(pick, effective_unit_usdc)
                 ),
                 "sizing_mode": "TO_WIN",
+                "unit_mode": unit_config["mode"],
+                "portfolio_pct": unit_config["portfolio_pct"],
+                "portfolio_value_usdc": unit_config["portfolio_value_usdc"],
                 "pick": pick,
             }
             if current:
@@ -3166,10 +3212,21 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     nfl._target_profit_for_pick(pick, effective_unit_usdc)
                 )
                 record["sizing_mode"] = "TO_WIN"
+                record["unit_mode"] = unit_config["mode"]
+                record["portfolio_pct"] = unit_config["portfolio_pct"]
+                record["portfolio_value_usdc"] = unit_config["portfolio_value_usdc"]
 
             if source_label is None:
                 record["status"] = "IGNORED_UNTRACKED_SOURCE"
                 record["reason"] = "CFB feed source is not Slam or Syndicate"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            if unit_config.get("error"):
+                record["status"] = "RETRYING"
+                record["last_error"] = str(unit_config["error"])
                 record["updated_at"] = _now_iso()
                 signals[fp] = record
                 changed = True
@@ -3504,9 +3561,13 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             sport="CFB",
             live_marks=live_marks,
         )
-        unit_by_label = {
-            label: nfl._capper_unit_usdc(core, label, unit_usdc)
+        unit_config_by_label = {
+            label: nfl._capper_unit_config(core, label, unit_usdc)
             for label in SOURCE_LABELS
+        }
+        unit_by_label = {
+            label: Decimal(str(config["unit_usdc"]))
+            for label, config in unit_config_by_label.items()
         }
         missed = nfl._missed_signal_stats(
             signals,
@@ -3521,9 +3582,15 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         counts: dict[str, dict[str, Any]] = {}
         for label in SOURCE_LABELS:
             rows = [r for r in signals.values() if r.get("source") == label]
+            unit_config = unit_config_by_label[label]
             counts[label] = {
                 "signals": len(rows),
-                "unit_usdc": str(unit_by_label[label]),
+                "unit_usdc": unit_config["unit_usdc"],
+                "fixed_unit_usdc": unit_config["fixed_unit_usdc"],
+                "unit_mode": unit_config["mode"],
+                "portfolio_pct": unit_config["portfolio_pct"],
+                "portfolio_value_usdc": unit_config["portfolio_value_usdc"],
+                "unit_error": unit_config["error"],
                 "sizing_mode": "TO_WIN",
                 "performance": performance.get(label, {}),
                 "positions": nfl._position_items(
@@ -3591,15 +3658,37 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         if label is None:
             raise HTTPException(status_code=404, detail="Unknown CFB capper")
         try:
-            amount = nfl._set_capper_unit_usdc(core, label, payload.get("unit_usdc"))
+            nfl._set_capper_unit_usdc(core, label, payload.get("unit_usdc"))
+            config = nfl._capper_unit_config(core, label, unit_usdc)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
             "ok": True,
             "capper": label,
-            "unit_usdc": str(amount),
+            **config,
             "sizing_mode": "TO_WIN",
-            "note": "Applies to new/retried orders; existing queued/open positions are unchanged.",
+            "note": "Fixed mode enabled. Applies to new/retried orders; existing queued/open positions are unchanged.",
+        }
+
+    @app.put("/api/cfb-cappers/unit-percent/{capper_key}", dependencies=[Depends(dashboard._auth)])
+    def cfb_capper_unit_percent(capper_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        label = {
+            "slam": "Slam - CFB",
+            "syndicate": "Syndicate - CFB",
+        }.get(str(capper_key).strip().lower())
+        if label is None:
+            raise HTTPException(status_code=404, detail="Unknown CFB capper")
+        try:
+            nfl._set_capper_portfolio_pct(core, label, payload.get("portfolio_pct", 10))
+            config = nfl._capper_unit_config(core, label, unit_usdc)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "capper": label,
+            **config,
+            "sizing_mode": "TO_WIN",
+            "note": "Portfolio-percentage mode enabled. 1u recalculates from the latest total wallet value for every new/retried order.",
         }
 
 
