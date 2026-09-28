@@ -1399,7 +1399,7 @@ def _prepare_test_preview(
         raise RuntimeError(
             "Requested " + str(units) + "u targets $" + str(target_profit)
             + " profit and requires $" + str(stake) + " stake at "
-            + str(max_price) + "; exceeds MAX_AUTO_TRADE_USDC=$"
+            + str(best_ask) + "; exceeds MAX_AUTO_TRADE_USDC=$"
             + str(core.MAX_AUTO_TRADE_USDC)
         )
 
