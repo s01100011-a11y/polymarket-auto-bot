@@ -2379,9 +2379,13 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         signals = _load_signals()
         live_marks = _live_mark_map(dashboard, executions)
         stats = _stats_from_executions(executions, live_marks=live_marks)
-        unit_by_label = {
-            label: _capper_unit_usdc(core, label, unit_usdc)
+        unit_config_by_label = {
+            label: _capper_unit_config(core, label, unit_usdc)
             for label in SOURCE_LABELS
+        }
+        unit_by_label = {
+            label: Decimal(str(config["unit_usdc"]))
+            for label, config in unit_config_by_label.items()
         }
         missed = _missed_signal_stats(
             signals,
@@ -2392,8 +2396,14 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             unit_usdc_by_label=unit_by_label,
         )
         for label in SOURCE_LABELS:
+            unit_config = unit_config_by_label[label]
             stats.setdefault(label, {}).update(missed.get(label, {}))
-            stats[label]["unit_usdc"] = str(unit_by_label[label])
+            stats[label]["unit_usdc"] = unit_config["unit_usdc"]
+            stats[label]["fixed_unit_usdc"] = unit_config["fixed_unit_usdc"]
+            stats[label]["unit_mode"] = unit_config["mode"]
+            stats[label]["portfolio_pct"] = unit_config["portfolio_pct"]
+            stats[label]["portfolio_value_usdc"] = unit_config["portfolio_value_usdc"]
+            stats[label]["unit_error"] = unit_config["error"]
             stats[label]["sizing_mode"] = "TO_WIN"
             stats[label]["positions"] = _position_items(
                 executions,
@@ -2482,15 +2492,37 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         if label is None:
             raise HTTPException(status_code=404, detail="Unknown NFL capper")
         try:
-            amount = _set_capper_unit_usdc(core, label, payload.get("unit_usdc"))
+            _set_capper_unit_usdc(core, label, payload.get("unit_usdc"))
+            config = _capper_unit_config(core, label, unit_usdc)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
             "ok": True,
             "capper": label,
-            "unit_usdc": str(amount),
+            **config,
             "sizing_mode": "TO_WIN",
-            "note": "Applies to new/retried orders; existing queued/open positions are unchanged.",
+            "note": "Fixed mode enabled. Applies to new/retried orders; existing queued/open positions are unchanged.",
+        }
+
+    @app.put("/api/nfl-cappers/unit-percent/{capper_key}", dependencies=[Depends(dashboard._auth)])
+    def nfl_capper_unit_percent(capper_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        label = {
+            "slam": "Slam - NFL",
+            "syndicate": "Syndicate - NFL",
+        }.get(str(capper_key).strip().lower())
+        if label is None:
+            raise HTTPException(status_code=404, detail="Unknown NFL capper")
+        try:
+            _set_capper_portfolio_pct(core, label, payload.get("portfolio_pct", 10))
+            config = _capper_unit_config(core, label, unit_usdc)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "capper": label,
+            **config,
+            "sizing_mode": "TO_WIN",
+            "note": "Portfolio-percentage mode enabled. 1u recalculates from the latest total wallet value for every new/retried order.",
         }
 
     base_snapshot = dashboard._dashboard_snapshot
