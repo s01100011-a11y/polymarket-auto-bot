@@ -63,12 +63,17 @@ def _total_missed_pnl(executions: dict[str, Any]) -> dict[str, Any]:
         signals = core._load(path)
         if not isinstance(signals, dict):
             signals = {}
+        unit_by_label = {
+            label: capper._capper_unit_usdc(core, label, unit_usdc)
+            for label in labels
+        }
         stats = capper._missed_signal_stats(
             signals,
             executions,
             labels=labels,
             sport=sport,
             unit_usdc=unit_usdc,
+            unit_usdc_by_label=unit_by_label,
         )
         for label in labels:
             row = stats.get(label) or {}

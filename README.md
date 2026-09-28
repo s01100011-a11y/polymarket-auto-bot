@@ -750,11 +750,12 @@ Copy `.env.example` to `.env` and configure:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NFL_CAPPER_ENABLED` | `true` | Enable NFL capper polling |
-| `NFL_CAPPER_UNIT_USDC` | `10` | USDC value of 1 unit |
+| `NFL_CAPPER_UNIT_USDC` | `10` | Default profit target for 1 NFL unit; Slam/Syndicate can override independently in the dashboard |
 | `NFL_CAPPER_POLL_SECONDS` | `15` | Polling interval |
 | `NFL_CAPPER_MAX_PICK_AGE_SECONDS` | `180` | Max age of a valid pick |
 | `NFL_CAPPER_BRIDGE_URL` | *(bridge URL)* | Telegram-ChatGPT bridge endpoint |
 | `CFB_CAPPER_ENABLED` | `true` | Enable CFB capper preview |
+| `CFB_CAPPER_UNIT_USDC` | `10` | Default profit target for 1 CFB unit; Slam/Syndicate can override independently in the dashboard |
 
 #### Tailscale
 

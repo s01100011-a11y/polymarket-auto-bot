@@ -2101,10 +2101,19 @@ def _prepare_preview(
         raise RuntimeError("Termux executor is offline")
 
     units = _units_for_pick(pick)
-    stake = _stake_for_pick(pick, unit_usdc)
+    target_profit = nfl._target_profit_for_pick(pick, unit_usdc)
+
+    match = _saved_market_match(matched, kind) or _resolve_market_match(pick, kind)
+    asset_id = str(match["asset_id"])
+    quote = _refresh_live_buy_quote(asset_id, core)
+    best_ask = Decimal(quote["best_ask"])
+
+    stake = nfl._stake_to_win_at_price(target_profit, best_ask)
     if stake > core.MAX_AUTO_TRADE_USDC:
         raise RuntimeError(
-            f"Requested {units}u = ${stake} exceeds MAX_AUTO_TRADE_USDC=${core.MAX_AUTO_TRADE_USDC}"
+            f"Requested {units}u targets ${target_profit} profit and requires "
+            f"${stake} stake at {best_ask}; exceeds "
+            f"MAX_AUTO_TRADE_USDC=${core.MAX_AUTO_TRADE_USDC}"
         )
 
     used = core._daily_budget_used()
@@ -2115,11 +2124,6 @@ def _prepare_preview(
             f"used=${used}, pending=${pending}, requested=${stake}, "
             f"limit=${core.MAX_DAILY_BUDGET_USDC}"
         )
-
-    match = _saved_market_match(matched, kind) or _resolve_market_match(pick, kind)
-    asset_id = str(match["asset_id"])
-    quote = _refresh_live_buy_quote(asset_id, core)
-    best_ask = Decimal(quote["best_ask"])
 
     source_label = _source_label(pick)
     fp = _fingerprint(pick)
@@ -2140,6 +2144,8 @@ def _prepare_preview(
         "strategy_sport": "CFB",
         "strategy_units": str(units),
         "strategy_unit_usdc": str(unit_usdc),
+        "strategy_target_profit_usdc": str(target_profit),
+        "strategy_sizing_mode": "TO_WIN",
         "strategy_pick_id": fp,
         "strategy_posted_at": pick.get("posted_at"),
         "strategy_selection": pick.get("selection"),
@@ -2153,7 +2159,10 @@ def _prepare_preview(
         "strategy_source": source_label,
         **match,
         "units": str(units),
+        "unit_usdc": str(unit_usdc),
+        "target_profit_usdc": str(target_profit),
         "stake_usdc": str(stake),
+        "sizing_mode": "TO_WIN",
         **quote,
     }
 
@@ -2181,10 +2190,19 @@ def _prepare_pick(
         raise RuntimeError("Termux executor is offline")
 
     units = _units_for_pick(pick)
-    stake = _stake_for_pick(pick, unit_usdc)
+    target_profit = nfl._target_profit_for_pick(pick, unit_usdc)
+
+    match = _saved_market_match(matched, kind) or _resolve_market_match(pick, kind)
+    asset_id = str(match["asset_id"])
+    quote = _refresh_live_buy_quote(asset_id, core)
+    best_ask = Decimal(quote["best_ask"])
+
+    stake = nfl._stake_to_win_at_price(target_profit, best_ask)
     if stake > core.MAX_AUTO_TRADE_USDC:
         raise RuntimeError(
-            f"Requested {units}u = ${stake} exceeds MAX_AUTO_TRADE_USDC=${core.MAX_AUTO_TRADE_USDC}"
+            f"Requested {units}u targets ${target_profit} profit and requires "
+            f"${stake} stake at {best_ask}; exceeds "
+            f"MAX_AUTO_TRADE_USDC=${core.MAX_AUTO_TRADE_USDC}"
         )
 
     used = core._daily_budget_used()
@@ -2195,11 +2213,6 @@ def _prepare_pick(
             f"used=${used}, pending=${pending}, requested=${stake}, "
             f"limit=${core.MAX_DAILY_BUDGET_USDC}"
         )
-
-    match = _saved_market_match(matched, kind) or _resolve_market_match(pick, kind)
-    asset_id = str(match["asset_id"])
-    quote = _refresh_live_buy_quote(asset_id, core)
-    best_ask = Decimal(quote["best_ask"])
 
     source_label = _source_label(pick)
     fp = _fingerprint(pick)
@@ -2220,6 +2233,8 @@ def _prepare_pick(
         "strategy_sport": "CFB",
         "strategy_units": str(units),
         "strategy_unit_usdc": str(unit_usdc),
+        "strategy_target_profit_usdc": str(target_profit),
+        "strategy_sizing_mode": "TO_WIN",
         "strategy_pick_id": fp,
         "strategy_posted_at": pick.get("posted_at"),
         "strategy_selection": pick.get("selection"),
@@ -2233,7 +2248,10 @@ def _prepare_pick(
         "strategy_source": source_label,
         **match,
         "units": str(units),
+        "unit_usdc": str(unit_usdc),
+        "target_profit_usdc": str(target_profit),
         "stake_usdc": str(stake),
+        "sizing_mode": "TO_WIN",
         **quote,
     }
 
@@ -2295,15 +2313,24 @@ def _prepare_manual_buy(
         raise RuntimeError("Termux executor is offline")
 
     units = _units_for_pick(pick)
-    stake = _stake_for_pick(pick, unit_usdc)
-    if stake > core.MAX_AUTO_TRADE_USDC:
-        raise RuntimeError(
-            f"Requested {units}u = ${stake} exceeds MAX_AUTO_TRADE_USDC=${core.MAX_AUTO_TRADE_USDC}"
-        )
+    target_profit = nfl._target_profit_for_pick(pick, unit_usdc)
 
     fp = str(strategy_pick_id or _fingerprint(pick))
     if _existing_manual_buy(core, remote, fp) is not None:
         raise RuntimeError("A live CFB BUY for this signal is already queued or open")
+
+    match = _saved_market_match(matched, kind) or _resolve_market_match(pick, kind)
+    asset_id = str(match["asset_id"])
+    quote = _refresh_live_buy_quote(asset_id, core)
+    best_ask = Decimal(quote["best_ask"])
+
+    stake = nfl._stake_to_win_at_price(target_profit, best_ask)
+    if stake > core.MAX_AUTO_TRADE_USDC:
+        raise RuntimeError(
+            f"Requested {units}u targets ${target_profit} profit and requires "
+            f"${stake} stake at {best_ask}; exceeds "
+            f"MAX_AUTO_TRADE_USDC=${core.MAX_AUTO_TRADE_USDC}"
+        )
 
     used = core._daily_budget_used()
     pending = nfl._pending_auto_budget(remote)
@@ -2313,11 +2340,6 @@ def _prepare_manual_buy(
             f"used=${used}, pending=${pending}, requested=${stake}, "
             f"limit=${core.MAX_DAILY_BUDGET_USDC}"
         )
-
-    match = _saved_market_match(matched, kind) or _resolve_market_match(pick, kind)
-    asset_id = str(match["asset_id"])
-    quote = _refresh_live_buy_quote(asset_id, core)
-    best_ask = Decimal(quote["best_ask"])
 
     source_label = _source_label(pick)
     trade_id = f"cfb-manual-{fp[:12]}-{uuid.uuid4().hex[:6]}"
@@ -2340,6 +2362,8 @@ def _prepare_manual_buy(
         "strategy_sport": "CFB",
         "strategy_units": str(units),
         "strategy_unit_usdc": str(unit_usdc),
+        "strategy_target_profit_usdc": str(target_profit),
+        "strategy_sizing_mode": "TO_WIN",
         "strategy_pick_id": fp,
         "strategy_posted_at": pick.get("posted_at"),
         "strategy_selection": strategy_selection or pick.get("selection"),
@@ -2355,7 +2379,10 @@ def _prepare_manual_buy(
         "strategy_source": source_label,
         **match,
         "units": str(units),
+        "unit_usdc": str(unit_usdc),
+        "target_profit_usdc": str(target_profit),
         "stake_usdc": str(stake),
+        "sizing_mode": "TO_WIN",
         **quote,
     }
 
@@ -2411,7 +2438,10 @@ def _status_pick_item(
         "updated_at": record.get("updated_at"),
         "signal_age_seconds": age_seconds,
         "units": record.get("units"),
+        "unit_usdc": record.get("unit_usdc"),
+        "target_profit_usdc": record.get("target_profit_usdc"),
         "stake_usdc": record.get("stake_usdc"),
+        "sizing_mode": record.get("sizing_mode"),
         "match_status": (
             record.get("match_status")
             if record.get("match_status") == "INVALID_FUTURE_MATCH"
@@ -2605,7 +2635,8 @@ function cfbPickList(title,items,kind){
  const rows=visible.map(item=>{
   const meta=[];
   if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(cfbEsc(item.units)+'u');
-  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('\u0024'+Number(item.stake_usdc).toFixed(2));
+  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('risk \u0024'+Number(item.stake_usdc).toFixed(2));
+  if(item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!=='')meta.push('to win \u0024'+Number(item.target_profit_usdc).toFixed(2));
   if(item.posted_at)meta.push('posted '+cfbPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+cfbAge(item.signal_age_seconds):''));
   if(item.market&&String(item.match_status||'')!=='INVALID_FUTURE_MATCH')meta.push('Matched: '+cfbEsc(item.market)+(item.outcome?' → '+cfbEsc(item.outcome):''));
   if(item.result_event_title)meta.push('Game '+cfbEsc(item.result_event_title));
@@ -2769,6 +2800,32 @@ function cfbOpenPositionList(x){
   return '<div class="cfb-open-position"><b style="font-size:15px">'+cfbEsc(item.selection||item.market||'CFB position')+' · OPEN</b><br><span>'+cfbEsc(item.outcome||'')+' · Entry '+entry+' · Live '+live+'</span><br><span>Shares '+shares+' · Cost $'+Number(cost||0).toFixed(2)+' · Value '+value+'</span><div class="live-pnl '+cls+'">Live P/L '+pnl+'</div>'+sell+'</div>';
  }).join('')+'</div>';
 }
+async function cfbSetUnitSize(sourceKey,btn){
+ const input=document.getElementById('cfbUnitSize-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/cfb-cappers/unit-size/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadCfbCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
 function cfbCapperLine(x,sourceKey){
  if(!x)return 'No tracked signals yet';
  const p=x.performance||{};
@@ -2794,7 +2851,9 @@ function cfbCapperLine(x,sourceKey){
  const spec=specs.find(s=>s[0]===active)||specs[0];
  const items=spec[3]||[];
  const body=items.length?cfbPickList(spec[1]+' signals',items,spec[4]):'<div style="margin-top:8px;opacity:.7">No '+cfbEsc(spec[1].toLowerCase())+' signals.</div>';
- return performance+cfbOpenPositionList(x)+tabs+body;
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const unitControl='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 9px"><b style="font-size:12px">1u WIN $</b><input id="cfbUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+unitValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px" onclick="cfbSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><span style="font-size:11px;opacity:.72">new orders · sized to win posted units</span></div>';
+ return unitControl+performance+cfbOpenPositionList(x)+tabs+body;
 }
 async function loadCfbCapperStats(){
  try{
@@ -2802,7 +2861,7 @@ async function loadCfbCapperStats(){
   if(!r.ok)throw new Error(d.detail||'CFB capper status failed');
   const state=document.getElementById('cfbCapperState'),meta=document.getElementById('cfbCapperMeta');
   if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
-  if(meta)meta.textContent='1u = \u0024'+Number(d.unit_usdc||10).toFixed(2)+' · auto fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · manual pregame/live while market open · odds refresh '+(d.poll_seconds||0)+'s';
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · auto fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · manual pregame/live while market open · odds refresh '+(d.poll_seconds||0)+'s';
   cfbLastSources=d.sources||{};
   const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
   if(s)s.innerHTML=cfbCapperLine(cfbLastSources['Slam - CFB'],'slam');
@@ -3081,6 +3140,11 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     continue
 
             source_label = _source_label(pick)
+            effective_unit_usdc = (
+                nfl._capper_unit_usdc(core, source_label, unit_usdc)
+                if source_label is not None
+                else unit_usdc
+            )
             record = current or {
                 "id": fp,
                 "first_seen_at": _now_iso(),
@@ -3089,9 +3153,19 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "posted_at": pick.get("posted_at"),
                 "selection": pick.get("selection"),
                 "units": str(_units_for_pick(pick)),
-                "stake_usdc": str(_stake_for_pick(pick, unit_usdc)),
+                "unit_usdc": str(effective_unit_usdc),
+                "target_profit_usdc": str(
+                    nfl._target_profit_for_pick(pick, effective_unit_usdc)
+                ),
+                "sizing_mode": "TO_WIN",
                 "pick": pick,
             }
+            if current:
+                record["unit_usdc"] = str(effective_unit_usdc)
+                record["target_profit_usdc"] = str(
+                    nfl._target_profit_for_pick(pick, effective_unit_usdc)
+                )
+                record["sizing_mode"] = "TO_WIN"
 
             if source_label is None:
                 record["status"] = "IGNORED_UNTRACKED_SOURCE"
@@ -3206,7 +3280,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                             pick,
                             core=core,
                             remote=remote,
-                            unit_usdc=unit_usdc,
+                            unit_usdc=effective_unit_usdc,
                             matched=record,
                         )
                         record.update(prepared)
@@ -3269,7 +3343,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     pick,
                     core=core,
                     remote=remote,
-                    unit_usdc=unit_usdc,
+                    unit_usdc=effective_unit_usdc,
                     matched=record,
                 )
                 record.update(prepared)
@@ -3324,12 +3398,18 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 await asyncio.sleep(2)
 
             test_prepare_fn = _prepare_pick if live_enabled else _prepare_preview
+            test_source = _source_label(pick)
+            test_unit_usdc = (
+                nfl._capper_unit_usdc(core, test_source, unit_usdc)
+                if test_source is not None
+                else unit_usdc
+            )
             result = await asyncio.to_thread(
                 test_prepare_fn,
                 pick,
                 core=core,
                 remote=remote,
-                unit_usdc=unit_usdc,
+                unit_usdc=test_unit_usdc,
             )
             marker = {
                 "trigger_hash": trigger_hash,
@@ -3424,12 +3504,17 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             sport="CFB",
             live_marks=live_marks,
         )
+        unit_by_label = {
+            label: nfl._capper_unit_usdc(core, label, unit_usdc)
+            for label in SOURCE_LABELS
+        }
         missed = nfl._missed_signal_stats(
             signals,
             executions,
             labels=SOURCE_LABELS,
             sport="CFB",
             unit_usdc=unit_usdc,
+            unit_usdc_by_label=unit_by_label,
         )
         for label in SOURCE_LABELS:
             performance.setdefault(label, {}).update(missed.get(label, {}))
@@ -3438,6 +3523,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             rows = [r for r in signals.values() if r.get("source") == label]
             counts[label] = {
                 "signals": len(rows),
+                "unit_usdc": str(unit_by_label[label]),
+                "sizing_mode": "TO_WIN",
                 "performance": performance.get(label, {}),
                 "positions": nfl._position_items(
                     executions,
@@ -3481,6 +3568,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         return {
             "enabled": enabled,
             "mode": "LIVE" if live_enabled else "PREVIEW_ONLY",
+            "sizing_mode": "TO_WIN",
             "poll_seconds": poll_seconds,
             "max_pick_age_seconds": max_age_seconds,
             "feed_window_minutes": feed_window_minutes,
@@ -3491,6 +3579,27 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             "auto_live": bool(enabled and live_enabled and auto_trading and live_trading),
             "sources": counts,
             "status": dict(_STATUS),
+        }
+
+
+    @app.put("/api/cfb-cappers/unit-size/{capper_key}", dependencies=[Depends(dashboard._auth)])
+    def cfb_capper_unit_size(capper_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        label = {
+            "slam": "Slam - CFB",
+            "syndicate": "Syndicate - CFB",
+        }.get(str(capper_key).strip().lower())
+        if label is None:
+            raise HTTPException(status_code=404, detail="Unknown CFB capper")
+        try:
+            amount = nfl._set_capper_unit_usdc(core, label, payload.get("unit_usdc"))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "capper": label,
+            "unit_usdc": str(amount),
+            "sizing_mode": "TO_WIN",
+            "note": "Applies to new/retried orders; existing queued/open positions are unchanged.",
         }
 
 
@@ -3535,11 +3644,16 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             f"{pick.get('team_hint') or pick.get('selection')} {selected['spread_line']}"
         )
         try:
+            effective_unit_usdc = nfl._capper_unit_usdc(
+                core,
+                str(record.get("source") or ""),
+                unit_usdc,
+            )
             result = _prepare_manual_buy(
                 execution_pick,
                 core=core,
                 remote=remote,
-                unit_usdc=unit_usdc,
+                unit_usdc=effective_unit_usdc,
                 matched=selected,
                 strategy_pick_id=signal_id,
                 strategy_selection=str(record.get("selection") or pick.get("selection") or ""),
@@ -3615,11 +3729,16 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             )
 
         try:
+            effective_unit_usdc = nfl._capper_unit_usdc(
+                core,
+                str(record.get("source") or ""),
+                unit_usdc,
+            )
             result = _prepare_manual_buy(
                 pick,
                 core=core,
                 remote=remote,
-                unit_usdc=unit_usdc,
+                unit_usdc=effective_unit_usdc,
                 matched=saved_match,
             )
         except HTTPException:
