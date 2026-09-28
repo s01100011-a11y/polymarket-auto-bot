@@ -2056,11 +2056,41 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     rec["result"] = queued.get("result")
                     changed = True
             elif qstatus == "FAILED":
-                rec["status"] = "EXECUTOR_FAILED"
-                rec["last_error"] = queued.get("error")
-                rec["completed_at"] = queued.get("updated_at") or _now_iso()
-                rec["result"] = queued.get("result")
-                changed = True
+                failure_text = str(queued.get("error") or "")
+                # One-time recovery for orders that were rejected solely by the
+                # retired Termux phone emergency ceiling. Reuse the exact original
+                # BUY payload so stake, token, line, max price and strategy metadata
+                # do not get recalculated at retry time.
+                if (
+                    "phone emergency hard ceiling" in failure_text
+                    and not rec.get("legacy_phone_ceiling_retry_done")
+                    and str((queued.get("payload") or {}).get("strategy_selection") or rec.get("selection") or "").strip().lower() == "bears +4"
+                    and str((queued.get("payload") or {}).get("strategy_source") or rec.get("source") or "").strip() == "Syndicate - NFL"
+                ):
+                    retry_payload = dict(queued.get("payload") or {})
+                    retried = remote._enqueue("BUY", retry_payload)
+                    rec["status"] = "QUEUED"
+                    rec["request_id"] = retried["id"]
+                    rec["legacy_phone_ceiling_retry_done"] = True
+                    rec["legacy_phone_ceiling_retry_at"] = _now_iso()
+                    rec["legacy_phone_ceiling_original_request_id"] = queued.get("id")
+                    rec["last_error"] = failure_text
+                    rec.pop("completed_at", None)
+                    changed = True
+                    print(
+                        "NFL_CAPPER_SIGNAL "
+                        f"status=QUEUED source={rec.get('source')!r} "
+                        f"selection={rec.get('selection')!r} "
+                        f"request_id={retried['id']!r} "
+                        f"recovery=legacy_phone_ceiling original_request_id={queued.get('id')!r}",
+                        flush=True,
+                    )
+                else:
+                    rec["status"] = "EXECUTOR_FAILED"
+                    rec["last_error"] = queued.get("error")
+                    rec["completed_at"] = queued.get("updated_at") or _now_iso()
+                    rec["result"] = queued.get("result")
+                    changed = True
         return changed
 
     async def _poll_once() -> None:
