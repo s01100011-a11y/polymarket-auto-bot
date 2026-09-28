@@ -469,12 +469,17 @@ def _missed_signal_stats(
                 target_profit = _target_profit_for_pick(pick, record_unit)
 
             stake = None
-            for key in ("stake_usdc_at_call", "stake_usdc"):
+            try:
+                candidate = Decimal(str(record.get("stake_usdc_at_call")))
+                if candidate > 0:
+                    stake = candidate
+            except Exception:
+                pass
+            if stake is None and str(record.get("sizing_mode") or "").upper() == "TO_WIN":
                 try:
-                    candidate = Decimal(str(record.get(key)))
+                    candidate = Decimal(str(record.get("stake_usdc")))
                     if candidate > 0:
                         stake = candidate
-                        break
                 except Exception:
                     pass
             if stake is None:
