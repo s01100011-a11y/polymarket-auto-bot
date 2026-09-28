@@ -84,14 +84,28 @@ class NflCapperFeedLoggingTests(unittest.TestCase):
 
 
 class NflCapperSizingTests(unittest.TestCase):
-    def test_default_and_sub_one_unit_both_buy_one_unit(self):
-        self.assertEqual(str(capper._stake_for_pick(_pick(units=None))), "10.00")
-        self.assertEqual(str(capper._stake_for_pick(_pick(units=0.5))), "10.00")
-        self.assertEqual(str(capper._stake_for_pick(_pick(units=1))), "10.00")
+    def test_default_and_sub_one_unit_target_one_unit_profit(self):
+        self.assertEqual(str(capper._target_profit_for_pick(_pick(units=None))), "10.00")
+        self.assertEqual(str(capper._target_profit_for_pick(_pick(units=0.5))), "10.00")
+        self.assertEqual(str(capper._target_profit_for_pick(_pick(units=1))), "10.00")
+        # Missing posted odds falls back to -115, so risking $11.50 targets $10 profit.
+        self.assertEqual(str(capper._stake_for_pick(_pick(units=1))), "11.50")
 
-    def test_explicit_units_scale_at_ten_dollars(self):
-        self.assertEqual(str(capper._stake_for_pick(_pick(units=1.25))), "12.50")
-        self.assertEqual(str(capper._stake_for_pick(_pick(units=3))), "30.00")
+    def test_explicit_units_scale_profit_target_not_flat_stake(self):
+        self.assertEqual(str(capper._target_profit_for_pick(_pick(units=1.25))), "12.50")
+        self.assertEqual(str(capper._target_profit_for_pick(_pick(units=3))), "30.00")
+        self.assertEqual(str(capper._stake_for_pick(_pick(units=1.25))), "14.38")
+        self.assertEqual(str(capper._stake_for_pick(_pick(units=3))), "34.50")
+
+    def test_binary_price_stake_is_calculated_to_win_target(self):
+        self.assertEqual(
+            str(capper._stake_to_win_at_price(Decimal("10"), Decimal("0.54"))),
+            "11.74",
+        )
+        self.assertEqual(
+            str(capper._stake_to_win_at_price(Decimal("20"), Decimal("0.64"))),
+            "35.56",
+        )
 
     def test_explicit_college_matchup_with_nfl_nickname_is_rejected(self):
         kind, reason = capper._classify_pick(
@@ -452,13 +466,17 @@ class NflCapperPreviewTests(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "PREVIEW_QUEUED")
-        self.assertEqual(result["stake_usdc"], "20.00")
+        self.assertEqual(result["stake_usdc"], "35.56")
         self.assertEqual(result["max_price"], "0.64")
+        self.assertEqual(result["target_profit_usdc"], "20.00")
+        self.assertEqual(result["sizing_mode"], "TO_WIN")
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][0], "PREVIEW")
         self.assertEqual(calls[0][1]["market_type"], "total")
-        self.assertEqual(calls[0][1]["budget_usdc"], "20.00")
+        self.assertEqual(calls[0][1]["budget_usdc"], "35.56")
         self.assertEqual(calls[0][1]["asset_id"], "under-48-5-token")
+        self.assertEqual(calls[0][1]["strategy_target_profit_usdc"], "20.00")
+        self.assertEqual(calls[0][1]["strategy_sizing_mode"], "TO_WIN")
         self.assertFalse(calls[0][1]["auto"])
 
 
