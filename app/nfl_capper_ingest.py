@@ -2096,11 +2096,19 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 continue
 
             source_label = _source_label(pick)
-            effective_unit_usdc = (
-                _capper_unit_usdc(core, source_label, unit_usdc)
-                if source_label is not None
-                else unit_usdc
-            )
+            if source_label is not None:
+                unit_config = _capper_unit_config(core, source_label, unit_usdc)
+                effective_unit_usdc = Decimal(str(unit_config["unit_usdc"]))
+            else:
+                unit_config = {
+                    "mode": "fixed",
+                    "unit_usdc": str(unit_usdc),
+                    "fixed_unit_usdc": str(unit_usdc),
+                    "portfolio_pct": "10.00",
+                    "portfolio_value_usdc": None,
+                    "error": None,
+                }
+                effective_unit_usdc = unit_usdc
             base_record = current or {
                 "id": fp,
                 "first_seen_at": _now_iso(),
@@ -2114,6 +2122,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "unit_usdc": str(effective_unit_usdc),
                 "target_profit_usdc": str(_target_profit_for_pick(pick, effective_unit_usdc)),
                 "sizing_mode": "TO_WIN",
+                "unit_mode": unit_config["mode"],
+                "portfolio_pct": unit_config["portfolio_pct"],
+                "portfolio_value_usdc": unit_config["portfolio_value_usdc"],
                 "pick": pick,
             }
             if current:
@@ -2122,6 +2133,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     _target_profit_for_pick(pick, effective_unit_usdc)
                 )
                 base_record["sizing_mode"] = "TO_WIN"
+                base_record["unit_mode"] = unit_config["mode"]
+                base_record["portfolio_pct"] = unit_config["portfolio_pct"]
+                base_record["portfolio_value_usdc"] = unit_config["portfolio_value_usdc"]
 
             if source_label is None:
                 base_record["status"] = "IGNORED_UNTRACKED_SOURCE"
@@ -2133,6 +2147,21 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     "NFL_CAPPER_SOURCE_IGNORED "
                     f"source={pick.get('source')!r} source_id={pick.get('source_id')!r} "
                     f"source_key={pick.get('source_key')!r} selection={pick.get('selection')!r}",
+                    flush=True,
+                )
+                continue
+
+            if unit_config.get("error"):
+                base_record["status"] = "RETRYING"
+                base_record["last_error"] = str(unit_config["error"])
+                base_record["updated_at"] = _now_iso()
+                signals[fp] = base_record
+                changed = True
+                print(
+                    "NFL_CAPPER_SIGNAL "
+                    f"status=RETRYING source={source_label!r} "
+                    f"selection={pick.get('selection')!r} "
+                    f"reason={base_record['last_error']!r}",
                     flush=True,
                 )
                 continue
