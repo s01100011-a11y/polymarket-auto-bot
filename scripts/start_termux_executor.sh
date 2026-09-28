@@ -28,7 +28,12 @@ if [ ! -x "${VENV}/bin/python" ]; then
   exit 1
 fi
 
-echo "$(date -Is) supervisor starting" | tee -a "${LOG_FILE}"
+# Ensure an old directly-launched worker cannot coexist with the supervised
+# worker. The bracketed pattern does not match this shell command itself.
+pkill -f '[t]ermux_executor_v2.py' 2>/dev/null || true
+
+echo "$(date -Is) supervisor starting full queue executor" | tee -a "${LOG_FILE}"
+echo "$(date -Is) worker=${ROOT}/scripts/termux_executor_v2.py bridge=${EXECUTOR_BRIDGE_URL:-default}" | tee -a "${LOG_FILE}"
 
 while true; do
   echo "$(date -Is) launching termux_executor_v2.py" | tee -a "${LOG_FILE}"
