@@ -459,7 +459,10 @@ def main() -> None:
         raise SystemExit(2)
 
     print(f"Termux executor online as {WORKER_NAME}. Ctrl+C to stop.")
-    last_heartbeat = 0.0
+    # The startup path already posted a full wallet heartbeat above. Mark it as
+    # current so the first worker-loop action is an executor queue poll instead
+    # of a second potentially slow wallet/portfolio heartbeat.
+    last_heartbeat = time.time()
     while True:
         try:
             if time.time() - last_heartbeat >= 20:
