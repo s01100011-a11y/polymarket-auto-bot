@@ -3140,11 +3140,19 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     continue
 
             source_label = _source_label(pick)
-            effective_unit_usdc = (
-                nfl._capper_unit_usdc(core, source_label, unit_usdc)
-                if source_label is not None
-                else unit_usdc
-            )
+            if source_label is not None:
+                unit_config = nfl._capper_unit_config(core, source_label, unit_usdc)
+                effective_unit_usdc = Decimal(str(unit_config["unit_usdc"]))
+            else:
+                unit_config = {
+                    "mode": "fixed",
+                    "unit_usdc": str(unit_usdc),
+                    "fixed_unit_usdc": str(unit_usdc),
+                    "portfolio_pct": "10.00",
+                    "portfolio_value_usdc": None,
+                    "error": None,
+                }
+                effective_unit_usdc = unit_usdc
             record = current or {
                 "id": fp,
                 "first_seen_at": _now_iso(),
@@ -3158,6 +3166,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     nfl._target_profit_for_pick(pick, effective_unit_usdc)
                 ),
                 "sizing_mode": "TO_WIN",
+                "unit_mode": unit_config["mode"],
+                "portfolio_pct": unit_config["portfolio_pct"],
+                "portfolio_value_usdc": unit_config["portfolio_value_usdc"],
                 "pick": pick,
             }
             if current:
@@ -3166,10 +3177,21 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     nfl._target_profit_for_pick(pick, effective_unit_usdc)
                 )
                 record["sizing_mode"] = "TO_WIN"
+                record["unit_mode"] = unit_config["mode"]
+                record["portfolio_pct"] = unit_config["portfolio_pct"]
+                record["portfolio_value_usdc"] = unit_config["portfolio_value_usdc"]
 
             if source_label is None:
                 record["status"] = "IGNORED_UNTRACKED_SOURCE"
                 record["reason"] = "CFB feed source is not Slam or Syndicate"
+                record["updated_at"] = _now_iso()
+                signals[fp] = record
+                changed = True
+                continue
+
+            if unit_config.get("error"):
+                record["status"] = "RETRYING"
+                record["last_error"] = str(unit_config["error"])
                 record["updated_at"] = _now_iso()
                 signals[fp] = record
                 changed = True
