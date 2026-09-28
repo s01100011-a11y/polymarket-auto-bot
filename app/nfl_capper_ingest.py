@@ -2739,6 +2739,32 @@ async function nflSetUnitSize(sourceKey,btn){
   alert(String(e.message||e));
  }
 }
+async function nflSetPortfolioPct(sourceKey,btn){
+ const input=document.getElementById('nflPortfolioPct-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-percent/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
 function nflCapperLine(x,sourceKey){
  if(!x)return 'No tracked signals yet';
  const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
@@ -2760,7 +2786,16 @@ function nflCapperLine(x,sourceKey){
  const spec=specs.find(s=>s[0]===active)||specs[0];
  const body=(spec[3]||[]).length?nflPickList(spec[1]+' signals',spec[3],spec[4]):'<div style="margin-top:8px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div>';
  const unitValue=Number(x.unit_usdc||10).toFixed(2);
- const unitControl='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 9px"><b style="font-size:12px">1u WIN $</b><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+unitValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><span style="font-size:11px;opacity:.72">new orders · sized to win posted units</span></div>';
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div style="margin:6px 0 9px"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:12px">1u WIN $</b><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px;'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><b style="font-size:12px;margin-left:4px">% PORTFOLIO</b><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'" style="width:72px"><button type="button" style="padding:5px 8px;min-height:34px;'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button></div><div style="font-size:11px;opacity:.78;margin-top:3px">'+modeText+' · percentage mode recalculates before each new/retried order; risk still varies by odds</div></div>';
  return unitControl+metrics+nflPositionList(x)+tabs+body;
 }
 async function loadNflCapperStats(){
