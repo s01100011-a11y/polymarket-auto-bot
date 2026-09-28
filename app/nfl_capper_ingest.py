@@ -1475,6 +1475,134 @@ def _stats_from_executions(
     return out
 
 
+def _execution_for_nfl_signal(
+    record: dict[str, Any],
+    executions: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Return the execution associated with one persisted NFL capper signal."""
+    if not isinstance(executions, dict):
+        return None
+    signal_id = str(record.get("id") or "")
+    trade_id = str(record.get("trade_id") or "")
+    matches: list[dict[str, Any]] = []
+    for execution_id, rec in executions.items():
+        if not isinstance(rec, dict) or rec.get("parent_trade_id"):
+            continue
+        if trade_id and str(rec.get("id") or execution_id) == trade_id:
+            matches.append(rec)
+            continue
+        if signal_id and str(rec.get("strategy_pick_id") or "") == signal_id:
+            matches.append(rec)
+    if not matches:
+        return None
+    matches.sort(
+        key=lambda rec: (
+            rec.get("realized_pnl") is not None,
+            str(rec.get("closed_at") or rec.get("submitted_at") or rec.get("created_at") or ""),
+        ),
+        reverse=True,
+    )
+    return matches[0]
+
+
+def _nfl_dashboard_event_phase(
+    record: dict[str, Any],
+    execution: dict[str, Any] | None = None,
+) -> str | None:
+    """Normalize persisted signal/trade state for the dashboard phase tabs."""
+    settlement = (execution or {}).get("settlement") or {}
+    result = str(
+        settlement.get("result")
+        or record.get("pick_result")
+        or ""
+    ).upper()
+    if result in {"WIN", "LOSS", "PUSH"} or record.get("final_score"):
+        return "CLOSED"
+
+    phase = str(
+        record.get("event_phase")
+        or record.get("espn_phase")
+        or ""
+    ).upper()
+    if phase in {"PREGAME", "LIVE", "CLOSED"}:
+        return phase
+
+    status = str(record.get("status") or "").upper()
+    if status in {"EVENT_CLOSED", "SETTLED_WIN", "SETTLED_LOSS", "SETTLED_PUSH"}:
+        return "CLOSED"
+    if status in {"MATCHED_LIVE", "MATCHED_LIVE_ALTERNATE"}:
+        return "LIVE"
+    if status in {"MATCHED_PREGAME", "MATCHED_PREGAME_ALTERNATE"}:
+        return "PREGAME"
+    return None
+
+
+def _nfl_signal_dashboard_item(
+    record: dict[str, Any],
+    executions: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Shape one NFL capper signal for the same dashboard UI used by CFB."""
+    execution = _execution_for_nfl_signal(record, executions)
+    settlement = (execution or {}).get("settlement") or {}
+    trade_result = str(settlement.get("result") or "").upper() or None
+    posted = _parse_iso(record.get("posted_at"))
+    age_seconds = None
+    if posted is not None:
+        age_seconds = max(0, int((datetime.now(timezone.utc) - posted).total_seconds()))
+
+    market_url = str(record.get("market_url") or "")
+    matched = bool(
+        record.get("asset_id")
+        and record.get("outcome")
+        and market_url.startswith("https://polymarket.com/")
+    )
+    phase = _nfl_dashboard_event_phase(record, execution)
+    execution_status = str((execution or {}).get("status") or "")
+    realized_pnl = (execution or {}).get("realized_pnl")
+    trade_stake = (execution or {}).get("actual_cost_usdc") or (execution or {}).get("budget_usdc")
+
+    return {
+        "status": record.get("status"),
+        "selection": record.get("selection"),
+        "posted_at": record.get("posted_at"),
+        "updated_at": record.get("updated_at"),
+        "signal_age_seconds": age_seconds,
+        "units": record.get("units"),
+        "stake_usdc": record.get("stake_usdc"),
+        "match_status": "MATCHED" if matched else record.get("match_status"),
+        "market_type": record.get("market_type"),
+        "market": record.get("market"),
+        "market_url": record.get("market_url"),
+        "event_title": record.get("event_title") or record.get("result_event_title"),
+        "event_start_at": record.get("event_start_at"),
+        "event_phase": phase,
+        "outcome": record.get("outcome"),
+        "asset_id": record.get("asset_id"),
+        "current_buy_price": record.get("current_buy_price"),
+        "best_ask": record.get("best_ask") or record.get("max_price"),
+        "spread": record.get("spread"),
+        "live_odds_american": record.get("live_odds_american"),
+        "reason": record.get("reason"),
+        "last_error": record.get("last_error"),
+        "request_id": record.get("request_id"),
+        "signal_id": record.get("id"),
+        "pick_result": record.get("pick_result"),
+        "trade_executed": execution is not None,
+        "trade_id": str((execution or {}).get("id") or "") or None,
+        "trade_status": execution_status or None,
+        "trade_result": trade_result,
+        "trade_pnl_usdc": realized_pnl,
+        "trade_stake_usdc": trade_stake,
+        "sell_available": execution_status in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"},
+        "result_source": record.get("result_source"),
+        "result_event_title": record.get("result_event_title"),
+        "final_score": record.get("final_score"),
+        "live_score": record.get("live_score"),
+        "espn_score": record.get("espn_score"),
+        "espn_status": record.get("espn_status"),
+    }
+
+
 def _position_items(
     executions: dict[str, Any],
     label: str,
@@ -2020,6 +2148,47 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 sport="NFL",
                 live_marks=live_marks,
             )
+            rows = [
+                r for r in signals.values()
+                if isinstance(r, dict) and r.get("source") == label
+            ]
+            items = [_nfl_signal_dashboard_item(r, executions) for r in rows]
+            items.sort(
+                key=lambda item: str(
+                    item.get("updated_at")
+                    or item.get("posted_at")
+                    or ""
+                ),
+                reverse=True,
+            )
+
+            def status_items(*wanted: str) -> list[dict[str, Any]]:
+                wanted_set = set(wanted)
+                return [
+                    item for item in items
+                    if str(item.get("status") or "") in wanted_set
+                ][:30]
+
+            stats[label].update({
+                "signals": len(rows),
+                "queued": sum(1 for r in rows if r.get("status") == "QUEUED"),
+                "done": sum(1 for r in rows if r.get("status") == "EXECUTOR_DONE"),
+                "failed": sum(1 for r in rows if r.get("status") == "EXECUTOR_FAILED"),
+                "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
+                "pregame": sum(1 for item in items if item.get("event_phase") == "PREGAME"),
+                "live": sum(1 for item in items if item.get("event_phase") == "LIVE"),
+                "closed": sum(1 for item in items if item.get("event_phase") == "CLOSED"),
+                "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
+                "all_items": items[:60],
+                "queued_items": status_items("QUEUED"),
+                "done_items": status_items("EXECUTOR_DONE"),
+                "failed_items": status_items("EXECUTOR_FAILED"),
+                "retrying_items": status_items("RETRYING"),
+                "pregame_items": [item for item in items if item.get("event_phase") == "PREGAME"][:30],
+                "live_items": [item for item in items if item.get("event_phase") == "LIVE"][:30],
+                "closed_items": [item for item in items if item.get("event_phase") == "CLOSED"][:30],
+                "unsupported_items": status_items("IGNORED_UNSUPPORTED"),
+            })
         signal_summary = {
             "queued": sum(1 for x in signals.values() if (x or {}).get("status") in {"QUEUED", "EXECUTOR_DONE"}),
             "failed": sum(1 for x in signals.values() if (x or {}).get("status") == "EXECUTOR_FAILED"),
@@ -2035,6 +2204,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             "unit_usdc": str(unit_usdc),
             "poll_seconds": poll_seconds,
             "max_pick_age_seconds": max_age_seconds,
+            "feed_window_minutes": feed_window_minutes,
             "better_spread_fallback_enabled": better_spread_fallback_enabled,
             "max_alt_spread_points": str(max_alt_spread_points),
             "auto_trading": auto_trading,
@@ -2071,14 +2241,40 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
 """
         html = html.replace('  <div class="tabs">', panel + '  <div class="tabs">', 1)
         css = r"""
-.nfl-capper-panel{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px;margin:14px 0}.nfl-capper-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.nfl-capper-state{font-size:15px;font-weight:850;margin-top:5px}.nfl-capper-meta{font-size:12px;color:var(--muted);text-align:right;line-height:1.45}.nfl-capper-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.nfl-capper-card{border:1px solid var(--border);border-radius:10px;background:#0d1522;padding:13px}.nfl-capper-card>b{font-size:18px;line-height:1.3}.nfl-capper-kpis{font-size:14px;color:var(--muted);line-height:1.75;margin-top:7px}.nfl-capper-kpis .capper-pnl{font-size:17px;font-weight:900}.nfl-capper-kpis .capper-pnl.positive{color:#86efac}.nfl-capper-kpis .capper-pnl.negative{color:#fca5a5}.nfl-capper-kpis .capper-pnl.flat{color:var(--muted)}.nfl-position-row{margin-top:8px;padding:9px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.08)}.nfl-position-row.win{background:rgba(34,197,94,.11);border-color:rgba(34,197,94,.40);border-left:4px solid #22c55e}.nfl-position-row.loss{background:rgba(239,68,68,.10);border-color:rgba(239,68,68,.40);border-left:4px solid #ef4444}.nfl-position-row.push{background:rgba(245,158,11,.10);border-color:rgba(245,158,11,.38);border-left:4px solid #f59e0b}.nfl-position-row.open{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.46);border-left:4px solid #f59e0b}.nfl-position-title{font-size:15px;font-weight:850}.nfl-position-pnl{font-size:16px;font-weight:900}.nfl-position-pnl.positive{color:#86efac}.nfl-position-pnl.negative{color:#fca5a5}@media(max-width:650px){.nfl-capper-grid{grid-template-columns:1fr}.nfl-capper-head{flex-direction:column}.nfl-capper-meta{text-align:left}.nfl-capper-card>b{font-size:19px}.nfl-capper-kpis{font-size:15px}.nfl-capper-kpis .capper-pnl{font-size:18px}.nfl-position-title{font-size:16px}.nfl-position-pnl{font-size:17px}}
+.nfl-capper-panel{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px;margin:14px 0}.nfl-capper-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.nfl-capper-state{font-size:15px;font-weight:850;margin-top:5px}.nfl-capper-meta{font-size:12px;color:var(--muted);text-align:right;line-height:1.45}.nfl-capper-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.nfl-capper-card{border:1px solid var(--border);border-radius:10px;background:#0d1522;padding:13px}.nfl-capper-card>b{font-size:18px;line-height:1.3}.nfl-capper-kpis{font-size:14px;color:var(--muted);line-height:1.75;margin-top:7px}.nfl-capper-kpis .capper-pnl{font-size:17px;font-weight:900}.nfl-capper-kpis .capper-pnl.positive,.nfl-result-line.positive{color:#86efac}.nfl-capper-kpis .capper-pnl.negative,.nfl-result-line.negative{color:#fca5a5}.nfl-capper-kpis .capper-pnl.flat,.nfl-result-line.flat{color:var(--muted)}.nfl-position-row{margin-top:8px;padding:9px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.08)}.nfl-position-row.win{background:rgba(34,197,94,.11);border-color:rgba(34,197,94,.40);border-left:4px solid #22c55e}.nfl-position-row.loss{background:rgba(239,68,68,.10);border-color:rgba(239,68,68,.40);border-left:4px solid #ef4444}.nfl-position-row.push{background:rgba(245,158,11,.10);border-color:rgba(245,158,11,.38);border-left:4px solid #f59e0b}.nfl-position-row.open{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.46);border-left:4px solid #f59e0b}.nfl-position-title{font-size:15px;font-weight:850}.nfl-position-pnl,.nfl-result-line{font-size:16px;font-weight:900}.nfl-position-pnl.positive{color:#86efac}.nfl-position-pnl.negative{color:#fca5a5}.nfl-result-line{margin-top:6px;line-height:1.35}@media(max-width:650px){.nfl-capper-grid{grid-template-columns:1fr}.nfl-capper-head{flex-direction:column}.nfl-capper-meta{text-align:left}.nfl-capper-card>b{font-size:19px}.nfl-capper-kpis{font-size:15px}.nfl-capper-kpis .capper-pnl{font-size:18px}.nfl-position-title{font-size:16px}.nfl-position-pnl,.nfl-result-line{font-size:17px}}
 """
         html = html.replace("</style>", css + "</style>", 1)
         js = r"""
 function nflEsc(v){
  return String(v??'').replace(/[&<>\"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch]));
 }
+function nflPickTime(v){
+ if(!v)return '';
+ const d=new Date(v);
+ return Number.isNaN(d.getTime())?nflEsc(v):nflEsc(d.toLocaleString());
+}
+function nflAge(seconds){
+ if(seconds===null||seconds===undefined)return '';
+ const s=Math.max(0,Number(seconds)||0);
+ if(s<60)return Math.floor(s)+'s';
+ if(s<3600)return Math.floor(s/60)+'m';
+ return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
+}
+function nflPhaseVisual(item){
+ const phase=String(item.event_phase||'').toUpperCase();
+ const status=String(item.status||'').toUpperCase();
+ const result=String(item.trade_result||item.pick_result||'').toUpperCase();
+ if(phase==='CLOSED'&&result==='WIN')return {label:'WIN',row:'background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.42);border-left:4px solid #22c55e;',badge:'background:rgba(34,197,94,.20);border:1px solid rgba(34,197,94,.50);color:#86efac;'};
+ if(phase==='CLOSED'&&result==='LOSS')return {label:'LOSS',row:'background:rgba(239,68,68,.11);border:1px solid rgba(239,68,68,.42);border-left:4px solid #ef4444;',badge:'background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.50);color:#fca5a5;'};
+ if(phase==='CLOSED'&&result==='PUSH')return {label:'PUSH',row:'background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.38);border-left:4px solid #f59e0b;',badge:'background:rgba(245,158,11,.16);border:1px solid rgba(245,158,11,.45);color:#fcd34d;'};
+ if(phase==='LIVE')return {label:'LIVE',row:'background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.38);border-left:4px solid #22c55e;',badge:'background:rgba(34,197,94,.18);border:1px solid rgba(34,197,94,.45);color:#86efac;'};
+ if(phase==='CLOSED')return {label:'FINISHED',row:'background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.24);border-left:4px solid #94a3b8;opacity:.82;',badge:'background:rgba(148,163,184,.15);border:1px solid rgba(148,163,184,.32);color:#cbd5e1;'};
+ if(phase==='PREGAME')return {label:'PREGAME',row:'background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.35);border-left:4px solid #3b82f6;',badge:'background:rgba(59,130,246,.17);border:1px solid rgba(59,130,246,.42);color:#93c5fd;'};
+ const label=status==='RETRYING'?'RETRYING':status==='EXECUTOR_FAILED'?'FAILED':status==='EXECUTOR_DONE'?'DONE':status==='QUEUED'?'QUEUED':'';
+ return {label,row:'border:1px solid rgba(255,255,255,.07);',badge:'background:rgba(148,163,184,.12);border:1px solid rgba(148,163,184,.25);color:#cbd5e1;'};
+}
 let nflHideFinished=localStorage.getItem('nflHideFinished')==='1';
+const nflActiveTabs={slam:'signals',syndicate:'signals'};
 let nflLastCappers={};
 function nflUpdateFinishedToggle(){
  const btn=document.getElementById('nflFinishedToggle');
@@ -2089,8 +2285,8 @@ function nflToggleFinished(){
  localStorage.setItem('nflHideFinished',nflHideFinished?'1':'0');
  nflUpdateFinishedToggle();
  const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
- if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL']);
- if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL']);
+ if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
+ if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL'],'syndicate');
 }
 function nflPositionList(x){
  const items=Array.isArray(x.positions)?x.positions:[];
@@ -2149,8 +2345,69 @@ async function nflSellPosition(tradeId,btn){
   alert(String(e.message||e));
  }
 }
-function nflCapperLine(x){
- if(!x)return 'No tracked trades yet';
+function nflTabSpec(x){
+ return [
+  ['signals','Signals',Number(x.signals||0),x.all_items||[],'signals'],
+  ['queued','Queued',Number(x.queued||0),x.queued_items||[],'queued'],
+  ['done','Done',Number(x.done||0),x.done_items||[],'done'],
+  ['failed','Failed',Number(x.failed||0),x.failed_items||[],'failed'],
+  ['retrying','Retrying',Number(x.retrying||0),x.retrying_items||[],'retrying'],
+  ['pregame','Pregame',Number(x.pregame||0),x.pregame_items||[],'pregame'],
+  ['live','Live',Number(x.live||0),x.live_items||[],'live'],
+  ['closed','Closed',Number(x.closed||0),x.closed_items||[],'closed'],
+  ['unsupported','Unsupported',Number(x.unsupported||0),x.unsupported_items||[],'unsupported']
+ ];
+}
+function nflSetTab(sourceKey,tab){
+ nflActiveTabs[sourceKey]=tab;
+ const x=nflLastCappers[sourceKey==='slam'?'Slam - NFL':'Syndicate - NFL'];
+ const el=document.getElementById(sourceKey==='slam'?'nflCapperSlam':'nflCapperSyndicate');
+ if(el&&x)el.innerHTML=nflCapperLine(x,sourceKey);
+}
+function nflPickList(title,items,kind){
+ if(!Array.isArray(items)||!items.length)return '';
+ const visible=nflHideFinished?items.filter(item=>String(item.event_phase||'').toUpperCase()!=='CLOSED'):items;
+ if(!visible.length)return '<div style="margin-top:8px;opacity:.7">'+(nflHideFinished?'Finished games hidden.':'No signals.')+'</div>';
+ const rows=visible.map(item=>{
+  const meta=[];
+  if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(nflEsc(item.units)+'u');
+  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('$'+Number(item.stake_usdc).toFixed(2));
+  if(item.posted_at)meta.push('posted '+nflPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+nflAge(item.signal_age_seconds):''));
+  if(item.market)meta.push('Matched: '+nflEsc(item.market)+(item.outcome?' → '+nflEsc(item.outcome):''));
+  if(item.result_event_title)meta.push('Game '+nflEsc(item.result_event_title));
+  if(item.event_phase==='LIVE'){
+   meta.push('GAME LIVE');
+   if(item.espn_score)meta.push('ESPN '+nflEsc(item.espn_score)+(item.espn_status?' · '+nflEsc(item.espn_status):''));
+  }else if(item.event_phase==='CLOSED')meta.push('GAME FINISHED');
+  else if(item.event_start_at)meta.push('starts '+nflPickTime(item.event_start_at));
+  if(item.final_score)meta.push('Final '+nflEsc(item.final_score));
+  if(item.status)meta.push('status '+nflEsc(item.status));
+  if(item.reason&&['pregame','live','closed','unsupported','failed','signals'].includes(kind))meta.push(nflEsc(item.reason));
+  if(item.last_error&&['retrying','failed','signals'].includes(kind))meta.push(nflEsc(item.last_error));
+  const sellAction=(item.trade_id&&item.sell_available)?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  const marketAction=(String(item.event_phase||'').toUpperCase()!=='CLOSED'&&item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+nflEsc(item.market_url)+'">OPEN MARKET</a>':'';
+  const visual=nflPhaseVisual(item);
+  const badge=visual.label?'<span style="display:inline-block;margin-left:7px;padding:2px 6px;border-radius:999px;font-size:12px;font-weight:850;letter-spacing:.03em;vertical-align:1px;'+visual.badge+'">'+visual.label+'</span>':'';
+  let pnlLine='';
+  if(String(item.event_phase||'').toUpperCase()==='CLOSED'){
+   if(item.trade_executed){
+    const raw=item.trade_pnl_usdc===null||item.trade_pnl_usdc===undefined?null:Number(item.trade_pnl_usdc);
+    const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
+    const text=raw===null?'pending':(raw>0?'+':'')+'$'+raw.toFixed(2);
+    pnlLine='<div class="nfl-result-line '+cls+'">Trade P/L '+text+'</div>';
+   }else{
+    pnlLine='<div class="nfl-result-line flat">Trade P/L — · NOT TRADED</div>';
+   }
+  }else if(!item.trade_executed&&String(item.status||'').toUpperCase()!=='QUEUED'){
+   pnlLine='<div class="nfl-result-line flat">NOT TRADED</div>';
+  }
+  const action=sellAction+marketAction;
+  return '<div style="margin-top:7px;padding:9px 10px;border-radius:8px;'+visual.row+'"><b style="font-size:15px">'+nflEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+pnlLine+(action?'<br>'+action:'')+'</div>';
+ }).join('');
+ return '<div style="margin-top:8px"><b>'+nflEsc(title)+'</b>'+rows+'</div>';
+}
+function nflCapperLine(x,sourceKey){
+ if(!x)return 'No tracked signals yet';
  const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
  const winPct=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
  const rawPnl=x.realized_pnl_usdc===null||x.realized_pnl_usdc===undefined?null:Number(x.realized_pnl_usdc);
@@ -2164,7 +2421,12 @@ function nflCapperLine(x){
  const liveClass=liveRaw===null||liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
  const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
  const metrics='<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">Realized P/L '+pnl+'</span> · ROI '+roi+'</div><div><span class="capper-pnl '+liveClass+'">Live P/L '+livePnl+'</span> · Open value '+openValue+'</div><div>Missed '+Number(x.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div>';
- return metrics+nflPositionList(x);
+ const active=nflActiveTabs[sourceKey]||'signals';
+ const specs=nflTabSpec(x);
+ const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>'<button type="button" style="padding:5px 8px;min-height:34px;'+(s[0]===active?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+nflEsc(s[1])+' '+s[2]+'</button>').join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const body=(spec[3]||[]).length?nflPickList(spec[1]+' signals',spec[3],spec[4]):'<div style="margin-top:8px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div>';
+ return metrics+nflPositionList(x)+tabs+body;
 }
 async function loadNflCapperStats(){
  try{
@@ -2172,11 +2434,20 @@ async function loadNflCapperStats(){
   if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
   const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
   if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
-  if(meta)meta.textContent='1u = $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · poll '+(d.poll_seconds||0)+'s';
+  if(meta)meta.textContent='1u =   nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
   nflLastCappers=d.cappers||{};
   const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
-  if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL']);
-  if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL']);
+  if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
+  if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL'],'syndicate');
   nflUpdateFinishedToggle();
  }catch(e){
   const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
