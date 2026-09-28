@@ -1,3 +1,12 @@
+## 2026-09-28 — Immutable call-time unit snapshots for missed P/L
+
+- Root cause: `_missed_signal_stats()` accepted each capper's current unit value as a fallback, while active signal rows also refreshed top-level sizing fields from the current fixed/AUTO % setting. That could make historical missed calls move when the current unit changed.
+- Added immutable per-signal fields `unit_usdc_at_call`, `target_profit_usdc_at_call`, `unit_mode_at_call`, `portfolio_pct_at_call`, `portfolio_value_usdc_at_call`, `unit_snapshot_at`, and `unit_snapshot_source` at first ingestion.
+- Initial/recovery quotes additionally freeze `stake_usdc_at_call` when available. Missed P/L now prioritizes those call-time fields and never uses today's dynamic unit setting for old calls.
+- Legacy rows use their own stored unit/target if present; otherwise they use the sport default unit rather than the current capper override. This prevents subsequent unit changes from revaluing legacy missed calls.
+- NFL and CFB dashboards serialize call-time unit/target/risk for each signal so historical cards stay consistent with missed-P/L accounting.
+- Regression tests cover different call-time units under the same current capper setting, legacy fallback independence, and immutability after later configuration changes.
+
 ## 2026-09-28 — Dynamic portfolio-percentage units for NFL/CFB cappers
 
 - Added a second sizing control beside fixed `SET 1U`: each Slam/Syndicate card now has a percentage input and `AUTO %` button. The percentage defaults to 10%.

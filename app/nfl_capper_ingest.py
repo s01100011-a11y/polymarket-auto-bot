@@ -325,6 +325,64 @@ def _set_capper_portfolio_pct(core: Any, label: str, value: Any) -> Decimal:
     return pct
 
 
+def _ensure_signal_call_unit_snapshot(
+    record: dict[str, Any],
+    pick: dict[str, Any],
+    *,
+    unit_config: dict[str, Any],
+    effective_unit_usdc: Decimal,
+) -> bool:
+    """Freeze the unit basis that applied when a Telegram call first entered the bot."""
+    changed = False
+
+    def _positive_decimal(value: Any) -> Decimal | None:
+        try:
+            amount = Decimal(str(value))
+            return amount if amount > 0 else None
+        except Exception:
+            return None
+
+    call_unit = _positive_decimal(record.get("unit_usdc_at_call"))
+    if call_unit is None:
+        # Legacy rows may already have the then-current unit persisted. Prefer it
+        # over today's capper setting so a later unit change cannot rewrite history.
+        call_unit = _positive_decimal(record.get("unit_usdc")) or Decimal(str(effective_unit_usdc))
+        record["unit_usdc_at_call"] = str(
+            call_unit.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        )
+        changed = True
+
+    call_target = _positive_decimal(record.get("target_profit_usdc_at_call"))
+    if call_target is None:
+        legacy_target = _positive_decimal(record.get("target_profit_usdc"))
+        call_target = legacy_target or _target_profit_for_pick(pick, call_unit)
+        record["target_profit_usdc_at_call"] = str(
+            call_target.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        )
+        changed = True
+
+    snapshot_fields = {
+        "unit_mode_at_call": record.get("unit_mode") or unit_config.get("mode") or "fixed",
+        "portfolio_pct_at_call": (
+            record.get("portfolio_pct")
+            if record.get("portfolio_pct") is not None
+            else unit_config.get("portfolio_pct")
+        ),
+        "portfolio_value_usdc_at_call": (
+            record.get("portfolio_value_usdc")
+            if record.get("portfolio_value_usdc") is not None
+            else unit_config.get("portfolio_value_usdc")
+        ),
+        "unit_snapshot_at": record.get("first_seen_at") or _now_iso(),
+        "unit_snapshot_source": "signal_first_seen",
+    }
+    for key, value in snapshot_fields.items():
+        if key not in record:
+            record[key] = value
+            changed = True
+    return changed
+
+
 def _decimal_odds_for_pick(pick: dict[str, Any]) -> Decimal:
     """Return posted decimal odds, falling back to the audit default of -115."""
     try:
@@ -371,7 +429,9 @@ def _missed_signal_stats(
     for label in labels:
         graded = wins = losses = pushes = 0
         missed_pnl = Decimal("0")
-        label_unit = (unit_usdc_by_label or {}).get(label, unit_usdc)
+        # Historical missed P/L must not move when today's unit setting changes.
+        # unit_usdc is only a legacy fallback for rows that pre-date per-signal snapshots.
+        historical_default_unit = Decimal(str(unit_usdc))
         for record in signals.values():
             if not isinstance(record, dict) or record.get("source") != label:
                 continue
@@ -384,26 +444,45 @@ def _missed_signal_stats(
                 continue
 
             pick = record.get("pick") if isinstance(record.get("pick"), dict) else {}
+            record_unit = None
+            for key in ("unit_usdc_at_call", "unit_usdc"):
+                try:
+                    candidate = Decimal(str(record.get(key)))
+                    if candidate > 0:
+                        record_unit = candidate
+                        break
+                except Exception:
+                    pass
+            if record_unit is None:
+                record_unit = historical_default_unit
+
+            target_profit = None
+            for key in ("target_profit_usdc_at_call", "target_profit_usdc"):
+                try:
+                    candidate = Decimal(str(record.get(key)))
+                    if candidate > 0:
+                        target_profit = candidate
+                        break
+                except Exception:
+                    pass
+            if target_profit is None:
+                target_profit = _target_profit_for_pick(pick, record_unit)
+
+            stake = None
             try:
-                record_unit = Decimal(str(record.get("unit_usdc")))
-                if record_unit <= 0:
-                    raise ValueError("non-positive unit")
-            except Exception:
-                record_unit = Decimal(str(label_unit))
-            target_profit = _target_profit_for_pick(pick, record_unit)
-            try:
-                stored_target = Decimal(str(record.get("target_profit_usdc")))
-                if stored_target > 0:
-                    target_profit = stored_target
+                candidate = Decimal(str(record.get("stake_usdc_at_call")))
+                if candidate > 0:
+                    stake = candidate
             except Exception:
                 pass
-            try:
-                if str(record.get("sizing_mode") or "").upper() != "TO_WIN":
-                    raise ValueError("legacy sizing")
-                stake = Decimal(str(record.get("stake_usdc")))
-                if stake <= 0:
-                    raise ValueError("non-positive stake")
-            except Exception:
+            if stake is None and str(record.get("sizing_mode") or "").upper() == "TO_WIN":
+                try:
+                    candidate = Decimal(str(record.get("stake_usdc")))
+                    if candidate > 0:
+                        stake = candidate
+                except Exception:
+                    pass
+            if stake is None:
                 stake = _stake_for_pick(pick, record_unit)
 
             graded += 1
@@ -1763,10 +1842,16 @@ def _nfl_signal_dashboard_item(
         "updated_at": record.get("updated_at"),
         "signal_age_seconds": age_seconds,
         "units": record.get("units"),
-        "unit_usdc": record.get("unit_usdc"),
-        "target_profit_usdc": record.get("target_profit_usdc"),
-        "stake_usdc": record.get("stake_usdc"),
+        "unit_usdc": record.get("unit_usdc_at_call") or record.get("unit_usdc"),
+        "target_profit_usdc": (
+            record.get("target_profit_usdc_at_call")
+            or record.get("target_profit_usdc")
+        ),
+        "stake_usdc": record.get("stake_usdc_at_call") or record.get("stake_usdc"),
         "sizing_mode": record.get("sizing_mode"),
+        "unit_mode_at_call": record.get("unit_mode_at_call"),
+        "portfolio_pct_at_call": record.get("portfolio_pct_at_call"),
+        "portfolio_value_usdc_at_call": record.get("portfolio_value_usdc_at_call"),
         "match_status": "MATCHED" if matched else record.get("match_status"),
         "market_type": record.get("market_type"),
         "market": record.get("market"),
@@ -2127,6 +2212,13 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "portfolio_value_usdc": unit_config["portfolio_value_usdc"],
                 "pick": pick,
             }
+            if _ensure_signal_call_unit_snapshot(
+                base_record,
+                pick,
+                unit_config=unit_config,
+                effective_unit_usdc=effective_unit_usdc,
+            ):
+                changed = True
             if current:
                 base_record["unit_usdc"] = str(effective_unit_usdc)
                 base_record["target_profit_usdc"] = str(
@@ -2216,6 +2308,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     max_alt_spread_points=max_alt_spread_points,
                 )
                 base_record.update(result)
+                if not base_record.get("stake_usdc_at_call") and result.get("stake_usdc"):
+                    base_record["stake_usdc_at_call"] = result.get("stake_usdc")
                 if recovery:
                     base_record["recovery_checked_at"] = _now_iso()
                 base_record["updated_at"] = _now_iso()

@@ -1,5 +1,15 @@
 # CHANGES
 
+## 2026-09-28 — Missed P/L uses call-time unit size
+
+- Missed-P/L calculations no longer use the capper's current fixed/AUTO % unit value as the fallback for historical calls.
+- Every newly ingested NFL/CFB signal now freezes an immutable call-time sizing snapshot: 1u dollar value, target profit, sizing mode, portfolio percentage, portfolio value, and snapshot timestamp.
+- Later changes to fixed 1u, AUTO %, or portfolio value do not rewrite that snapshot, so a call made when 1u was $10 remains a $10-unit call even if 1u is now $50.
+- When an initial quote is available, the intended cash risk is also frozen as `stake_usdc_at_call` for loss-side missed-P/L calculations.
+- Legacy signals without a per-call snapshot fall back to their own persisted unit/target first, then to the sport's historical default unit — never today's dynamic capper unit.
+- NFL and CFB signal cards now display the call-time sizing snapshot rather than the capper's current unit value.
+
+
 ## 2026-09-28 — Automatic portfolio-percentage capper units
 
 - Added an **AUTO %** control next to the fixed **SET 1U** control for Slam and Syndicate on both NFL and CFB cards.
