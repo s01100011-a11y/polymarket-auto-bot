@@ -2434,16 +2434,7 @@ async function loadNflCapperStats(){
   if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
   const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
   if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
-  if(meta)meta.textContent='1u =   nflUpdateFinishedToggle();
- }catch(e){
-  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
- }
-}
-loadNflCapperStats();setInterval(loadNflCapperStats,10000);
-"""
-        html = html.replace("</script>", js + "\n</script>", 1)
-        dashboard.DASHBOARD_HTML = html
-+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  if(meta)meta.textContent='1u = $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
   nflLastCappers=d.cappers||{};
   const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
   if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
