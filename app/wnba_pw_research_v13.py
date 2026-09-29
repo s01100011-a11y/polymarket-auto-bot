@@ -143,13 +143,10 @@ a{color:#0000ee;text-decoration:underline}
 .wrap{
  max-width:1440px;
  margin:16px auto 54px;
- padding:3px;
- background:#c0c0c0;
- border-top:2px solid #fff;
- border-left:2px solid #fff;
- border-right:2px solid #404040;
- border-bottom:2px solid #404040;
- box-shadow:2px 2px 0 #000;
+ padding:0;
+ background:transparent;
+ border:0;
+ box-shadow:none;
 }
 .top.win95-app-chrome{
  display:block!important;
@@ -301,7 +298,7 @@ a{color:#0000ee;text-decoration:underline}
  border:1px solid #004000;
  box-shadow:none;
 }
-.cards,.performance-strip{gap:4px;margin:4px 0}
+.cards{gap:10px;margin:10px 0}.performance-strip{gap:4px;margin:4px 0}
 .card,.performance-card,.wallet-strip,.panel,.nfl-capper-panel,.more-stats-panel{
  background:#c0c0c0!important;
  color:#000!important;
@@ -326,8 +323,66 @@ a{color:#0000ee;text-decoration:underline}
 .green,.positive,.performance-value.green{color:#008000!important}
 .red,.negative,.performance-value.red{color:#b00000!important}
 .yellow{color:#8a5b00!important}
-.wallet-live-layout{gap:4px;margin:4px 0!important}
-.wallet-strip{padding:10px!important}
+.wallet-live-layout{gap:10px;margin:10px 0!important}
+.wallet-strip{padding:2px!important;overflow:hidden}
+.wallet-main{padding:8px 9px 10px}
+.wallet-main>.label{display:none!important}
+.win95-section-titlebar{
+ min-height:24px;
+ display:flex;
+ align-items:center;
+ justify-content:space-between;
+ gap:8px;
+ padding:2px 3px 2px 5px;
+ background:linear-gradient(90deg,#000080 0%,#1084d0 78%,#000080 100%);
+ color:#fff;
+ box-sizing:border-box;
+}
+.win95-section-title{
+ overflow:hidden;
+ text-overflow:ellipsis;
+ white-space:nowrap;
+ font-size:11px;
+ font-weight:800;
+ text-shadow:1px 1px #000;
+ letter-spacing:.02em;
+}
+.win95-mini-controls{display:flex;gap:2px;flex:0 0 auto}
+.win95-mini-control{
+ width:19px;
+ height:17px;
+ display:flex;
+ align-items:center;
+ justify-content:center;
+ box-sizing:border-box;
+ background:#c0c0c0;
+ color:#000;
+ border-top:2px solid #fff;
+ border-left:2px solid #fff;
+ border-right:2px solid #404040;
+ border-bottom:2px solid #404040;
+ box-shadow:1px 1px 0 #000;
+ font:900 11px/11px Tahoma,Arial,sans-serif;
+ user-select:none;
+ cursor:default;
+}
+.win95-mini-control:first-child{align-items:flex-end;padding-bottom:1px}
+.win95-stats-window{
+ margin:10px 0;
+ padding:2px;
+ background:#c0c0c0;
+ border-top:2px solid #fff;
+ border-left:2px solid #fff;
+ border-right:2px solid #404040;
+ border-bottom:2px solid #404040;
+ box-shadow:1px 1px 0 #000;
+}
+.win95-stats-body{padding:6px 8px 8px}
+.win95-stats-body #statsModeFilter{margin:0 0 6px}
+.win95-stats-body #statsModeFilter .mode-filter-label{display:none}
+.win95-stats-body .performance-strip{margin:0 0 6px}
+.win95-stats-body .more-stats-shell{margin:0}
+
 .wallet-address{font-family:"Courier New",monospace;color:#000!important}
 .wallet-state{color:#404040!important}
 .wallet-metrics-stack{border-top:1px solid #808080!important;margin-top:8px!important}
@@ -388,7 +443,7 @@ button:disabled{color:#808080!important;text-shadow:1px 1px #fff!important}
 .panel{
  padding:8px!important;
  display:none;
- margin-top:4px;
+ margin-top:10px;
 }
 .panel.active{display:block}
 .panel h2{
@@ -456,7 +511,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
 }
 .nfl-capper-panel{
  padding:8px!important;
- margin:4px 0!important;
+ margin:10px 0!important;
 }
 .nfl-capper-head{
  background:linear-gradient(90deg,#000080,#1084d0)!important;
@@ -495,6 +550,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
 }
 .more-stats-head .label,.more-stats-head .performance-sub{color:#fff!important}
 .empty{color:#808080!important;background:#000!important}
+.win95-stats-window .more-stats-panel{margin-top:8px!important}
 @media(max-width:900px){
  .wrap{margin:0;padding:2px;box-shadow:none}
  .wallet-live-layout{grid-template-columns:1fr!important}
@@ -514,6 +570,44 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
 }
 """
     html = html.replace("</style>", theme_css + "\n</style>", 1)
+
+    chrome_js = r"""
+function s01807MiniControls(){
+ return '<span class="win95-mini-controls" aria-hidden="true"><span class="win95-mini-control">_</span><span class="win95-mini-control">□</span><span class="win95-mini-control">×</span></span>';
+}
+function s01807InstallSectionWindows(){
+ const wallet=document.querySelector('.wallet-strip');
+ if(wallet&&!wallet.querySelector(':scope > .win95-section-titlebar')){
+  wallet.insertAdjacentHTML('afterbegin','<div class="win95-section-titlebar"><span class="win95-section-title">POLYMARKET WALLET</span>'+s01807MiniControls()+'</div>');
+ }
+
+ const statsFilter=document.getElementById('statsModeFilter');
+ const performance=document.querySelector('.performance-strip');
+ const moreStats=document.querySelector('.more-stats-shell');
+ if(statsFilter&&performance&&!statsFilter.closest('.win95-stats-window')){
+  const parent=statsFilter.parentNode;
+  const shell=document.createElement('div');
+  shell.className='win95-stats-window';
+  const bar=document.createElement('div');
+  bar.className='win95-section-titlebar';
+  bar.innerHTML='<span class="win95-section-title">STATS</span>'+s01807MiniControls();
+  const body=document.createElement('div');
+  body.className='win95-stats-body';
+  parent.insertBefore(shell,statsFilter);
+  shell.appendChild(bar);
+  shell.appendChild(body);
+  body.appendChild(statsFilter);
+  body.appendChild(performance);
+  if(moreStats)body.appendChild(moreStats);
+ }
+}
+if(document.readyState==='loading'){
+ document.addEventListener('DOMContentLoaded',s01807InstallSectionWindows);
+}else{
+ s01807InstallSectionWindows();
+}
+"""
+    html = html.replace("</script>", chrome_js + "\n</script>", 1)
     dashboard.DASHBOARD_HTML = html
 
 
