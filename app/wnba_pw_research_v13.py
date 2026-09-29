@@ -517,19 +517,28 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
 .nfl-capper-head{
  background:linear-gradient(90deg,#000080,#1084d0)!important;
  color:#fff!important;
- margin:-6px -6px 6px!important;
+ margin:-6px -6px 0!important;
  padding:5px 6px!important;
- flex-direction:column!important;
- align-items:flex-start!important;
+ display:flex!important;
+ flex-direction:row!important;
+ align-items:center!important;
  justify-content:flex-start!important;
- gap:3px!important;
  text-align:left!important;
 }
-.nfl-capper-head .label,.nfl-capper-head .capper-panel-title,.nfl-capper-head .nfl-capper-meta{color:#fff!important;text-align:left!important}
+.nfl-capper-head .label,.nfl-capper-head .capper-panel-title{color:#fff!important;text-align:left!important}
 .capper-panel-title{font-size:15px!important;font-weight:900!important;line-height:1.2!important;text-transform:uppercase}
-.nfl-capper-state{color:#fff!important;text-shadow:1px 1px #000;text-align:left!important;margin:0!important}
-.nfl-capper-meta{width:100%;text-align:left!important}
-.capper-panel-actions{justify-content:flex-start!important;margin-top:3px!important}
+.capper-panel-status-row{
+ display:flex!important;
+ align-items:center!important;
+ justify-content:space-between!important;
+ gap:8px!important;
+ padding:7px 0 5px!important;
+ text-align:left!important;
+}
+.nfl-capper-state{color:#000!important;text-shadow:none!important;text-align:left!important;margin:0!important;font-weight:900!important}
+.nfl-capper-meta{width:100%;text-align:left!important;color:#000!important}
+.capper-panel-actions{justify-content:flex-start!important;margin-top:5px!important}
+.sport-power-btn{margin-left:auto!important}
 .nfl-capper-card,.more-stats-row{
  background:#000!important;
  color:#d8d8d8!important;
