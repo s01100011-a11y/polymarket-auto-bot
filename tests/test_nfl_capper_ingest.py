@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -1323,3 +1324,47 @@ class NflDashboardSignalItemTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class NflRollingPnlStatsTests(unittest.TestCase):
+    def test_stats_include_last_7_and_30_day_realized_pnl(self):
+        now = datetime.now(timezone.utc)
+        executions = {
+            "recent": {
+                "id": "recent",
+                "strategy_source": "Slam - NFL",
+                "strategy_sport": "NFL",
+                "status": "SETTLED_WIN",
+                "realized_pnl": "5.00",
+                "actual_cost_usdc": "10.00",
+                "closed_at": (now - timedelta(days=2)).isoformat(),
+            },
+            "mid": {
+                "id": "mid",
+                "strategy_source": "Slam - NFL",
+                "strategy_sport": "NFL",
+                "status": "SETTLED_WIN",
+                "realized_pnl": "3.00",
+                "actual_cost_usdc": "10.00",
+                "closed_at": (now - timedelta(days=15)).isoformat(),
+            },
+            "old": {
+                "id": "old",
+                "strategy_source": "Slam - NFL",
+                "strategy_sport": "NFL",
+                "status": "SETTLED_LOSS",
+                "realized_pnl": "-4.00",
+                "actual_cost_usdc": "10.00",
+                "closed_at": (now - timedelta(days=45)).isoformat(),
+            },
+        }
+
+        stats = capper._stats_from_executions(
+            executions,
+            labels=("Slam - NFL",),
+            sport="NFL",
+        )["Slam - NFL"]
+
+        self.assertEqual(stats["realized_pnl_usdc"], "4.00")
+        self.assertEqual(stats["realized_pnl_7d_usdc"], "5.00")
+        self.assertEqual(stats["realized_pnl_30d_usdc"], "8.00")
+
