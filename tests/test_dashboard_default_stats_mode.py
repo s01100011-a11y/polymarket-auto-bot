@@ -38,4 +38,8 @@ def test_top_stats_include_portfolio_value_and_total_missed_pnl():
     assert '"portfolio_value_usdc": _portfolio_value()' in stats_source
     assert '"missed_graded_total": total_missed["missed_graded"]' in stats_source
     assert '"missed_pnl_total_usdc": total_missed["missed_pnl_usdc"]' in stats_source
+    assert '"realized_pnl_7d_usdc"' in stats_source
+    assert '"realized_pnl_30d_usdc"' in stats_source
+    assert "performancePnl7d" in stats_source
+    assert "performancePnl30d" in stats_source
     assert "graded missed calls · NFL + CFB" in stats_source
