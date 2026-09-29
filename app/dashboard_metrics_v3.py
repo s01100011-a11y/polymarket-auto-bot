@@ -399,6 +399,30 @@ def _capper_name(source: Any, sport: Any) -> str | None:
     return name
 
 
+def _legacy_monitor_identity(rec: dict[str, Any]) -> tuple[str, str]:
+    source = str(rec.get("strategy_source") or "").strip()
+    sport = str(rec.get("strategy_sport") or "").strip().upper()
+    if source or sport:
+        return source, sport
+
+    event_id = str(rec.get("slack_event_id") or rec.get("strategy_pick_id") or "")
+    if not event_id.startswith("pwexport-"):
+        return source, sport
+
+    decision = rec.get("pw_strategy_decision") or {}
+    quote = rec.get("quote") or {}
+    selection = (
+        rec.get("strategy_selection")
+        or decision.get("predicted_winner")
+        or quote.get("requested_outcome")
+        or quote.get("resolved_outcome")
+    )
+    league = str(ingest._league_for_team(str(selection or "")) or "").upper()
+    if league in {"WNBA", "NBA"}:
+        return f"{league} Monitor - {league}", league
+    return source, sport
+
+
 def _more_stats_payload(mode: str = "live") -> dict[str, Any]:
     mode = str(mode or "live").strip().lower()
     if mode not in {"live", "paper", "both"}:
@@ -461,8 +485,7 @@ def _more_stats_payload(mode: str = "live") -> dict[str, Any]:
         return row
 
     for rec in scoped:
-        source = str(rec.get("strategy_source") or "").strip()
-        sport = str(rec.get("strategy_sport") or "").strip().upper()
+        source, sport = _legacy_monitor_identity(rec)
         capper = _capper_name(source, sport)
         if not capper and not sport:
             continue
