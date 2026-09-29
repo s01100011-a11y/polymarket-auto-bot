@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP, ROUND_UP
 from typing import Any
 
 from fastapi import Depends, HTTPException
@@ -17,6 +17,89 @@ ingest = base.ingest
 remote = base.remote
 
 SLACK_MODE_FILE = core.DATA_DIR / "slack_trading_mode.json"
+
+MONITOR_UNIT_SETTINGS_FILE = core.DATA_DIR / "capper_unit_sizes.json"
+MONITOR_DEFAULT_UNIT_USDC = Decimal("10")
+
+
+def _monitor_label(sport: str) -> str:
+    key = str(sport or "").strip().upper()
+    if key not in {"WNBA", "NBA"}:
+        raise ValueError("Unsupported basketball monitor sport")
+    return f"{key} Monitor - {key}"
+
+
+def _monitor_portfolio_value_usdc() -> Decimal | None:
+    try:
+        state = remote._state()
+        cash_raw = state.get("usdc_balance")
+        positions_raw = state.get("portfolio_value")
+        if cash_raw is None or cash_raw == "" or positions_raw is None or positions_raw == "":
+            return None
+        return (
+            Decimal(str(cash_raw)) + Decimal(str(positions_raw))
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except Exception:
+        return None
+
+
+def _monitor_unit_config(label: str) -> dict[str, Any]:
+    saved = core._load(MONITOR_UNIT_SETTINGS_FILE)
+    settings = saved if isinstance(saved, dict) else {}
+    try:
+        fixed = Decimal(str(settings.get(label, MONITOR_DEFAULT_UNIT_USDC)))
+    except Exception:
+        fixed = MONITOR_DEFAULT_UNIT_USDC
+    if fixed <= 0:
+        fixed = MONITOR_DEFAULT_UNIT_USDC
+    fixed = fixed.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    mode = str(settings.get(f"{label}::mode", "fixed") or "fixed").strip().lower()
+    if mode not in {"fixed", "portfolio_pct"}:
+        mode = "fixed"
+
+    try:
+        pct = Decimal(str(settings.get(f"{label}::portfolio_pct", "10")))
+    except Exception:
+        pct = Decimal("10")
+    if pct <= 0 or pct > 100:
+        pct = Decimal("10")
+    pct = pct.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    portfolio = _monitor_portfolio_value_usdc()
+    effective = fixed
+    error = None
+    if mode == "portfolio_pct":
+        if portfolio is None:
+            error = "Portfolio value is unavailable; percentage unit sizing is waiting for a wallet heartbeat."
+        elif portfolio <= 0:
+            error = "Portfolio value must be greater than $0 for percentage unit sizing."
+        else:
+            effective = (
+                portfolio * pct / Decimal("100")
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if effective <= 0:
+                error = "Calculated percentage unit size is not positive."
+
+    return {
+        "mode": mode,
+        "unit_usdc": str(effective),
+        "fixed_unit_usdc": str(fixed),
+        "portfolio_pct": str(pct),
+        "portfolio_value_usdc": str(portfolio) if portfolio is not None else None,
+        "error": error,
+    }
+
+
+def _monitor_stake_to_win(target_profit_usdc: Decimal, price: Decimal) -> Decimal:
+    if target_profit_usdc <= 0:
+        raise ValueError("Monitor unit size must be positive")
+    if price <= 0 or price >= 1:
+        raise ValueError(f"Invalid current BUY price {price}")
+    return (
+        target_profit_usdc * price / (Decimal("1") - price)
+    ).quantize(Decimal("0.01"), rounding=ROUND_UP)
+
 
 
 class SlackTradingMode(BaseModel):
@@ -125,12 +208,69 @@ def _slack_trade_handler(
     slack_event: dict[str, Any],
 ) -> dict[str, Any]:
     mode = _mode()
+    monitor_sport = str(slack_event.get("monitor_sport") or "").upper()
+    monitor_source = str(slack_event.get("monitor_source") or "").strip()
+    if monitor_sport not in {"WNBA", "NBA"}:
+        monitor_sport = ""
+        monitor_source = ""
+    monitor_label = _monitor_label(monitor_sport) if monitor_sport else None
+
     ingest.SLACK_PAPER_ONLY = not mode["auto_prepare_enabled"]
     if not mode["auto_prepare_enabled"]:
-        # Keep PAPER and LIVE sizing identical: the dashboard stake is the
-        # single source of truth for every new Slack trade.
-        ingest.SLACK_PAPER_BUDGET_USDC = Decimal(str(mode["stake_usdc"]))
-        return _PAPER_HANDLER(parsed, slack_event_id, slack_event)
+        if not monitor_sport:
+            ingest.SLACK_PAPER_BUDGET_USDC = Decimal(str(mode["stake_usdc"]))
+            return _PAPER_HANDLER(parsed, slack_event_id, slack_event)
+
+        # WNBA/NBA monitor paper trades use the exact same TO-WIN unit sizing
+        # as live trades so historical strategy stats remain comparable.
+        event, market, outcome_label, outcome_obj = ingest._find_market(parsed)
+        asset_id = str(
+            getattr(outcome_obj, "token_id", None)
+            or getattr(outcome_obj, "position_id", None)
+            or ""
+        )
+        if not asset_id:
+            raise ValueError("Matched moneyline has no tradable asset id")
+        with ingest.PublicClient() as client:
+            buy_price = Decimal(str(client.get_price(asset_id=asset_id, side="BUY")))
+        unit_config = _monitor_unit_config(str(monitor_label))
+        if unit_config.get("error"):
+            raise ValueError(str(unit_config["error"]))
+        unit_usdc = Decimal(str(unit_config["unit_usdc"]))
+        target_profit = unit_usdc
+        stake = _monitor_stake_to_win(target_profit, buy_price)
+        if stake > core.MAX_AUTO_TRADE_USDC:
+            raise ValueError(
+                "1u target profit $" + str(target_profit)
+                + " requires $" + str(stake) + " stake at " + str(buy_price)
+                + "; exceeds dashboard Auto trade cap $" + str(core.MAX_AUTO_TRADE_USDC)
+            )
+        ingest.SLACK_PAPER_BUDGET_USDC = stake
+        trade = _PAPER_HANDLER(parsed, slack_event_id, slack_event)
+        trade.update({
+            "strategy_units": "1",
+            "strategy_unit_usdc": str(unit_usdc),
+            "strategy_target_profit_usdc": str(target_profit),
+            "sizing_mode": "TO_WIN",
+            "unit_mode": unit_config["mode"],
+            "portfolio_pct": unit_config["portfolio_pct"],
+            "portfolio_value_usdc": unit_config["portfolio_value_usdc"],
+        })
+        trade_id = str(trade.get("id") or "")
+        if trade_id:
+            executions = core._load(core.EXECUTIONS_FILE)
+            if isinstance(executions, dict) and isinstance(executions.get(trade_id), dict):
+                executions[trade_id].update({
+                    "strategy_units": "1",
+                    "strategy_unit_usdc": str(unit_usdc),
+                    "strategy_target_profit_usdc": str(target_profit),
+                    "sizing_mode": "TO_WIN",
+                    "unit_mode": unit_config["mode"],
+                    "portfolio_pct": unit_config["portfolio_pct"],
+                    "portfolio_value_usdc": unit_config["portfolio_value_usdc"],
+                })
+                core._save(core.EXECUTIONS_FILE, executions)
+        return trade
 
     if parsed.get("market_kind") != "moneyline":
         raise ValueError("Slack LIVE mode is hard-locked to moneyline only")
@@ -168,13 +308,26 @@ def _slack_trade_handler(
     if _active_or_pending(asset_id, market_url, outcome_label):
         raise ValueError("An open or pending LIVE position already exists for this selection")
 
-    stake = min(Decimal(str(mode["stake_usdc"])), core.MAX_AUTO_TRADE_USDC)
+    unit_config = None
+    unit_usdc = None
+    target_profit = None
+    if monitor_sport:
+        unit_config = _monitor_unit_config(str(monitor_label))
+        if unit_config.get("error"):
+            raise ValueError(str(unit_config["error"]))
+        unit_usdc = Decimal(str(unit_config["unit_usdc"]))
+        target_profit = unit_usdc
+        stake = _monitor_stake_to_win(target_profit, buy_price)
+        if stake > core.MAX_AUTO_TRADE_USDC:
+            raise ValueError(
+                "1u target profit $" + str(target_profit)
+                + " requires $" + str(stake) + " stake at " + str(buy_price)
+                + "; exceeds dashboard Auto trade cap $" + str(core.MAX_AUTO_TRADE_USDC)
+            )
+    else:
+        stake = min(Decimal(str(mode["stake_usdc"])), core.MAX_AUTO_TRADE_USDC)
+
     trade_id = f"slack-live-{slack_event_id[:12]}-{uuid.uuid4().hex[:6]}"
-    monitor_sport = str(slack_event.get("monitor_sport") or "").upper()
-    monitor_source = str(slack_event.get("monitor_source") or "").strip()
-    if monitor_sport not in {"WNBA", "NBA"}:
-        monitor_sport = ""
-        monitor_source = ""
     payload = {
         "market_url": market_url,
         "outcome": outcome_label,
@@ -189,9 +342,16 @@ def _slack_trade_handler(
         "slack_event_id": slack_event_id,
         "strategy_source": f"{monitor_source} - {monitor_sport}" if monitor_sport else None,
         "strategy_sport": monitor_sport or None,
+        "strategy_units": "1" if monitor_sport else None,
+        "strategy_unit_usdc": str(unit_usdc) if unit_usdc is not None else None,
+        "strategy_target_profit_usdc": str(target_profit) if target_profit is not None else None,
         "strategy_pick_id": slack_event_id if monitor_sport else None,
         "strategy_posted_at": ((parsed.get("pw") or {}).get("event_ts") if monitor_sport else None),
         "strategy_selection": parsed.get("selection") if monitor_sport else None,
+        "sizing_mode": "TO_WIN" if monitor_sport else "STAKE",
+        "unit_mode": unit_config["mode"] if unit_config else None,
+        "portfolio_pct": unit_config["portfolio_pct"] if unit_config else None,
+        "portfolio_value_usdc": unit_config["portfolio_value_usdc"] if unit_config else None,
     }
     queued = _prepare_remote_buy(payload)
     return {
@@ -210,14 +370,15 @@ def _slack_trade_handler(
         "buy_price": str(buy_price),
         "spread": str(spread),
         "stake_usdc": str(stake),
-        "slack_event_id": slack_event_id,
         "strategy_source": payload.get("strategy_source"),
         "strategy_sport": payload.get("strategy_sport"),
+        "strategy_units": payload.get("strategy_units"),
+        "strategy_unit_usdc": payload.get("strategy_unit_usdc"),
+        "strategy_target_profit_usdc": payload.get("strategy_target_profit_usdc"),
         "strategy_pick_id": payload.get("strategy_pick_id"),
         "strategy_posted_at": payload.get("strategy_posted_at"),
         "strategy_selection": payload.get("strategy_selection"),
     }
-
 
 ingest._paper_trade_from_alert = _slack_trade_handler
 ingest.SLACK_PAPER_ONLY = not _mode()["auto_prepare_enabled"]
