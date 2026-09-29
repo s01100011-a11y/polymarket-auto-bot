@@ -2885,7 +2885,10 @@ function nflPositionList(x){
   const pnl=raw===null?'':('<div class="nfl-position-pnl '+(raw>0?'positive':raw<0?'negative':'')+'">Realized P/L '+(raw>0?'+':'')+'$'+raw.toFixed(2)+'</div>');
   const stake=item.stake_usdc===null||item.stake_usdc===undefined?'':' · Stake $'+Number(item.stake_usdc).toFixed(2);
   const statusLabel=result?(' · '+nflEsc(result)):(awaiting?' · AWAITING SETTLEMENT':'');
-  return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+statusLabel+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+'</div>';
+  const manual=awaiting&&item.trade_id
+   ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px"><button type="button" data-result="WIN" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE WIN</button><button type="button" data-result="LOSS" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE LOSS</button><button type="button" data-result="PUSH" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE PUSH</button></div>'
+   : '';
+  return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+statusLabel+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+manual+'</div>';
  };
  let html='<div style="margin-top:9px"><b>Open positions</b>'+(open.length?open.map(renderOpen).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>')+'</div>';
  if(!nflHideFinished&&settled.length)html+='<div style="margin-top:12px"><b>Settled positions</b>'+settled.map(renderSettled).join('')+'</div>';
@@ -2916,6 +2919,27 @@ async function nflSellPosition(tradeId,btn){
   throw new Error('SELL timed out waiting for Termux');
  }catch(e){
   btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflManualSettle(tradeId,result,btn){
+ const choice=String(result||'').toUpperCase();
+ if(!['WIN','LOSS','PUSH'].includes(choice))return;
+ if(!confirm('Manually settle this position as '+choice+'? This writes the final result and realized P/L and cannot be undone from this button.'))return;
+ const group=btn.parentElement;
+ const buttons=group?Array.from(group.querySelectorAll('button')):[btn];
+ buttons.forEach(b=>b.disabled=true);
+ const original=btn.textContent;
+ btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(choice),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  btn.textContent='SETTLED '+choice;
+  await loadNflCapperStats();
+ }catch(e){
+  buttons.forEach(b=>b.disabled=false);
   btn.textContent=original;
   alert(String(e.message||e));
  }
