@@ -170,6 +170,11 @@ def _slack_trade_handler(
 
     stake = min(Decimal(str(mode["stake_usdc"])), core.MAX_AUTO_TRADE_USDC)
     trade_id = f"slack-live-{slack_event_id[:12]}-{uuid.uuid4().hex[:6]}"
+    monitor_sport = str(slack_event.get("monitor_sport") or "").upper()
+    monitor_source = str(slack_event.get("monitor_source") or "").strip()
+    if monitor_sport not in {"WNBA", "NBA"}:
+        monitor_sport = ""
+        monitor_source = ""
     payload = {
         "market_url": market_url,
         "outcome": outcome_label,
@@ -182,6 +187,11 @@ def _slack_trade_handler(
         "source": "slack_live",
         "auto": True,
         "slack_event_id": slack_event_id,
+        "strategy_source": f"{monitor_source} - {monitor_sport}" if monitor_sport else None,
+        "strategy_sport": monitor_sport or None,
+        "strategy_pick_id": slack_event_id if monitor_sport else None,
+        "strategy_posted_at": ((parsed.get("pw") or {}).get("event_ts") if monitor_sport else None),
+        "strategy_selection": parsed.get("selection") if monitor_sport else None,
     }
     queued = _prepare_remote_buy(payload)
     return {
@@ -201,6 +211,11 @@ def _slack_trade_handler(
         "spread": str(spread),
         "stake_usdc": str(stake),
         "slack_event_id": slack_event_id,
+        "strategy_source": payload.get("strategy_source"),
+        "strategy_sport": payload.get("strategy_sport"),
+        "strategy_pick_id": payload.get("strategy_pick_id"),
+        "strategy_posted_at": payload.get("strategy_posted_at"),
+        "strategy_selection": payload.get("strategy_selection"),
     }
 
 
