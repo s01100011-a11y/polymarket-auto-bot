@@ -415,7 +415,6 @@ def _paper_trade_from_alert(parsed: dict[str, Any], slack_event_id: str, slack_e
 
     budget = min(SLACK_PAPER_BUDGET_USDC, core.MAX_AUTO_TRADE_USDC)
     shares = (budget / buy_price).quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
-    record_id = f"slack-{slack_event_id[:18]}"
     market_url = f"https://polymarket.com/event/{getattr(event, 'slug', '')}" if getattr(event, "slug", None) else None
 
     monitor_sport = str(slack_event.get("monitor_sport") or "").upper()
@@ -423,6 +422,11 @@ def _paper_trade_from_alert(parsed: dict[str, Any], slack_event_id: str, slack_e
     if monitor_sport not in {"WNBA", "NBA"}:
         monitor_sport = ""
         monitor_source = ""
+    if monitor_sport:
+        monitor_key = hashlib.sha256(slack_event_id.encode("utf-8")).hexdigest()[:16]
+        record_id = f"monitor-{monitor_sport.lower()}-{monitor_key}"
+    else:
+        record_id = f"slack-{slack_event_id[:18]}"
 
     record = {
         "id": record_id,
