@@ -327,7 +327,7 @@ def install(*, app: Any, dashboard: Any, core: Any, ingest: Any, nfl: Any) -> No
         <div class="capper-panel-title">NBA AUTO-TRADING</div>
       </div>
       <div class="capper-panel-status-row">
-        <div class="nfl-capper-state" id="nbaMonitorState">Loading…</div>
+        <div class="capper-status-field"><div class="capper-status-label">STATUS</div><div class="nfl-capper-state" id="nbaMonitorState">Loading…</div></div>
         <button type="button" class="badge capper-power-btn sport-power-btn" id="monitorCapperPower-nba" data-enabled="1" aria-pressed="true" onclick="monitorToggleCapper('nba',this)" title="Toggle NBA automatic trading"><span class="dot"></span><span class="capper-power-text">Online</span></button>
       </div>
       <div class="capper-panel-actions"><button type="button" data-capper-last24h-toggle onclick="capperToggleLast24h()">Last 24h only: OFF</button></div>
