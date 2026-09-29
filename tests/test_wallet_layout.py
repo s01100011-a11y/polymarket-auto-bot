@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-def test_wallet_contains_summary_metrics_and_live_graph_moves_right():
+def test_wallet_contains_summary_metrics_and_live_graph_is_standalone():
     source = Path("app/wallet_dashboard.py").read_text(encoding="utf-8")
 
     assert 'class="wallet-live-layout"' in source
@@ -19,11 +19,11 @@ def test_wallet_contains_summary_metrics_and_live_graph_moves_right():
     assert 'id="walletLiveGraphSlot"' in source
     assert 'html = html.replace(cards_html, "", 1)' in source
     assert 'cards_html.replace("Live trades", "Current trades")' in source
-    assert "function moveLivePnlGraphIntoWallet()" in source
+    assert "function moveLivePnlGraphToStandaloneWindow()" in source
     assert "document.querySelector('.pnl-chart-card')" in source
     assert "slot.appendChild(chart)" in source
-    assert "grid-template-columns:minmax(430px,1fr) minmax(0,1.35fr)" in source
-    assert "@media(max-width:1050px){.wallet-live-layout{grid-template-columns:1fr}" in source
+    assert ".wallet-live-layout{display:grid;grid-template-columns:1fr" in source
+    assert '<div class="wallet-graph-slot" id="walletLiveGraphSlot"></div>' in source
 
 
 def test_mode_is_rendered_in_top_app_status_row_not_wallet():
@@ -35,3 +35,14 @@ def test_mode_is_rendered_in_top_app_status_row_not_wallet():
     assert '<div class="capper-status-label">MODE</div>' in theme
     assert 'class="nfl-capper-state top-mode-state" id="mode"' in theme
     assert 'class="badge capper-power-btn sport-power-btn" id="botPowerBtn"' in theme
+
+
+def test_live_graph_slot_is_outside_wallet_layout():
+    source = Path("app/wallet_dashboard.py").read_text(encoding="utf-8")
+    wallet = source.split("wallet_html = '''", 1)[1].split("'''", 1)[0]
+
+    layout_start = wallet.index('<div class="wallet-live-layout">')
+    graph_slot = wallet.index('<div class="wallet-graph-slot" id="walletLiveGraphSlot"></div>')
+    layout_close = wallet.rfind('</div>', layout_start, graph_slot)
+    assert layout_close < graph_slot
+    assert "moveLivePnlGraphToStandaloneWindow()" in source
