@@ -22,6 +22,12 @@ def test_top_stats_include_portfolio_value_and_total_missed_pnl():
     assert 'id="performanceMissedCount"' in metrics_source
     assert "Portfolio value" in metrics_source
     assert "Missed P/L · total" in metrics_source
+    assert 'id="performancePnl7d"' in metrics_source
+    assert 'id="performancePnl30d"' in metrics_source
+    assert "Last 7 days P/L" in metrics_source
+    assert "Last 30 days P/L" in metrics_source
+    assert '"realized_pnl_7d_usdc"' in metrics_source
+    assert '"realized_pnl_30d_usdc"' in metrics_source
 
     assert "def _portfolio_value()" in stats_source
     assert 'state.get("usdc_balance")' in stats_source
