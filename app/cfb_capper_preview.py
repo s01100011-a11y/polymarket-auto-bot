@@ -2553,7 +2553,7 @@ def _inject_dashboard_panel(html: str) -> str:
 
     panel = r"""
   <div class="nfl-capper-panel" id="cfbCapperStats">
-    <div class="nfl-capper-head"><div><div class="label">CFB capper auto-trading</div><div class="nfl-capper-state" id="cfbCapperState">Loading…</div></div><div><div class="nfl-capper-meta" id="cfbCapperMeta"></div><button type="button" id="cfbFinishedToggle" style="margin-top:8px" onclick="cfbToggleFinished()">Hide finished</button></div></div>
+    <div class="nfl-capper-head"><div><div class="label">CFB capper auto-trading</div><div class="nfl-capper-state" id="cfbCapperState">Loading…</div></div><div><div class="nfl-capper-meta" id="cfbCapperMeta"></div><div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px"><button type="button" id="cfbFinishedToggle" onclick="cfbToggleFinished()">Hide finished</button><button type="button" data-capper-last24h-toggle onclick="capperToggleLast24h()">Last 24h only: OFF</button></div></div></div>
     <div class="nfl-capper-grid">
       <div class="nfl-capper-card"><b>Slam - CFB</b><div class="nfl-capper-kpis" id="cfbCapperSlam">—</div></div>
       <div class="nfl-capper-card"><b>Syndicate - CFB</b><div class="nfl-capper-kpis" id="cfbCapperSyndicate">—</div></div>
@@ -2562,7 +2562,7 @@ def _inject_dashboard_panel(html: str) -> str:
 """
     html = html.replace('  <div class="tabs">', panel + '  <div class="tabs">', 1)
     css = r"""
-.cfb-capper-performance{font-size:15px;line-height:1.75;margin:3px 0 9px;color:var(--muted)}.cfb-capper-performance .capper-pnl{font-size:18px;font-weight:900}.cfb-capper-performance .capper-pnl.positive,.cfb-result-line.positive{color:#86efac}.cfb-capper-performance .capper-pnl.negative,.cfb-result-line.negative{color:#fca5a5}.cfb-capper-performance .capper-pnl.flat,.cfb-result-line.flat{color:var(--muted)}.cfb-result-line{font-size:16px;font-weight:900;margin-top:6px;line-height:1.35}.cfb-open-position{margin-top:7px;padding:9px 10px;border-radius:8px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.46);border-left:4px solid #f59e0b}.cfb-open-position .live-pnl{font-size:16px;font-weight:900}@media(max-width:650px){.cfb-capper-performance{font-size:16px}.cfb-capper-performance .capper-pnl{font-size:19px}.cfb-result-line{font-size:17px}}
+.cfb-capper-performance{font-size:15px;line-height:1.75;margin:3px 0 9px;color:var(--muted)}.cfb-capper-performance .capper-pnl{font-size:18px;font-weight:900}.cfb-capper-performance .capper-pnl.positive,.cfb-result-line.positive{color:#86efac}.cfb-capper-performance .capper-pnl.negative,.cfb-result-line.negative{color:#fca5a5}.cfb-capper-performance .capper-pnl.flat,.cfb-result-line.flat{color:var(--muted)}.cfb-result-line{font-size:16px;font-weight:900;margin-top:6px;line-height:1.35}.cfb-open-position,.cfb-settled-position{margin-top:7px;padding:9px 10px;border-radius:8px}.cfb-open-position{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.46);border-left:4px solid #f59e0b}.cfb-settled-position{border:1px solid rgba(255,255,255,.08)}.cfb-settled-position.win{background:rgba(34,197,94,.11);border-left:4px solid #22c55e}.cfb-settled-position.loss{background:rgba(239,68,68,.10);border-left:4px solid #ef4444}.cfb-settled-position.push{background:rgba(245,158,11,.10);border-left:4px solid #f59e0b}.cfb-open-position .live-pnl,.cfb-settled-position .settled-pnl{font-size:16px;font-weight:900}@media(max-width:650px){.cfb-capper-performance{font-size:16px}.cfb-capper-performance .capper-pnl{font-size:19px}.cfb-result-line{font-size:17px}}
 """
     html = html.replace("</style>", css + "</style>", 1)
 
@@ -2636,8 +2636,14 @@ function cfbPhaseVisual(item){
 }
 function cfbPickList(title,items,kind){
  if(!Array.isArray(items)||!items.length)return '';
- const visible=cfbHideFinished?items.filter(item=>String(item.event_phase||'').toUpperCase()!=='CLOSED'&&String(item.status||'').toUpperCase()!=='EVENT_CLOSED'):items;
- if(!visible.length)return '<div style="margin-top:8px;opacity:.7">'+(cfbHideFinished?'Finished games hidden.':'No signals.')+'</div>';
+ const scoped=capperLast24hOnly&&kind==='signals'
+  ? items.filter(item=>capperWithin24h(item.posted_at||item.updated_at))
+  : items;
+ const visible=cfbHideFinished?scoped.filter(item=>String(item.event_phase||'').toUpperCase()!=='CLOSED'&&String(item.status||'').toUpperCase()!=='EVENT_CLOSED'):scoped;
+ if(!visible.length){
+  if(capperLast24hOnly&&kind==='signals')return '<div style="margin-top:8px;opacity:.7">No signals in the last 24 hours.</div>';
+  return '<div style="margin-top:8px;opacity:.7">'+(cfbHideFinished?'Finished games hidden.':'No signals.')+'</div>';
+ }
  const rows=visible.map(item=>{
   const meta=[];
   if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(cfbEsc(item.units)+'u');
@@ -2761,6 +2767,13 @@ function cfbUpdateFinishedToggle(){
  const btn=document.getElementById('cfbFinishedToggle');
  if(btn)btn.textContent=cfbHideFinished?'Show finished':'Hide finished';
 }
+function cfbRenderCappers(){
+ const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
+ if(s&&cfbLastSources['Slam - CFB'])s.innerHTML=cfbCapperLine(cfbLastSources['Slam - CFB'],'slam');
+ if(y&&cfbLastSources['Syndicate - CFB'])y.innerHTML=cfbCapperLine(cfbLastSources['Syndicate - CFB'],'syndicate');
+ capperSyncLast24hButtons();
+}
+window.addEventListener('capper-history-filter-change',cfbRenderCappers);
 function cfbToggleFinished(){
  cfbHideFinished=!cfbHideFinished;
  localStorage.setItem('cfbHideFinished',cfbHideFinished?'1':'0');
@@ -2790,10 +2803,14 @@ function cfbSetTab(sourceKey,tab){
  const el=document.getElementById(sourceKey==='slam'?'cfbCapperSlam':'cfbCapperSyndicate');
  if(el&&x)el.innerHTML=cfbCapperLine(x,sourceKey);
 }
-function cfbOpenPositionList(x){
- const items=(Array.isArray(x.positions)?x.positions:[]).filter(item=>item.sell_available);
- if(!items.length)return '<div style="margin-top:9px"><b>Open positions</b><div style="margin-top:7px;opacity:.7">No open positions.</div></div>';
- return '<div style="margin-top:9px"><b>Open positions</b>'+items.map(item=>{
+function cfbPositionList(x){
+ const all=Array.isArray(x.positions)?x.positions:[];
+ const open=all.filter(item=>item.sell_available);
+ const settledAll=all.filter(item=>!item.sell_available&&item.finished);
+ const settled=capperLast24hOnly
+  ? settledAll.filter(item=>capperWithin24h(item.closed_at||item.submitted_at))
+  : settledAll;
+ const openHtml=open.length?open.map(item=>{
   const raw=item.live_pnl_usdc===null||item.live_pnl_usdc===undefined?null:Number(item.live_pnl_usdc);
   const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
   const pnl=raw===null?'—':(raw>0?'+':'')+'$'+raw.toFixed(2)+(item.live_pnl_pct===null||item.live_pnl_pct===undefined?'':' ('+Number(item.live_pnl_pct).toFixed(1)+'%)');
@@ -2804,7 +2821,21 @@ function cfbOpenPositionList(x){
   const value=item.current_value_usdc===null||item.current_value_usdc===undefined?'—':'$'+Number(item.current_value_usdc).toFixed(2);
   const sell=item.trade_id?'<button type="button" style="margin-top:6px" data-trade-id="'+cfbEsc(item.trade_id)+'" onclick="cfbSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
   return '<div class="cfb-open-position"><b style="font-size:15px">'+cfbEsc(item.selection||item.market||'CFB position')+' · OPEN</b><br><span>'+cfbEsc(item.outcome||'')+' · Entry '+entry+' · Live '+live+'</span><br><span>Shares '+shares+' · Cost $'+Number(cost||0).toFixed(2)+' · Value '+value+'</span><div class="live-pnl '+cls+'">Live P/L '+pnl+'</div>'+sell+'</div>';
- }).join('')+'</div>';
+ }).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>';
+ let html='<div style="margin-top:9px"><b>Open positions</b>'+openHtml+'</div>';
+ if(!cfbHideFinished&&(settled.length||capperLast24hOnly)){
+  const settledHtml=settled.length?settled.map(item=>{
+   const result=String(item.result||'').toUpperCase();
+   const cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
+   const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
+   const pnl=raw===null?'':('<div class="settled-pnl '+(raw>0?'positive':raw<0?'negative':'')+'">Realized P/L '+(raw>0?'+':'')+'$'+raw.toFixed(2)+'</div>');
+   const stake=item.stake_usdc===null||item.stake_usdc===undefined?'':' · Stake $'+Number(item.stake_usdc).toFixed(2);
+   const status=result?(' · '+cfbEsc(result)):(String(item.status||'').toUpperCase()==='CLOSED_RECONCILED'?' · AWAITING SETTLEMENT':'');
+   return '<div class="cfb-settled-position '+cls+'"><b style="font-size:15px">'+cfbEsc(item.selection||item.market||'CFB position')+status+'</b><br><span>'+cfbEsc(item.outcome||'')+stake+'</span>'+pnl+'</div>';
+  }).join(''):'<div style="margin-top:7px;opacity:.7">No settled positions in the last 24 hours.</div>';
+  html+='<div style="margin-top:12px"><b>Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</b>'+settledHtml+'</div>';
+ }
+ return html;
 }
 async function cfbSetUnitSize(sourceKey,btn){
  const input=document.getElementById('cfbUnitSize-'+sourceKey);
@@ -2900,7 +2931,7 @@ function cfbCapperLine(x,sourceKey){
  const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
  const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
  const unitControl='<div style="margin:6px 0 9px"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:12px">FIXED 1u WIN $</b><input id="cfbUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px;'+fixedBtnStyle+'" onclick="cfbSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><b style="font-size:12px;margin-left:4px">% PORTFOLIO</b><input id="cfbPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'" style="width:72px"><button type="button" style="padding:5px 8px;min-height:34px;'+autoBtnStyle+'" onclick="cfbSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button></div><div style="font-size:11px;opacity:.78;margin-top:3px">'+modeText+' · percentage mode recalculates before each new/retried order; risk still varies by odds</div></div>';
- return unitControl+performance+cfbOpenPositionList(x)+tabs+body;
+ return unitControl+performance+cfbPositionList(x)+tabs+body;
 }
 async function loadCfbCapperStats(){
  try{
@@ -2910,9 +2941,7 @@ async function loadCfbCapperStats(){
   if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
   if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · auto fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · manual pregame/live while market open · odds refresh '+(d.poll_seconds||0)+'s';
   cfbLastSources=d.sources||{};
-  const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
-  if(s)s.innerHTML=cfbCapperLine(cfbLastSources['Slam - CFB'],'slam');
-  if(y)y.innerHTML=cfbCapperLine(cfbLastSources['Syndicate - CFB'],'syndicate');
+  cfbRenderCappers();
   cfbUpdateFinishedToggle();
  }catch(e){
   const state=document.getElementById('cfbCapperState');if(state)state.textContent='Status unavailable: '+String(e);

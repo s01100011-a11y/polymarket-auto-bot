@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -2263,6 +2264,18 @@ class CfbLegacyBridgeNormalizationTests(unittest.TestCase):
         )
         self.assertIsNotNone(row)
         self.assertEqual(len(row["event_hints"]), 2)
+
+
+class CfbDashboardHistoryFilterTests(unittest.TestCase):
+    def test_cfb_uses_shared_last_24h_filter_for_signals_and_settled_positions(self):
+        source = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
+
+        self.assertIn("data-capper-last24h-toggle", source)
+        self.assertIn("capperLast24hOnly&&kind==='signals'", source)
+        self.assertIn("capperWithin24h(item.closed_at||item.submitted_at)", source)
+        self.assertIn("Settled positions", source)
+        self.assertIn("No settled positions in the last 24 hours.", source)
+        self.assertIn("cfbPositionList", source)
 
 
 if __name__ == "__main__":

@@ -369,6 +369,201 @@ def _performance_metrics(executions: dict[str, dict[str, Any]]) -> dict[str, Any
     }
 
 
+def _metric_time(rec: dict[str, Any]) -> datetime | None:
+    for raw_time in (
+        rec.get("closed_at"),
+        rec.get("updated_at"),
+        rec.get("submitted_at"),
+        rec.get("created_at"),
+    ):
+        if not raw_time:
+            continue
+        try:
+            parsed = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    return None
+
+
+def _capper_name(source: Any, sport: Any) -> str | None:
+    name = str(source or "").strip()
+    sport_name = str(sport or "").strip().upper()
+    if not name:
+        return None
+    suffix = f" - {sport_name}" if sport_name else ""
+    if suffix and name.upper().endswith(suffix):
+        return name[: -len(suffix)].strip() or name
+    return name
+
+
+def _more_stats_payload(mode: str = "live") -> dict[str, Any]:
+    mode = str(mode or "live").strip().lower()
+    if mode not in {"live", "paper", "both"}:
+        mode = "live"
+
+    executions = core._load(core.EXECUTIONS_FILE)
+    if not isinstance(executions, dict):
+        executions = {}
+
+    records = [
+        rec
+        for rec in executions.values()
+        if isinstance(rec, dict) and not rec.get("parent_trade_id")
+    ]
+    scoped = [
+        rec
+        for rec in records
+        if mode == "both"
+        or (mode == "paper" and bool(rec.get("paper")))
+        or (mode == "live" and not bool(rec.get("paper")))
+    ]
+
+    try:
+        current, _ = dashboard._estimate_pnl(scoped)
+    except Exception:
+        current = []
+    marks = {
+        str(row.get("id")): row
+        for row in current
+        if isinstance(row, dict) and row.get("id") is not None
+    }
+
+    now = datetime.now(timezone.utc)
+    cutoff_7d = now - timedelta(days=7)
+    cutoff_30d = now - timedelta(days=30)
+    active_statuses = {"ORDER_SUBMITTED", "PARTIALLY_CLOSED", "PAPER_OPEN"}
+    grouped: dict[str, dict[str, dict[str, Any]]] = {"capper": {}, "sport": {}}
+
+    def ensure(bucket: str, key: str) -> dict[str, Any]:
+        row = grouped[bucket].setdefault(
+            key,
+            {
+                "name": key,
+                "bets": 0,
+                "open": 0,
+                "wins": 0,
+                "losses": 0,
+                "pushes": 0,
+                "graded": 0,
+                "stake": Decimal("0"),
+                "realized": Decimal("0"),
+                "realized_7d": Decimal("0"),
+                "realized_30d": Decimal("0"),
+                "unrealized": Decimal("0"),
+                "open_value": Decimal("0"),
+                "sports": set(),
+                "cappers": set(),
+            },
+        )
+        return row
+
+    for rec in scoped:
+        source = str(rec.get("strategy_source") or "").strip()
+        sport = str(rec.get("strategy_sport") or "").strip().upper()
+        capper = _capper_name(source, sport)
+        if not capper and not sport:
+            continue
+
+        targets: list[tuple[str, str]] = []
+        if capper:
+            targets.append(("capper", capper))
+        if sport:
+            targets.append(("sport", sport))
+
+        status = str(rec.get("status") or "")
+        trade_id = str(rec.get("id") or "")
+        mark = marks.get(trade_id) or {}
+        realized = base.pnl_base._explicit_realized_pnl(rec)
+        stake = _d(rec.get("actual_cost_usdc") or rec.get("budget_usdc"))
+        settled_at = _metric_time(rec)
+
+        for bucket, key in targets:
+            row = ensure(bucket, key)
+            row["bets"] += 1
+            if sport:
+                row["sports"].add(sport)
+            if capper:
+                row["cappers"].add(capper)
+
+            if status in active_statuses:
+                row["open"] += 1
+                row["unrealized"] += _d(mark.get("estimated_pnl"))
+                row["open_value"] += _d(mark.get("current_value_usdc"))
+
+            if realized is None:
+                continue
+            row["graded"] += 1
+            row["realized"] += realized
+            if stake > 0:
+                row["stake"] += stake
+            if realized > 0:
+                row["wins"] += 1
+            elif realized < 0:
+                row["losses"] += 1
+            else:
+                row["pushes"] += 1
+            if settled_at is not None:
+                if settled_at >= cutoff_30d:
+                    row["realized_30d"] += realized
+                if settled_at >= cutoff_7d:
+                    row["realized_7d"] += realized
+
+    def finish(rows: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+        output: list[dict[str, Any]] = []
+        for key in sorted(rows, key=str.casefold):
+            row = rows[key]
+            decided = row["wins"] + row["losses"]
+            win_pct = (
+                Decimal(row["wins"]) / Decimal(decided) * Decimal("100")
+                if decided
+                else None
+            )
+            roi = (
+                row["realized"] / row["stake"] * Decimal("100")
+                if row["stake"] > 0
+                else None
+            )
+            total_live = row["realized"] + row["unrealized"]
+            output.append(
+                {
+                    "name": row["name"],
+                    "bets": row["bets"],
+                    "open": row["open"],
+                    "wins": row["wins"],
+                    "losses": row["losses"],
+                    "pushes": row["pushes"],
+                    "graded": row["graded"],
+                    "win_pct": str(win_pct.quantize(Decimal("0.1"))) if win_pct is not None else None,
+                    "stake_usdc": str(row["stake"].quantize(Decimal("0.01"))),
+                    "realized_pnl_usdc": str(row["realized"].quantize(Decimal("0.01"))),
+                    "realized_pnl_7d_usdc": str(row["realized_7d"].quantize(Decimal("0.01"))),
+                    "realized_pnl_30d_usdc": str(row["realized_30d"].quantize(Decimal("0.01"))),
+                    "unrealized_pnl_usdc": str(row["unrealized"].quantize(Decimal("0.01"))),
+                    "total_live_pnl_usdc": str(total_live.quantize(Decimal("0.01"))),
+                    "open_value_usdc": str(row["open_value"].quantize(Decimal("0.01"))),
+                    "roi_pct": str(roi.quantize(Decimal("0.1"))) if roi is not None else None,
+                    "sports": sorted(row["sports"]),
+                    "cappers": sorted(row["cappers"]),
+                }
+            )
+        return output
+
+    return {
+        "mode": mode,
+        "by_capper": finish(grouped["capper"]),
+        "by_sport": finish(grouped["sport"]),
+        "generated_at": _now_iso(),
+    }
+
+
+@app.get("/api/dashboard/more-stats", dependencies=[Depends(dashboard._auth)])
+def dashboard_more_stats(mode: str = "live"):
+    return _more_stats_payload(mode)
+
+
 def _dashboard_snapshot_v3() -> dict[str, Any]:
     reconcile = _reconcile_live_positions()
     data = _BASE_SNAPSHOT()
@@ -404,10 +599,25 @@ def _install_performance_and_paper_ui() -> None:
     <div class="performance-card"><div class="label">Accuracy</div><div class="performance-value" id="performanceAccuracy">—</div><div class="performance-sub" id="performanceGraded"></div></div>
   </div>
 '''
-    html = html.replace('  <div class="tabs">', performance_html + '  <div class="tabs">', 1)
+    more_stats_html = '''
+  <div class="more-stats-shell">
+    <button type="button" id="moreStatsToggle" class="more-stats-main-btn" onclick="toggleMoreStats()">MORE STATS</button>
+    <div id="moreStatsPanel" class="more-stats-panel" style="display:none">
+      <div class="more-stats-head">
+        <div><div class="label">Performance breakdown</div><div id="moreStatsScope" class="performance-sub">LIVE trades</div></div>
+        <div class="more-stats-tabs">
+          <button type="button" data-more-stats-tab="capper" onclick="setMoreStatsTab('capper')">BY CAPPER</button>
+          <button type="button" data-more-stats-tab="sport" onclick="setMoreStatsTab('sport')">BY SPORT</button>
+        </div>
+      </div>
+      <div id="moreStatsBody">Loading…</div>
+    </div>
+  </div>
+'''
+    html = html.replace('  <div class="tabs">', performance_html + more_stats_html + '  <div class="tabs">', 1)
 
     css = '''
-.performance-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:18px 0}.performance-card{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px}.performance-value{font-size:24px;font-weight:900;margin-top:6px}.performance-sub{font-size:10px;color:var(--muted);margin-top:4px}.paper-close-btn{border:1px solid #7c5b15;background:#33270c;color:#fde68a;border-radius:8px;padding:7px 11px;font-size:11px;font-weight:850;cursor:pointer;white-space:nowrap}.paper-close-btn:hover{background:#49350d}.paper-close-btn:disabled{opacity:.55;cursor:wait}@media(max-width:1100px){.performance-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:700px){.performance-strip{grid-template-columns:1fr 1fr}.performance-card:last-child{grid-column:1/-1}}
+.performance-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:18px 0}.performance-card{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px}.performance-value{font-size:24px;font-weight:900;margin-top:6px}.performance-sub{font-size:10px;color:var(--muted);margin-top:4px}.paper-close-btn{border:1px solid #7c5b15;background:#33270c;color:#fde68a;border-radius:8px;padding:7px 11px;font-size:11px;font-weight:850;cursor:pointer;white-space:nowrap}.paper-close-btn:hover{background:#49350d}.paper-close-btn:disabled{opacity:.55;cursor:wait}.more-stats-shell{margin:0 0 14px}.more-stats-main-btn{font-weight:850}.more-stats-panel{margin-top:9px;background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:14px}.more-stats-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.more-stats-tabs{display:flex;gap:6px;flex-wrap:wrap}.more-stats-tabs button.active{font-weight:850;border-color:#86efac}.more-stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:9px;margin-top:12px}.more-stats-row{border:1px solid var(--border);border-radius:10px;background:#0d1522;padding:11px;line-height:1.55}.more-stats-row .name{font-size:16px;font-weight:850}.more-stats-row .pnl{font-weight:850}.more-stats-row .positive{color:#86efac}.more-stats-row .negative{color:#fca5a5}@media(max-width:1100px){.performance-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:700px){.performance-strip{grid-template-columns:1fr 1fr}.performance-card:last-child{grid-column:1/-1}.more-stats-head{flex-direction:column}}
 '''
     html = html.replace("</style>", css + "</style>", 1)
 
@@ -427,6 +637,103 @@ def _install_performance_and_paper_ui() -> None:
     html = html.replace(metric_anchor, metric_js)
 
     paper_js = r'''
+let capperLast24hOnly=localStorage.getItem('capperLast24hOnly')==='1';
+if(localStorage.getItem('capperLast24hOnly')===null&&localStorage.getItem('nflLast24hOnly')==='1'){
+ capperLast24hOnly=true;
+ localStorage.setItem('capperLast24hOnly','1');
+}
+function capperWithin24h(v){
+ if(!v)return false;
+ const t=new Date(v).getTime();
+ return Number.isFinite(t)&&t>=(Date.now()-24*60*60*1000);
+}
+function capperSyncLast24hButtons(){
+ document.querySelectorAll('[data-capper-last24h-toggle]').forEach(btn=>{
+  btn.textContent='Last 24h only: '+(capperLast24hOnly?'ON':'OFF');
+  btn.style.fontWeight=capperLast24hOnly?'800':'';
+  btn.style.borderColor=capperLast24hOnly?'#86efac':'';
+ });
+}
+function capperToggleLast24h(){
+ capperLast24hOnly=!capperLast24hOnly;
+ localStorage.setItem('capperLast24hOnly',capperLast24hOnly?'1':'0');
+ capperSyncLast24hButtons();
+ window.dispatchEvent(new CustomEvent('capper-history-filter-change',{detail:{last24h:capperLast24hOnly}}));
+}
+window.addEventListener('load',capperSyncLast24hButtons);
+
+let moreStatsOpen=false;
+let moreStatsTab=localStorage.getItem('moreStatsTab')||'capper';
+let moreStatsData=null;
+function moreStatsEsc(v){
+ return String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function moreStatsMoney(v){
+ const n=Number(v||0);
+ return (n>0?'+':'')+'$'+n.toFixed(2);
+}
+function moreStatsPnlClass(v){
+ const n=Number(v||0);
+ return n>0?'positive':n<0?'negative':'';
+}
+function renderMoreStats(){
+ const body=document.getElementById('moreStatsBody');
+ const scope=document.getElementById('moreStatsScope');
+ if(!body||!moreStatsData)return;
+ const mode=String(moreStatsData.mode||'live').toUpperCase();
+ if(scope)scope.textContent=mode+' trades · grouped automatically from execution history';
+ document.querySelectorAll('[data-more-stats-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.moreStatsTab===moreStatsTab));
+ const rows=moreStatsTab==='sport'?(moreStatsData.by_sport||[]):(moreStatsData.by_capper||[]);
+ if(!rows.length){
+  body.innerHTML='<div style="margin-top:12px;opacity:.7">No tracked capper trades in this scope.</div>';
+  return;
+ }
+ body.innerHTML='<div class="more-stats-grid">'+rows.map(row=>{
+  const win=row.win_pct===null||row.win_pct===undefined?'—':Number(row.win_pct).toFixed(1)+'%';
+  const roi=row.roi_pct===null||row.roi_pct===undefined?'—':Number(row.roi_pct).toFixed(1)+'%';
+  const related=moreStatsTab==='sport'?(row.cappers||[]).join(', '):(row.sports||[]).join(', ');
+  return '<div class="more-stats-row"><div class="name">'+moreStatsEsc(row.name)+'</div>'
+   +'<div>'+(related?moreStatsEsc(related)+' · ':'')+'Bets '+Number(row.bets||0)+' · Open '+Number(row.open||0)+'</div>'
+   +'<div>W-L-P '+Number(row.wins||0)+'-'+Number(row.losses||0)+'-'+Number(row.pushes||0)+' · Win '+win+'</div>'
+   +'<div>Stake $'+Number(row.stake_usdc||0).toFixed(2)+' · ROI '+roi+'</div>'
+   +'<div class="pnl '+moreStatsPnlClass(row.realized_pnl_usdc)+'">Realized P/L '+moreStatsMoney(row.realized_pnl_usdc)+'</div>'
+   +'<div><span class="pnl '+moreStatsPnlClass(row.realized_pnl_7d_usdc)+'">7D '+moreStatsMoney(row.realized_pnl_7d_usdc)+'</span> · <span class="pnl '+moreStatsPnlClass(row.realized_pnl_30d_usdc)+'">30D '+moreStatsMoney(row.realized_pnl_30d_usdc)+'</span></div>'
+   +'<div class="pnl '+moreStatsPnlClass(row.total_live_pnl_usdc)+'">Live P/L '+moreStatsMoney(row.total_live_pnl_usdc)+'</div>'
+   +'</div>';
+ }).join('')+'</div>';
+}
+async function loadMoreStats(){
+ if(!moreStatsOpen)return;
+ const mode=localStorage.getItem('dashboardStatsFilter')||'live';
+ try{
+  const r=await fetch('/api/dashboard/more-stats?mode='+encodeURIComponent(mode),{cache:'no-store'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'More stats failed');
+  moreStatsData=d;
+  renderMoreStats();
+ }catch(e){
+  const body=document.getElementById('moreStatsBody');
+  if(body)body.textContent='Stats unavailable: '+String(e.message||e);
+ }
+}
+function toggleMoreStats(){
+ moreStatsOpen=!moreStatsOpen;
+ const panel=document.getElementById('moreStatsPanel');
+ const btn=document.getElementById('moreStatsToggle');
+ if(panel)panel.style.display=moreStatsOpen?'block':'none';
+ if(btn)btn.textContent=moreStatsOpen?'HIDE MORE STATS':'MORE STATS';
+ if(moreStatsOpen)loadMoreStats();
+}
+function setMoreStatsTab(tab){
+ moreStatsTab=tab==='sport'?'sport':'capper';
+ localStorage.setItem('moreStatsTab',moreStatsTab);
+ renderMoreStats();
+}
+document.addEventListener('click',function(ev){
+ if(ev.target.closest('[data-stats-filter]')&&moreStatsOpen)setTimeout(loadMoreStats,50);
+});
+setInterval(()=>{if(moreStatsOpen)loadMoreStats()},10000);
+
 document.addEventListener('click',async function(ev){
  const btn=ev.target.closest('[data-paper-close]');
  if(!btn)return;

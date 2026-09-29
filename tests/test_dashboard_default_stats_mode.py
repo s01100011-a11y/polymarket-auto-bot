@@ -43,3 +43,18 @@ def test_top_stats_include_portfolio_value_and_total_missed_pnl():
     assert "performancePnl7d" in stats_source
     assert "performancePnl30d" in stats_source
     assert "graded missed calls · NFL + CFB" in stats_source
+
+def test_more_stats_breaks_execution_history_down_by_capper_and_sport():
+    metrics_source = Path("app/dashboard_metrics_v3.py").read_text(encoding="utf-8")
+
+    assert '"/api/dashboard/more-stats"' in metrics_source
+    assert "def _more_stats_payload(" in metrics_source
+    assert 'rec.get("strategy_source")' in metrics_source
+    assert 'rec.get("strategy_sport")' in metrics_source
+    assert '"by_capper"' in metrics_source
+    assert '"by_sport"' in metrics_source
+    assert 'id="moreStatsToggle"' in metrics_source
+    assert "BY CAPPER" in metrics_source
+    assert "BY SPORT" in metrics_source
+    assert "localStorage.getItem('dashboardStatsFilter')||'live'" in metrics_source
+

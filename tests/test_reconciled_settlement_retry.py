@@ -35,13 +35,16 @@ def test_nfl_unresolved_settlement_card_has_manual_controls():
     assert "/api/dashboard/manual-settle/" in source
 
 
-def test_nfl_last_24h_toggle_filters_only_signals_and_settled_positions():
-    source = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
+def test_shared_last_24h_toggle_filters_nfl_and_future_capper_panels():
+    metrics = Path("app/dashboard_metrics_v3.py").read_text(encoding="utf-8")
+    nfl = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
 
-    assert 'id="nflLast24hToggle"' in source
-    assert "nflToggleLast24h" in source
-    assert "nflWithin24h(item.closed_at||item.submitted_at)" in source
-    assert "nflLast24hOnly&&kind==='signals'" in source
-    assert "item.posted_at||item.updated_at" in source
-    assert "No settled positions in the last 24 hours." in source
-    assert "No signals in the last 24 hours." in source
+    assert "capperLast24hOnly" in metrics
+    assert "capperWithin24h" in metrics
+    assert "capperToggleLast24h" in metrics
+    assert "capper-history-filter-change" in metrics
+    assert "data-capper-last24h-toggle" in nfl
+    assert "capperWithin24h(item.closed_at||item.submitted_at)" in nfl
+    assert "capperLast24hOnly&&kind==='signals'" in nfl
+    assert "No settled positions in the last 24 hours." in nfl
+    assert "No signals in the last 24 hours." in nfl
