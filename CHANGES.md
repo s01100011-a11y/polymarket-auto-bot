@@ -1,5 +1,14 @@
 # CHANGES
 
+## 2026-09-30 — Teal window spacing and top MODE control
+
+- Inset the major dashboard windows slightly from the page edges so the teal desktop wallpaper remains visible around each window on desktop and mobile.
+- Removed the words `Version date` from the application title bar; the title bar now shows only the date next to the S01807 version.
+- Moved the dashboard `LIVE / DRY RUN · Auto ON/OFF` MODE value out of Wallet and into the top application chrome.
+- MODE now uses the same labeled white inset field dimensions and styling as the sport AUTO-TRADING status fields.
+- Moved the dashboard master Online/Offline button onto the same MODE row at the right and applied the same capper power-button classes/color treatment.
+- Removed the duplicate Mode box from the Wallet body.
+
 ## 2026-09-30 — Event badge parity
 
 - Changed NFL/CFB result/state badges such as WIN, LOSS, PUSH, LIVE, FINISHED, PREGAME, QUEUED, DONE, FAILED, and RETRYING to use the same raised Windows-grey badge frame as the other capper badges.
