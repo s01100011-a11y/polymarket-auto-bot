@@ -34,3 +34,16 @@ def test_long_term_pnl_archive_is_compact_and_live_point_is_not_lost():
     assert "_LATEST_PNL_POINT" in source
     assert "PNL_RANGE_MAX_POINTS = 1200" in source
     assert "_downsample_points" in source
+
+
+def test_filtered_pnl_range_is_mode_aware_and_does_not_overwrite_selected_range():
+    source = Path("app/dashboard_pnl_filters_v6.py").read_text(encoding="utf-8")
+    chart = Path("app/slack_dashboard_v2.py").read_text(encoding="utf-8")
+
+    assert '"/api/dashboard/pnl-history-mode"' in source
+    assert 'MODE_PNL_SAMPLE_SECONDS = 300' in source
+    assert 'MODE_PNL_HISTORY_MAX_ENTRIES = 210240' in source
+    assert "refreshPnlChartRange" in source
+    assert "renderPnlChart(p.history||[])" not in source
+    assert "/api/dashboard/pnl-history-mode?mode=" in chart
+    assert "localStorage.getItem('dashboardStatsFilter')||'live'" in chart
