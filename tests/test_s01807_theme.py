@@ -5,7 +5,7 @@ def test_dashboard_is_renamed_and_win95_theme_is_final_layer():
     source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
 
     assert "S01-807 · POLYMARKET SPORTS DESK" in source
-    assert "<title>S01-807 · Polymarket</title>" in source
+    assert "<title>s01807.exe</title>" in source
     assert "s01807-win95-theme" in source
     assert 'background:#008080' in source
     assert 'background:linear-gradient(90deg,#000080' in source

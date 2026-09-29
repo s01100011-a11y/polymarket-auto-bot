@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
+
+from fastapi import Depends
 
 from app import slack_wnba as base
 
@@ -13,9 +16,14 @@ dashboard = ingest.dashboard
 core = ingest.core
 
 PNL_HISTORY_FILE = core.DATA_DIR / "pnl_history.json"
-PNL_HISTORY_MAX_ENTRIES = 5760
-PNL_SAMPLE_SECONDS = 10
+# Long-term archive: one persisted point every 5 minutes, retaining up to ~2 years.
+# The current live point is kept in memory and appended to API responses, so the
+# chart still updates live without writing a huge JSON file every few seconds.
+PNL_HISTORY_MAX_ENTRIES = 210240
+PNL_SAMPLE_SECONDS = 300
+PNL_RANGE_MAX_POINTS = 1200
 _PNL_LOCK = threading.Lock()
+_LATEST_PNL_POINT: dict[str, Any] | None = None
 
 
 def _d(value: Any, default: str = "0") -> Decimal:
@@ -188,34 +196,118 @@ _start_background_live_reconcile()
 _BASE_SNAPSHOT = dashboard._dashboard_snapshot
 
 
-def _pnl_history(total_pnl: Decimal, open_trades: int) -> list[dict[str, Any]]:
-    now = time.time()
+def _history_points() -> list[dict[str, Any]]:
+    history = core._load(PNL_HISTORY_FILE)
+    if not isinstance(history, dict):
+        return []
+    points = [v for v in history.values() if isinstance(v, dict)]
+    points.sort(key=lambda x: float(x.get("epoch") or 0))
+    return points
+
+
+def _append_latest_point(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    latest = _LATEST_PNL_POINT
+    if not isinstance(latest, dict):
+        return points
+    if not points or float(latest.get("epoch") or 0) > float(points[-1].get("epoch") or 0):
+        return [*points, dict(latest)]
+    return points
+
+
+def _downsample_points(points: list[dict[str, Any]], limit: int = PNL_RANGE_MAX_POINTS) -> list[dict[str, Any]]:
+    if len(points) <= limit:
+        return points
+    if limit <= 2:
+        return [points[0], points[-1]]
+    last_index = len(points) - 1
+    indexes = {0, last_index}
+    for i in range(1, limit - 1):
+        indexes.add(round(i * last_index / (limit - 1)))
+    return [points[i] for i in sorted(indexes)]
+
+
+def _range_cutoff_epoch(range_key: str, now: datetime) -> float | None:
+    key = str(range_key or "1d").strip().lower()
+    if key == "1d":
+        return (now - timedelta(days=1)).timestamp()
+    if key == "1w":
+        return (now - timedelta(days=7)).timestamp()
+    if key == "1m":
+        return (now - timedelta(days=30)).timestamp()
+    if key == "1y":
+        return (now - timedelta(days=365)).timestamp()
+    if key == "ytd":
+        return datetime(now.year, 1, 1, tzinfo=timezone.utc).timestamp()
+    if key == "all":
+        return None
+    return (now - timedelta(days=1)).timestamp()
+
+
+def _pnl_history_for_range(range_key: str) -> dict[str, Any]:
+    key = str(range_key or "1d").strip().lower()
+    if key not in {"1d", "1w", "1m", "1y", "ytd", "all"}:
+        key = "1d"
+    now = datetime.now(timezone.utc)
     with _PNL_LOCK:
+        points = _append_latest_point(_history_points())
+    cutoff = _range_cutoff_epoch(key, now)
+    if cutoff is not None:
+        points = [p for p in points if float(p.get("epoch") or 0) >= cutoff]
+    sampled = _downsample_points(points)
+    return {
+        "range": key,
+        "points": sampled,
+        "sample_count": len(points),
+        "returned_count": len(sampled),
+        "first_at": points[0].get("at") if points else None,
+        "last_at": points[-1].get("at") if points else None,
+        "archive_sample_seconds": PNL_SAMPLE_SECONDS,
+    }
+
+
+@app.get("/api/dashboard/pnl-history", dependencies=[Depends(dashboard._auth)])
+def dashboard_pnl_history(range: str = "1d"):
+    return _pnl_history_for_range(range)
+
+
+def _pnl_history(total_pnl: Decimal, open_trades: int) -> list[dict[str, Any]]:
+    global _LATEST_PNL_POINT
+    now = time.time()
+    current = {
+        "epoch": now,
+        "at": ingest._now_iso(),
+        "pnl": str(total_pnl.quantize(Decimal("0.01"))),
+        "open_trades": open_trades,
+    }
+    with _PNL_LOCK:
+        _LATEST_PNL_POINT = current
         history = core._load(PNL_HISTORY_FILE)
+        if not isinstance(history, dict):
+            history = {}
         latest_epoch = 0.0
         if history:
             try:
-                latest_epoch = max(float(v.get("epoch") or 0) for v in history.values())
+                latest_epoch = max(float(v.get("epoch") or 0) for v in history.values() if isinstance(v, dict))
             except Exception:
                 latest_epoch = 0.0
 
         if not history or now - latest_epoch >= PNL_SAMPLE_SECONDS:
             key = str(int(now * 1000))
-            history[key] = {
-                "epoch": now,
-                "at": ingest._now_iso(),
-                "pnl": str(total_pnl.quantize(Decimal("0.01"))),
-                "open_trades": open_trades,
-            }
+            history[key] = current
             if len(history) > PNL_HISTORY_MAX_ENTRIES:
-                ordered = sorted(history.items(), key=lambda kv: float((kv[1] or {}).get("epoch") or 0))
+                ordered = sorted(
+                    history.items(),
+                    key=lambda kv: float((kv[1] or {}).get("epoch") or 0),
+                )
                 history = dict(ordered[-PNL_HISTORY_MAX_ENTRIES:])
             core._save(PNL_HISTORY_FILE, history)
 
-        points = list(history.values())
+        points = [v for v in history.values() if isinstance(v, dict)]
         points.sort(key=lambda x: float(x.get("epoch") or 0))
-        # Keep the live dashboard payload compact while retaining a full day on disk.
-        return points[-720:]
+        points = _append_latest_point(points)
+        # Keep the normal dashboard payload compact; range buttons use the API above.
+        cutoff = now - 86400
+        return [p for p in points if float(p.get("epoch") or 0) >= cutoff][-360:]
 
 
 def _dashboard_snapshot_v2() -> dict[str, Any]:
@@ -270,29 +362,84 @@ def _install_trading_ui() -> None:
 
     chart_html = '''
     <div class="pnl-chart-card">
-      <div class="pnl-chart-head"><div><div class="label">Live portfolio P/L</div><div class="pnl-chart-value" id="pnlChartValue">$0.00</div></div><div class="pnl-chart-range" id="pnlChartRange">Waiting for samples…</div></div>
-      <div id="pnlChart" class="pnl-chart"><div class="empty">Collecting live P/L samples…</div></div>
+      <div class="pnl-chart-head"><div class="label">Portfolio P/L · LIVE</div><div class="pnl-chart-range" id="pnlChartRange">Waiting for samples…</div></div>
+      <div class="pnl-chart-body">
+        <div class="pnl-chart-summary">
+          <div><div class="label">Live P/L</div><div class="pnl-chart-value" id="pnlChartValue">$0.00</div></div>
+          <div class="pnl-chart-controls" role="group" aria-label="P/L chart range">
+            <button type="button" data-pnl-range="1d">1D</button>
+            <button type="button" data-pnl-range="1w">1W</button>
+            <button type="button" data-pnl-range="1m">1M</button>
+            <button type="button" data-pnl-range="1y">1Y</button>
+            <button type="button" data-pnl-range="ytd">YTD</button>
+            <button type="button" data-pnl-range="all">ALL</button>
+          </div>
+        </div>
+        <div id="pnlChart" class="pnl-chart"><div class="empty">Collecting live P/L samples…</div></div>
+      </div>
     </div>
 '''
     html = html.replace('    <div id="currentBody"></div>', chart_html + '    <div id="currentBody"></div>')
 
     css = '''
-.pnl-chart-card{border:1px solid var(--border);background:#0d1522;border-radius:12px;padding:14px;margin:0 0 18px}.pnl-chart-head{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;margin-bottom:8px}.pnl-chart-value{font-size:24px;font-weight:850;margin-top:4px}.pnl-chart-range{font-size:11px;color:var(--muted);text-align:right}.pnl-chart{height:225px;position:relative;overflow:hidden}.pnl-chart svg{width:100%;height:100%;display:block}.pnl-line{fill:none;stroke:currentColor;stroke-width:3;vector-effect:non-scaling-stroke}.pnl-zero{stroke:#43516a;stroke-width:1;stroke-dasharray:5 5;vector-effect:non-scaling-stroke}.pnl-fill{fill:currentColor;opacity:.08}.pnl-axis{fill:var(--muted);font-size:22px}.side-buy{color:var(--accent);font-weight:850}.side-sell{color:var(--bad);font-weight:850}.pnl-sub{display:block;color:var(--muted);font-size:10px;margin-top:3px;text-transform:uppercase;letter-spacing:.05em}
+.pnl-chart-card{border:1px solid var(--border);background:#0d1522;border-radius:12px;padding:14px;margin:0 0 18px}.pnl-chart-head{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:0}.pnl-chart-body{padding-top:8px}.pnl-chart-summary{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:0 0 7px}.pnl-chart-value{font-size:24px;font-weight:850;margin-top:3px}.pnl-chart-range{font-size:11px;color:var(--muted);text-align:right}.pnl-chart-controls{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}.pnl-chart-controls button{min-width:42px;padding:4px 7px;font-size:10px;font-weight:850}.pnl-chart-controls button.active{font-weight:900}.pnl-chart{height:225px;position:relative;overflow:hidden}.pnl-chart svg{width:100%;height:100%;display:block}.pnl-line{fill:none;stroke:currentColor;stroke-width:3;vector-effect:non-scaling-stroke}.pnl-zero{stroke:#43516a;stroke-width:1;stroke-dasharray:5 5;vector-effect:non-scaling-stroke}.pnl-fill{fill:currentColor;opacity:.08}.pnl-axis{fill:var(--muted);font-size:22px}.side-buy{color:var(--accent);font-weight:850}.side-sell{color:var(--bad);font-weight:850}.pnl-sub{display:block;color:var(--muted);font-size:10px;margin-top:3px;text-transform:uppercase;letter-spacing:.05em}@media(max-width:650px){.pnl-chart-summary{align-items:flex-start}.pnl-chart-controls{justify-content:flex-start}.pnl-chart-controls button{min-width:39px}}
 '''
     html = html.replace('</style>', css + '</style>')
 
     chart_js = r'''
-function renderPnlChart(points){
+let pnlChartRangeKey=localStorage.getItem('pnlChartRangeKey')||'1d';
+let pnlChartLoading=false;
+function pnlChartRangeLabel(key){
+ return ({'1d':'1D','1w':'1W','1m':'1M','1y':'1Y','ytd':'YTD','all':'ALL'})[key]||'1D';
+}
+function updatePnlRangeButtons(){
+ document.querySelectorAll('[data-pnl-range]').forEach(btn=>{
+  btn.classList.toggle('active',btn.dataset.pnlRange===pnlChartRangeKey);
+ });
+}
+function renderPnlChart(points,meta){
  const box=document.getElementById('pnlChart'),val=document.getElementById('pnlChartValue'),range=document.getElementById('pnlChartRange');
  if(!box||!val||!range)return;
  const pts=(points||[]).filter(x=>Number.isFinite(Number(x.pnl)));
- if(!pts.length){box.innerHTML='<div class="empty">Collecting live P/L samples…</div>';val.textContent='$0.00';range.textContent='Waiting for samples…';return}
+ updatePnlRangeButtons();
+ if(!pts.length){
+  box.innerHTML='<div class="empty">No P/L samples in this range yet.</div>';
+  val.textContent='$0.00';
+  val.className='pnl-chart-value';
+  range.textContent=pnlChartRangeLabel(pnlChartRangeKey)+' · no samples yet';
+  return;
+ }
  const values=pts.map(x=>Number(x.pnl));const last=values[values.length-1];val.textContent=money(last);val.className='pnl-chart-value '+(last>0?'green':last<0?'red':'');
- const start=new Date(pts[0].at),end=new Date(pts[pts.length-1].at);range.textContent=start.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})+' → '+end.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})+' · '+pts.length+' samples';
+ const start=new Date(pts[0].at),end=new Date(pts[pts.length-1].at);
+ const dateOpts={month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'};
+ range.textContent=pnlChartRangeLabel(pnlChartRangeKey)+' · '+start.toLocaleString([],dateOpts)+' → '+end.toLocaleString([],dateOpts)+' · '+Number((meta&&meta.sample_count)||pts.length)+' samples';
  const W=1000,H=220,L=50,R=18,T=14,B=28;let min=Math.min(0,...values),max=Math.max(0,...values);if(max===min){max+=1;min-=1}const span=max-min;
  const x=i=>L+(W-L-R)*(pts.length===1?1:i/(pts.length-1));const y=v=>T+(H-T-B)*(1-(v-min)/span);const line=pts.map((p,i)=>x(i).toFixed(1)+','+y(Number(p.pnl)).toFixed(1)).join(' ');const zero=y(0).toFixed(1);const area=L+','+zero+' '+line+' '+x(pts.length-1).toFixed(1)+','+zero;const cls=last>0?'green':last<0?'red':'';
  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="${cls}"><line class="pnl-zero" x1="${L}" y1="${zero}" x2="${W-R}" y2="${zero}"></line><polygon class="pnl-fill" points="${area}"></polygon><polyline class="pnl-line" points="${line}"></polyline><text class="pnl-axis" x="4" y="${Math.max(18,y(max)+8)}">${esc(money(max))}</text><text class="pnl-axis" x="4" y="${Math.min(H-4,y(min)+8)}">${esc(money(min))}</text></svg>`;
 }
+async function refreshPnlChartRange(){
+ if(pnlChartLoading)return;
+ pnlChartLoading=true;
+ try{
+  const r=await fetch('/api/dashboard/pnl-history?range='+encodeURIComponent(pnlChartRangeKey),{cache:'no-store'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'P/L history failed');
+  renderPnlChart(d.points||[],d);
+ }catch(e){
+  const range=document.getElementById('pnlChartRange');
+  if(range)range.textContent=pnlChartRangeLabel(pnlChartRangeKey)+' · history unavailable';
+ }finally{
+  pnlChartLoading=false;
+ }
+}
+document.addEventListener('click',function(ev){
+ const btn=ev.target.closest('[data-pnl-range]');
+ if(!btn)return;
+ pnlChartRangeKey=btn.dataset.pnlRange||'1d';
+ localStorage.setItem('pnlChartRangeKey',pnlChartRangeKey);
+ updatePnlRangeButtons();
+ refreshPnlChartRange();
+});
 '''
     html = html.replace(
         "function setPnl(el,v){const n=Number(v||0);el.textContent=money(n);el.className='value '+(n>0?'green':n<0?'red':'')}",
@@ -304,7 +451,7 @@ function renderPnlChart(points){
     html = html.replace(old_lr, new_lr)
 
     old_current = "table(['Status','Market','Outcome','Entry','Mid','Budget','Est. P/L','Submitted'],lr);"
-    new_current = "table(['Status','Side','Market','Outcome','Entry','Live price','Budget','Live P/L','Submitted'],lr);renderPnlChart(d.pnl_history||[]);"
+    new_current = "table(['Status','Side','Market','Outcome','Entry','Live price','Budget','Live P/L','Submitted'],lr);refreshPnlChartRange();"
     html = html.replace(old_current, new_current)
 
     old_hr = "const hr=d.history.map(x=>`<tr><td><span class=\"status\">${esc(x.status||'—')}</span></td><td class=\"market\">${link(x.market_url,x.market)}</td><td>${esc(x.outcome||'—')}</td><td>${price(x.limit_price)}</td><td>${money(x.budget_usdc)}</td><td>${x.auto?'Auto':'Manual'}</td><td>${when(x.submitted_at)}</td><td class=\"muted\">${esc(x.order_id||'—')}</td></tr>`);"
