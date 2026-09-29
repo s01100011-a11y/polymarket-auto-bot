@@ -673,8 +673,8 @@ function capperWithin24h(v){
 function capperSyncLast24hButtons(){
  document.querySelectorAll('[data-capper-last24h-toggle]').forEach(btn=>{
   btn.textContent='Last 24h only: '+(capperLast24hOnly?'ON':'OFF');
-  btn.style.fontWeight=capperLast24hOnly?'800':'';
-  btn.style.borderColor=capperLast24hOnly?'#86efac':'';
+  btn.classList.toggle('active',capperLast24hOnly);
+  btn.setAttribute('aria-pressed',capperLast24hOnly?'true':'false');
  });
 }
 function capperToggleLast24h(){
@@ -744,7 +744,7 @@ function toggleMoreStats(){
  const panel=document.getElementById('moreStatsPanel');
  const btn=document.getElementById('moreStatsToggle');
  if(panel)panel.style.display=moreStatsOpen?'block':'none';
- if(btn)btn.textContent=moreStatsOpen?'HIDE MORE STATS':'MORE STATS';
+ if(btn){btn.textContent=moreStatsOpen?'HIDE MORE STATS':'MORE STATS';btn.classList.toggle('active',moreStatsOpen);btn.setAttribute('aria-pressed',moreStatsOpen?'true':'false')}
  if(moreStatsOpen)loadMoreStats();
 }
 function setMoreStatsTab(tab){

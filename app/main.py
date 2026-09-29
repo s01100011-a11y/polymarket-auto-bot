@@ -33,17 +33,31 @@ DATA_DIR.mkdir(exist_ok=True)
 PENDING_FILE = DATA_DIR / "pending.json"
 WATCH_FILE = DATA_DIR / "watchlist.json"
 EXECUTIONS_FILE = DATA_DIR / "executions.json"
+BOT_ENABLED_STATE_FILE = DATA_DIR / "bot_enabled_state.json"
 FILE_LOCK = Lock()
 
+
+def bot_enabled() -> bool:
+    """Persistent dashboard master switch. Defaults to enabled."""
+    try:
+        if not BOT_ENABLED_STATE_FILE.exists():
+            return True
+        data = json.loads(BOT_ENABLED_STATE_FILE.read_text())
+        return bool(data.get("enabled", True))
+    except Exception:
+        # Fail open to the configured Railway switches if state cannot be read.
+        return True
+
+
 def live_trading_enabled() -> bool:
-    """Railway LIVE_TRADING is the authoritative live-mode switch."""
-    return os.getenv("LIVE_TRADING", "false").strip().lower() in {"1", "true", "yes", "on"}
+    """Railway LIVE_TRADING gated by the persistent dashboard master switch."""
+    return bot_enabled() and os.getenv("LIVE_TRADING", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 LIVE_TRADING = live_trading_enabled()
 
 def auto_trading_enabled() -> bool:
-    """Railway AUTO_TRADING is the authoritative automation switch."""
-    return os.getenv("AUTO_TRADING", "false").strip().lower() in {"1", "true", "yes", "on"}
+    """Railway AUTO_TRADING gated by the persistent dashboard master switch."""
+    return bot_enabled() and os.getenv("AUTO_TRADING", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 AUTO_TRADING = auto_trading_enabled()
 

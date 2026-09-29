@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
+
+from fastapi import Depends
 
 from app import dashboard_filters_v5 as base
 
@@ -12,9 +15,11 @@ dashboard = base.dashboard
 core = base.core
 
 MODE_PNL_HISTORY_FILE = core.DATA_DIR / "pnl_history_modes.json"
-MODE_PNL_HISTORY_MAX_ENTRIES = 5760
-MODE_PNL_SAMPLE_SECONDS = 10
+MODE_PNL_HISTORY_MAX_ENTRIES = 210240
+MODE_PNL_SAMPLE_SECONDS = 300
+MODE_PNL_RANGE_MAX_POINTS = 1200
 _MODE_PNL_LOCK = threading.Lock()
+_LATEST_MODE_PNL_POINT: dict[str, Any] | None = None
 
 _BASE_SNAPSHOT = dashboard._dashboard_snapshot
 
@@ -69,34 +74,122 @@ def _mode_totals(data: dict[str, Any]) -> dict[str, dict[str, Decimal]]:
     return result
 
 
-def _record_mode_history(totals: dict[str, dict[str, Decimal]]) -> dict[str, list[dict[str, Any]]]:
-    now = time.time()
+def _mode_history_points() -> list[dict[str, Any]]:
+    history = core._load(MODE_PNL_HISTORY_FILE)
+    if not isinstance(history, dict):
+        return []
+    points = [v for v in history.values() if isinstance(v, dict)]
+    points.sort(key=lambda x: float(x.get("epoch") or 0))
+    return points
+
+
+def _append_latest_mode_point(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    latest = _LATEST_MODE_PNL_POINT
+    if not isinstance(latest, dict):
+        return points
+    if not points or float(latest.get("epoch") or 0) > float(points[-1].get("epoch") or 0):
+        return [*points, dict(latest)]
+    return points
+
+
+def _downsample_mode_points(points: list[dict[str, Any]], limit: int = MODE_PNL_RANGE_MAX_POINTS) -> list[dict[str, Any]]:
+    if len(points) <= limit:
+        return points
+    last_index = len(points) - 1
+    indexes = {0, last_index}
+    for i in range(1, max(1, limit - 1)):
+        indexes.add(round(i * last_index / max(1, limit - 1)))
+    return [points[i] for i in sorted(indexes)]
+
+
+def _mode_range_cutoff(range_key: str, now: datetime) -> float | None:
+    key = str(range_key or "1d").strip().lower()
+    if key == "1d":
+        return (now - timedelta(days=1)).timestamp()
+    if key == "1w":
+        return (now - timedelta(days=7)).timestamp()
+    if key == "1m":
+        return (now - timedelta(days=30)).timestamp()
+    if key == "1y":
+        return (now - timedelta(days=365)).timestamp()
+    if key == "ytd":
+        return datetime(now.year, 1, 1, tzinfo=timezone.utc).timestamp()
+    if key == "all":
+        return None
+    return (now - timedelta(days=1)).timestamp()
+
+
+def _mode_history_for_range(mode: str, range_key: str) -> dict[str, Any]:
+    mode_key = str(mode or "live").strip().lower()
+    if mode_key not in {"live", "paper", "both"}:
+        mode_key = "live"
+    range_name = str(range_key or "1d").strip().lower()
+    if range_name not in {"1d", "1w", "1m", "1y", "ytd", "all"}:
+        range_name = "1d"
+    field = {"live": "live_pnl", "paper": "paper_pnl", "both": "both_pnl"}[mode_key]
     with _MODE_PNL_LOCK:
+        raw_points = _append_latest_mode_point(_mode_history_points())
+    cutoff = _mode_range_cutoff(range_name, datetime.now(timezone.utc))
+    if cutoff is not None:
+        raw_points = [p for p in raw_points if float(p.get("epoch") or 0) >= cutoff]
+    points = [
+        {"epoch": p.get("epoch"), "at": p.get("at"), "pnl": p.get(field)}
+        for p in raw_points
+        if p.get(field) is not None
+    ]
+    sampled = _downsample_mode_points(points)
+    return {
+        "mode": mode_key,
+        "range": range_name,
+        "points": sampled,
+        "sample_count": len(points),
+        "returned_count": len(sampled),
+        "first_at": points[0].get("at") if points else None,
+        "last_at": points[-1].get("at") if points else None,
+        "archive_sample_seconds": MODE_PNL_SAMPLE_SECONDS,
+    }
+
+
+@app.get("/api/dashboard/pnl-history-mode", dependencies=[Depends(dashboard._auth)])
+def dashboard_mode_pnl_history(mode: str = "live", range: str = "1d"):
+    return _mode_history_for_range(mode, range)
+
+
+def _record_mode_history(totals: dict[str, dict[str, Decimal]]) -> dict[str, list[dict[str, Any]]]:
+    global _LATEST_MODE_PNL_POINT
+    now = time.time()
+    current = {
+        "epoch": now,
+        "at": base.base.ingest._now_iso(),
+        "paper_pnl": str(totals["paper"]["total"].quantize(Decimal("0.01"))),
+        "live_pnl": str(totals["live"]["total"].quantize(Decimal("0.01"))),
+        "both_pnl": str(totals["both"]["total"].quantize(Decimal("0.01"))),
+    }
+    with _MODE_PNL_LOCK:
+        _LATEST_MODE_PNL_POINT = current
         history = core._load(MODE_PNL_HISTORY_FILE)
+        if not isinstance(history, dict):
+            history = {}
         latest_epoch = 0.0
         if history:
             try:
-                latest_epoch = max(float(v.get("epoch") or 0) for v in history.values())
+                latest_epoch = max(float(v.get("epoch") or 0) for v in history.values() if isinstance(v, dict))
             except Exception:
                 latest_epoch = 0.0
 
         if not history or now - latest_epoch >= MODE_PNL_SAMPLE_SECONDS:
             key = str(int(now * 1000))
-            history[key] = {
-                "epoch": now,
-                "at": base.base.ingest._now_iso(),
-                "paper_pnl": str(totals["paper"]["total"].quantize(Decimal("0.01"))),
-                "live_pnl": str(totals["live"]["total"].quantize(Decimal("0.01"))),
-                "both_pnl": str(totals["both"]["total"].quantize(Decimal("0.01"))),
-            }
+            history[key] = current
             if len(history) > MODE_PNL_HISTORY_MAX_ENTRIES:
                 ordered = sorted(history.items(), key=lambda kv: float((kv[1] or {}).get("epoch") or 0))
                 history = dict(ordered[-MODE_PNL_HISTORY_MAX_ENTRIES:])
             core._save(MODE_PNL_HISTORY_FILE, history)
 
-        points = list(history.values())
+        points = [v for v in history.values() if isinstance(v, dict)]
         points.sort(key=lambda x: float(x.get("epoch") or 0))
-        points = points[-720:]
+        points = _append_latest_mode_point(points)
+        cutoff = now - 86400
+        points = [p for p in points if float(p.get("epoch") or 0) >= cutoff][-360:]
 
     out: dict[str, list[dict[str, Any]]] = {"paper": [], "live": [], "both": []}
     for point in points:
@@ -164,7 +257,7 @@ function renderFilteredPnl(){
  if(card)setPnl(card,p.total_pnl);
  const label=document.getElementById('pnlChartLabel');
  if(label)label.textContent='Portfolio P/L · '+mode.toUpperCase();
- renderPnlChart(p.history||[]);
+ if(typeof refreshPnlChartRange==='function')refreshPnlChartRange();
 }
 
 document.addEventListener('click',function(ev){

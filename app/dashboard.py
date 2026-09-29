@@ -38,6 +38,10 @@ class AutoTradingState(BaseModel):
     enabled: bool
 
 
+class BotEnabledState(BaseModel):
+    enabled: bool
+
+
 def _auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
     if not DASHBOARD_PASSWORD:
         raise HTTPException(status_code=503, detail="Dashboard password is not configured")
@@ -199,6 +203,7 @@ def _dashboard_snapshot() -> dict:
             "ok": True,
             "version": DASHBOARD_VERSION,
             "version_date": DASHBOARD_VERSION_DATE,
+            "bot_enabled": core.bot_enabled(),
             "live_trading": core.live_trading_enabled(),
             "auto_trading": core.auto_trading_enabled(),
             "block_political_auto": core.BLOCK_POLITICAL_AUTO,
@@ -252,6 +257,26 @@ def dashboard_settings_put(settings: DashboardSettings):
     _apply_settings(data)
     core._save(DASHBOARD_SETTINGS_FILE, data)
     return {"ok": True, "settings": _current_settings()}
+
+
+@app.get("/api/dashboard/bot-enabled", dependencies=[Depends(_auth)])
+def dashboard_bot_enabled_get():
+    return {
+        "enabled": bool(core.bot_enabled()),
+        "live_trading": bool(core.live_trading_enabled()),
+        "auto_trading": bool(core.auto_trading_enabled()),
+    }
+
+
+@app.put("/api/dashboard/bot-enabled", dependencies=[Depends(_auth)])
+def dashboard_bot_enabled_put(state: BotEnabledState):
+    core._save(core.BOT_ENABLED_STATE_FILE, {"enabled": bool(state.enabled)})
+    return {
+        "ok": True,
+        "enabled": bool(core.bot_enabled()),
+        "live_trading": bool(core.live_trading_enabled()),
+        "auto_trading": bool(core.auto_trading_enabled()),
+    }
 
 
 @app.get("/api/dashboard/auto-trading", dependencies=[Depends(_auth)])
@@ -368,8 +393,15 @@ async function loadExecutorEvents(){
 async function load(){
  try{
   const r=await fetch('/api/dashboard',{cache:'no-store'}); if(!r.ok)throw new Error('HTTP '+r.status); const d=await r.json(),s=d.status;
-  document.getElementById('serviceState').textContent='Online'; document.getElementById('versionLabel').textContent='v'+(s.version||'—'); document.getElementById('versionDateLabel').textContent='Version date '+(s.version_date||'—'); document.getElementById('updated').textContent='Updated '+new Date(d.generated_at).toLocaleTimeString()+' · uptime '+Math.floor(s.uptime_seconds/60)+'m';
-  document.getElementById('mode').textContent=(s.live_trading?'LIVE':'DRY RUN')+' · Auto '+(s.auto_trading?'ON':'OFF'); document.getElementById('watches').textContent=s.active_watches; document.getElementById('liveTrades').textContent=s.submitted_live_trades; setPnl(document.getElementById('pnl'),s.estimated_total_pnl); document.getElementById('budget').textContent=money(s.daily_budget_used)+' / '+money(s.max_daily_budget_usdc); document.getElementById('pnlNote').textContent=s.pnl_note;
+  const serviceState=document.getElementById('serviceState'),versionLabel=document.getElementById('versionLabel'),versionDateLabel=document.getElementById('versionDateLabel'),win95Title=document.getElementById('win95Title'),powerBtn=document.getElementById('botPowerBtn');
+  if(serviceState)serviceState.textContent=s.bot_enabled===false?'Offline':'Online';
+  if(versionLabel)versionLabel.textContent='v'+(s.version||'—');
+  if(versionDateLabel)versionDateLabel.textContent='Version date '+(s.version_date||'—');
+  if(win95Title)win95Title.textContent='s01807 '+(s.version||'—');
+  document.title='s01807 '+(s.version||'—');
+  if(powerBtn){powerBtn.dataset.enabled=s.bot_enabled===false?'0':'1';powerBtn.classList.toggle('active',s.bot_enabled!==false);powerBtn.classList.toggle('offline',s.bot_enabled===false);powerBtn.setAttribute('aria-pressed',s.bot_enabled!==false?'true':'false')}
+  document.getElementById('updated').textContent='Updated '+new Date(d.generated_at).toLocaleTimeString()+' · uptime '+Math.floor(s.uptime_seconds/60)+'m';
+  document.getElementById('mode').textContent=(s.bot_enabled===false?'OFFLINE':(s.live_trading?'LIVE':'DRY RUN'))+' · Auto '+(s.auto_trading?'ON':'OFF'); document.getElementById('watches').textContent=s.active_watches; document.getElementById('liveTrades').textContent=s.submitted_live_trades; setPnl(document.getElementById('pnl'),s.estimated_total_pnl); document.getElementById('budget').textContent=money(s.daily_budget_used)+' / '+money(s.max_daily_budget_usdc); document.getElementById('pnlNote').textContent=s.pnl_note;
   document.getElementById('roLive').textContent=s.live_trading?'ENABLED':'DISABLED'; document.getElementById('roAuto').textContent=s.auto_trading?'ENABLED':'DISABLED'; document.getElementById('roPolitics').textContent=s.block_political_auto?'BLOCKED':'UNBLOCKED';
   const autoBtn=document.getElementById('autoTradingBtn'),autoNote=document.getElementById('autoTradingNote'); autoBtn.dataset.enabled=s.auto_trading?'1':'0'; autoBtn.textContent=s.auto_trading?'AUTO TRADING ON':'AUTO TRADING OFF'; autoBtn.classList.toggle('active',!!s.auto_trading); autoBtn.disabled=!!(s.live_trading&&!s.auto_trading); autoNote.textContent=s.live_trading?'Live mode is active: this control cannot enable unattended real-money execution.':'Controls paper trading and automatic order preparation.';
   const wr=d.watching.map(x=>`<tr><td><span class="status">${esc(x.status)}</span></td><td class="market">${link(x.market_url,x.outcome||x.market_url)}</td><td>${esc(x.market_type||'—')}</td><td>${price(x.best_ask||x.current_buy_price)}</td><td>${price(x.max_price)}</td><td>${money(x.budget_usdc)}</td><td>${when(x.expires_at)}</td><td class="muted">${esc(x.last_error||'')}</td></tr>`);
@@ -381,6 +413,28 @@ async function load(){
   await loadExecutorEvents();
  }catch(e){document.getElementById('serviceState').textContent='Dashboard error';document.getElementById('updated').textContent=String(e)}
 }
+async function setDashboardBotEnabled(enabled){
+ const btn=document.getElementById('botPowerBtn');
+ if(btn)btn.disabled=true;
+ try{
+  const r=await fetch('/api/dashboard/bot-enabled',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!!enabled})});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Bot power change failed');
+  await load();
+ }catch(e){
+  alert('Bot power change failed: '+String(e.message||e));
+ }finally{
+  if(btn)btn.disabled=false;
+ }
+}
+document.addEventListener('click',function(ev){
+ const btn=ev.target.closest('#botPowerBtn');
+ if(!btn)return;
+ const currentlyEnabled=btn.dataset.enabled!=='0';
+ if(currentlyEnabled&&!confirm('Turn S01-807 OFF? New automated/live buys will stop until you turn it back on.'))return;
+ setDashboardBotEnabled(!currentlyEnabled);
+});
+
 async function waitForSellRequest(requestId,timeoutMs=90000){
  const started=Date.now();
  while(Date.now()-started<timeoutMs){

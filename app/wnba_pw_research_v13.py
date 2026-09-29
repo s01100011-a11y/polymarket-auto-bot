@@ -94,7 +94,7 @@ def _install_s01807_win95_theme() -> None:
     <div class="win95-titlebar">
       <div class="win95-title-left">
         <span class="win95-logo" aria-hidden="true"><i class="win95-logo-red"></i><i class="win95-logo-green"></i><i class="win95-logo-blue"></i><i class="win95-logo-yellow"></i></span>
-        <span class="win95-title-text">s01807.exe</span>
+        <span class="win95-title-text" id="win95Title">s01807</span>
       </div>
       <div class="win95-window-controls" aria-hidden="true">
         <span class="win95-window-control win95-minimize">_</span>
@@ -105,12 +105,11 @@ def _install_s01807_win95_theme() -> None:
     <div class="win95-info-strip">
       <div class="win95-info-group">
         <span class="win95-info-cell">S01-807 · POLYMARKET SPORTS DESK</span>
-        <span class="versionchip" id="versionLabel">v—</span>
         <span class="versionchip" id="versionDateLabel">Version date —</span>
       </div>
       <div class="win95-info-group win95-info-right">
         <span class="sub" id="updated">Loading status…</span>
-        <span class="badge"><span class="dot"></span><span id="serviceState">Connecting</span></span>
+        <button type="button" class="badge" id="botPowerBtn" data-enabled="1" aria-pressed="true" title="Dashboard master bot switch"><span class="dot"></span><span id="serviceState">Connecting</span></button>
       </div>
     </div>
   </div>'''
@@ -291,7 +290,9 @@ a{color:#0000ee;text-decoration:underline}
  font-size:10px;
  box-shadow:1px 1px 0 #000;
 }
-.badge{border-radius:0!important}
+.badge{border-radius:0!important;cursor:pointer}
+.badge.offline .dot{background:#ff1616!important;border-color:#600!important}
+.badge.offline #serviceState{color:#900!important}
 .dot{
  width:8px;height:8px;
  background:#00ff66;
@@ -300,8 +301,8 @@ a{color:#0000ee;text-decoration:underline}
 }
 .cards{gap:10px;margin:10px 0}.performance-strip{gap:4px;margin:4px 0}
 .card,.performance-card,.wallet-strip,.panel,.nfl-capper-panel,.more-stats-panel{
- background:#c0c0c0!important;
- color:#000!important;
+ background:#000!important;
+ color:#fff!important;
  border-top:2px solid #fff!important;
  border-left:2px solid #fff!important;
  border-right:2px solid #404040!important;
@@ -310,13 +311,13 @@ a{color:#0000ee;text-decoration:underline}
 }
 .card,.performance-card{padding:9px!important}
 .label{
- color:#303030!important;
+ color:#fff!important;
  font-size:10px!important;
  letter-spacing:.04em!important;
  font-weight:700!important;
 }
 .value,.performance-value{
- color:#000;
+ color:#fff;
  font-family:"Courier New",monospace;
  font-weight:900;
 }
@@ -325,7 +326,7 @@ a{color:#0000ee;text-decoration:underline}
 .yellow{color:#8a5b00!important}
 .wallet-live-layout{gap:10px;margin:10px 0!important}
 .wallet-strip{padding:2px!important;overflow:hidden}
-.wallet-main{padding:8px 9px 10px}
+.wallet-main{padding:8px 9px 10px;background:#000!important;color:#fff!important}
 .wallet-main>.label{display:none!important}
 .win95-section-titlebar{
  min-height:24px;
@@ -377,18 +378,18 @@ a{color:#0000ee;text-decoration:underline}
  border-bottom:2px solid #404040;
  box-shadow:1px 1px 0 #000;
 }
-.win95-stats-body{padding:6px 8px 8px}
+.win95-stats-body{padding:6px 8px 8px;background:#000!important;color:#fff!important}
 .win95-stats-body #statsModeFilter{margin:0 0 6px}
 .win95-stats-body #statsModeFilter .mode-filter-label{display:none}
 .win95-stats-body .performance-strip{margin:0 0 6px}
 .win95-stats-body .more-stats-shell{margin:0}
 
-.wallet-address{font-family:"Courier New",monospace;color:#000!important}
-.wallet-state{color:#404040!important}
+.wallet-address{font-family:"Courier New",monospace;color:#fff!important}
+.wallet-state{color:#fff!important}
 .wallet-metrics-stack{border-top:1px solid #808080!important;margin-top:8px!important}
 .wallet-metric{border-color:#808080!important;padding:9px 0!important}
 .wallet-balance{color:#008000!important;font-family:"Courier New",monospace!important}
-.wallet-secondary{color:#000!important;font-family:"Courier New",monospace!important}
+.wallet-secondary{color:#fff!important;font-family:"Courier New",monospace!important}
 .pnl-chart-card{
  background:#000!important;
  color:#00ff66!important;
@@ -429,7 +430,7 @@ button,.tab,.btn,.toggle-btn,.paper-close-btn,.live-sell-btn,.sell-btn,.more-sta
  text-transform:none!important;
  cursor:pointer;
 }
-button:active,.tab.active,.toggle-btn.active,.more-stats-tabs button.active{
+button:active,button.active,button[aria-pressed="true"],.tab.active,.toggle-btn.active,.more-stats-tabs button.active{
  border-top:2px solid #404040!important;
  border-left:2px solid #404040!important;
  border-right:2px solid #fff!important;
@@ -455,7 +456,7 @@ button:disabled{color:#808080!important;text-shadow:1px 1px #fff!important}
  line-height:1.2!important;
  text-shadow:1px 1px #000;
 }
-.note,.muted,.performance-sub,.toggle-note,.foot{color:#404040!important}
+.note,.muted,.performance-sub,.toggle-note,.foot,.setting label,.exec-event .evtime,.mode-filter-label,.slack-mode-note,.slack-mode-controls label,.slack-mode-state{color:#fff!important}
 .table-wrap{
  background:#000!important;
  border-top:2px solid #404040!important;
@@ -490,7 +491,8 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
  padding:2px 5px!important;
 }
 .setting,.ro,.exec-status-box{
- background:#c0c0c0!important;
+ background:#000!important;
+ color:#fff!important;
  border-top:2px solid #808080!important;
  border-left:2px solid #808080!important;
  border-right:2px solid #fff!important;
@@ -505,8 +507,8 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
  border-bottom:2px solid #fff!important;
 }
 .exec-event{
- background:#fff!important;
- color:#000!important;
+ background:#000!important;
+ color:#fff!important;
  border:1px solid #808080!important;
 }
 .nfl-capper-panel{
@@ -549,7 +551,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
  padding:4px 6px!important;
 }
 .more-stats-head .label,.more-stats-head .performance-sub{color:#fff!important}
-.empty{color:#808080!important;background:#000!important}
+.empty{color:#fff!important;background:#000!important}
 .win95-stats-window .more-stats-panel{margin-top:8px!important}
 
 /* Dope Wars-inspired retro data typography + palette */
@@ -560,7 +562,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
  --retro-blue:#315cff;
  --retro-cyan:#00e5ff;
  --retro-white:#f4f4f4;
- --retro-gray:#c8c8c8;
+ --retro-gray:#ffffff;
 }
 .value,.performance-value,.wallet-address,.wallet-balance,.wallet-secondary,
 .pnl-chart-value,.pnl-chart-range,.nfl-capper-kpis,.cfb-capper-performance,

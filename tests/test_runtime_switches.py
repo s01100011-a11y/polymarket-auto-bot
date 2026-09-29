@@ -37,6 +37,24 @@ class RuntimeSwitchTests(unittest.TestCase):
             os.environ["LIVE_TRADING"] = "true"
             self.assertTrue(main.live_trading_enabled())
 
+
+
+    def test_dashboard_master_switch_gates_live_and_auto(self):
+        with patch.object(main, "bot_enabled", return_value=False), patch.dict(
+            os.environ,
+            {"LIVE_TRADING": "true", "AUTO_TRADING": "true"},
+        ):
+            self.assertFalse(main.live_trading_enabled())
+            self.assertFalse(main.auto_trading_enabled())
+
+    def test_dashboard_master_switch_allows_railway_modes_when_enabled(self):
+        with patch.object(main, "bot_enabled", return_value=True), patch.dict(
+            os.environ,
+            {"LIVE_TRADING": "true", "AUTO_TRADING": "true"},
+        ):
+            self.assertTrue(main.live_trading_enabled())
+            self.assertTrue(main.auto_trading_enabled())
+
     def test_watch_health_reports_recent_cycle_as_healthy(self):
         now = datetime(2026, 9, 26, 8, 0, tzinfo=timezone.utc)
         recent = now - timedelta(seconds=main.AUTO_POLL_SECONDS)
