@@ -418,6 +418,12 @@ def _paper_trade_from_alert(parsed: dict[str, Any], slack_event_id: str, slack_e
     record_id = f"slack-{slack_event_id[:18]}"
     market_url = f"https://polymarket.com/event/{getattr(event, 'slug', '')}" if getattr(event, "slug", None) else None
 
+    monitor_sport = str(slack_event.get("monitor_sport") or "").upper()
+    monitor_source = str(slack_event.get("monitor_source") or "").strip()
+    if monitor_sport not in {"WNBA", "NBA"}:
+        monitor_sport = ""
+        monitor_source = ""
+
     record = {
         "id": record_id,
         "status": "PAPER_OPEN",
@@ -428,6 +434,11 @@ def _paper_trade_from_alert(parsed: dict[str, Any], slack_event_id: str, slack_e
         "source": "slack",
         "paper": True,
         "slack_event_id": slack_event_id,
+        "strategy_source": f"{monitor_source} - {monitor_sport}" if monitor_sport else None,
+        "strategy_sport": monitor_sport or None,
+        "strategy_pick_id": slack_event_id if monitor_sport else None,
+        "strategy_posted_at": ((parsed.get("pw") or {}).get("event_ts") if monitor_sport else None),
+        "strategy_selection": parsed.get("selection") if monitor_sport else None,
         "slack_channel": slack_event.get("channel"),
         "slack_ts": slack_event.get("ts"),
         "intent": {
