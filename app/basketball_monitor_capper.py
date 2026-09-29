@@ -6,6 +6,8 @@ from typing import Any
 
 from fastapi import Depends, HTTPException
 
+from app import capper_control
+
 _INSTALLED = False
 
 SPORTS = {
@@ -222,6 +224,7 @@ def install(*, app: Any, dashboard: Any, core: Any, ingest: Any, nfl: Any) -> No
                 "portfolio_value_usdc": unit_config["portfolio_value_usdc"],
                 "unit_error": unit_config["error"],
                 "sizing_mode": "TO_WIN",
+                "enabled": capper_control.is_enabled(core, label),
                 "signals": signals,
                 "positions": positions,
                 "feed": {
@@ -236,8 +239,15 @@ def install(*, app: Any, dashboard: Any, core: Any, ingest: Any, nfl: Any) -> No
                 },
             }
 
+        online_count = sum(1 for row in cappers.values() if row.get("enabled", True))
+        auto_trading = bool(core.auto_trading_enabled())
+        live_trading = bool(core.live_trading_enabled())
         return {
             "cappers": cappers,
+            "online_count": online_count,
+            "auto_trading": auto_trading,
+            "live_trading": live_trading,
+            "auto_live": bool(online_count and auto_trading and live_trading),
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -247,6 +257,19 @@ def install(*, app: Any, dashboard: Any, core: Any, ingest: Any, nfl: Any) -> No
         if spec is None:
             raise HTTPException(status_code=404, detail="Unknown basketball monitor sport")
         return str(spec["label"])
+
+    @app.put("/api/basketball-monitor/enabled/{sport_key}", dependencies=[Depends(dashboard._auth)])
+    def basketball_monitor_enabled(sport_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        label = _monitor_label(sport_key)
+        if not isinstance(payload.get("enabled"), bool):
+            raise HTTPException(status_code=400, detail="enabled must be true or false")
+        enabled_now = capper_control.set_enabled(core, label, payload["enabled"])
+        return {
+            "ok": True,
+            "capper": label,
+            "enabled": enabled_now,
+            "note": "Controls new automatic monitor trades only; existing queued/open positions are unchanged.",
+        }
 
     @app.put("/api/basketball-monitor/unit-size/{sport_key}", dependencies=[Depends(dashboard._auth)])
     def basketball_monitor_unit_size(sport_key: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -287,17 +310,15 @@ def install(*, app: Any, dashboard: Any, core: Any, ingest: Any, nfl: Any) -> No
     panel = r"""
   <div class="nfl-capper-panel" id="basketballMonitorStats">
     <div class="nfl-capper-head">
-      <div>
-        <div class="label">Basketball monitor signals</div>
-        <div class="nfl-capper-state" id="basketballMonitorState">Loading WNBA / NBA monitor feeds…</div>
-      </div>
-      <div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end">
+      <div class="capper-panel-title">Basketball monitor auto-trading</div>
+      <div class="nfl-capper-state" id="basketballMonitorState">Loading WNBA / NBA monitor feeds…</div>
+      <div class="capper-panel-actions">
         <button type="button" data-capper-last24h-toggle onclick="capperToggleLast24h()">Last 24h only: OFF</button>
       </div>
     </div>
     <div class="nfl-capper-grid">
-      <div class="nfl-capper-card"><b>WNBA Monitor - WNBA</b><div class="nfl-capper-kpis" id="wnbaMonitorCard">—</div></div>
-      <div class="nfl-capper-card"><b>NBA Monitor - NBA</b><div class="nfl-capper-kpis" id="nbaMonitorCard">—</div></div>
+      <div class="nfl-capper-card"><div class="capper-card-head"><b>WNBA Monitor - WNBA</b><button type="button" class="badge capper-power-btn" id="monitorCapperPower-wnba" data-enabled="1" aria-pressed="true" onclick="monitorToggleCapper('wnba',this)" title="Toggle WNBA Monitor automatic trading"><span class="dot"></span><span class="capper-power-text">Online</span></button></div><div class="nfl-capper-kpis" id="wnbaMonitorCard">—</div></div>
+      <div class="nfl-capper-card"><div class="capper-card-head"><b>NBA Monitor - NBA</b><button type="button" class="badge capper-power-btn" id="monitorCapperPower-nba" data-enabled="1" aria-pressed="true" onclick="monitorToggleCapper('nba',this)" title="Toggle NBA Monitor automatic trading"><span class="dot"></span><span class="capper-power-text">Online</span></button></div><div class="nfl-capper-kpis" id="nbaMonitorCard">—</div></div>
     </div>
   </div>
 """
@@ -460,10 +481,37 @@ function monitorCard(x,sportKey){
   monitorPositions(x)+monitorSignals(x);
 }
 
+function monitorSyncPowerButton(sportKey,enabled){
+ const btn=document.getElementById('monitorCapperPower-'+sportKey);
+ if(!btn)return;
+ const on=enabled!==false;
+ btn.dataset.enabled=on?'1':'0';
+ btn.classList.toggle('active',on);
+ btn.classList.toggle('offline',!on);
+ btn.setAttribute('aria-pressed',on?'true':'false');
+ const text=btn.querySelector('.capper-power-text');
+ if(text)text.textContent=on?'Online':'Offline';
+}
+async function monitorToggleCapper(sportKey,btn){
+ const online=btn.dataset.enabled!=='0';
+ if(online&&!confirm('Turn this basketball monitor OFFLINE? New automatic trades from it will pause.'))return;
+ btn.disabled=true;
+ try{
+  const r=await fetch('/api/basketball-monitor/enabled/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!online})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status update failed');
+  await loadBasketballMonitors();
+ }catch(e){alert(String(e.message||e))}
+ finally{btn.disabled=false}
+}
 function renderBasketballMonitors(){
  const w=document.getElementById('wnbaMonitorCard'),n=document.getElementById('nbaMonitorCard');
  if(w)w.innerHTML=monitorCard(basketballMonitorData['WNBA Monitor - WNBA'],'wnba');
  if(n)n.innerHTML=monitorCard(basketballMonitorData['NBA Monitor - NBA'],'nba');
+ monitorSyncPowerButton('wnba',(basketballMonitorData['WNBA Monitor - WNBA']||{}).enabled);
+ monitorSyncPowerButton('nba',(basketballMonitorData['NBA Monitor - NBA']||{}).enabled);
  capperSyncLast24hButtons();
 }
 window.addEventListener('capper-history-filter-change',renderBasketballMonitors);
@@ -474,7 +522,7 @@ async function loadBasketballMonitors(){
   if(!r.ok)throw new Error(d.detail||'Monitor status failed');
   basketballMonitorData=d.cappers||{};
   const state=document.getElementById('basketballMonitorState');
-  if(state)state.textContent='WNBA Monitor + NBA Monitor · PW export feeds · shared capper tracking';
+  if(state)state.textContent=Number(d.online_count||0)===0?'ALL CAPPERS OFFLINE':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
   renderBasketballMonitors();
  }catch(e){
   const state=document.getElementById('basketballMonitorState');

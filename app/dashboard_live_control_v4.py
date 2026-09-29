@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app import capper_control
 from app import dashboard_metrics_v3 as base
 
 app = base.app
@@ -218,6 +219,8 @@ def _slack_trade_handler(
         monitor_sport = ""
         monitor_source = ""
     monitor_label = _monitor_label(monitor_sport) if monitor_sport else None
+    if monitor_label and not capper_control.is_enabled(core, monitor_label):
+        raise ValueError(f"{monitor_label} is OFFLINE")
 
     ingest.SLACK_PAPER_ONLY = not mode["auto_prepare_enabled"]
     if not mode["auto_prepare_enabled"]:

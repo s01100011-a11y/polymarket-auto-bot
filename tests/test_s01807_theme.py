@@ -4,7 +4,7 @@ from pathlib import Path
 def test_dashboard_is_renamed_and_win95_theme_is_final_layer():
     source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
 
-    assert "S01-807 · POLYMARKET SPORTS DESK" in source
+    assert "S01-807 · POLYMARKET SPORTS DESK" not in source
     assert "<title>s01807.exe</title>" in source
     assert "s01807-win95-theme" in source
     assert 'background:#008080' in source
@@ -132,3 +132,28 @@ def test_pw_and_legacy_panels_follow_main_win95_theme():
     assert "color:#fff!important" in source
     assert "var(--retro-green)" in source
     assert "var(--retro-red)" in source
+
+
+def test_capper_title_bars_and_power_buttons_are_left_aligned():
+    theme = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+    nfl = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
+    cfb = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
+    basketball = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+
+    assert "align-items:flex-start!important" in theme
+    assert "justify-content:flex-start!important" in theme
+    assert ".capper-panel-title" in theme
+    assert ".capper-power-btn.offline .dot" in theme
+
+    assert '<div class="capper-panel-title">NFL capper auto-trading</div>' in nfl
+    assert '<div class="nfl-capper-state" id="nflCapperState">' in nfl
+    assert 'id="nflCapperPower-slam"' in nfl
+    assert 'id="nflCapperPower-syndicate"' in nfl
+
+    assert '<div class="capper-panel-title">CFB capper auto-trading</div>' in cfb
+    assert 'id="cfbCapperPower-slam"' in cfb
+    assert 'id="cfbCapperPower-syndicate"' in cfb
+
+    assert '<div class="capper-panel-title">Basketball monitor auto-trading</div>' in basketball
+    assert 'id="monitorCapperPower-wnba"' in basketball
+    assert 'id="monitorCapperPower-nba"' in basketball

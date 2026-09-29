@@ -14,6 +14,7 @@ import httpx
 from fastapi import Depends, HTTPException
 from polymarket import PublicClient
 
+from app import capper_control
 from app import dashboard_live_control_v4 as live_control
 
 TARGET_SOURCES = {
@@ -2416,6 +2417,15 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 )
                 continue
 
+            if not capper_control.is_enabled(core, source_label):
+                base_record["status"] = "PAUSED_CAPPER"
+                base_record["reason"] = f"{source_label} is offline; automatic trading is paused"
+                base_record["updated_at"] = _now_iso()
+                base_record.pop("last_error", None)
+                signals[fp] = base_record
+                changed = True
+                continue
+
             if unit_config.get("error"):
                 base_record["status"] = "RETRYING"
                 base_record["last_error"] = str(unit_config["error"])
@@ -2672,6 +2682,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             stats[label]["portfolio_value_usdc"] = unit_config["portfolio_value_usdc"]
             stats[label]["unit_error"] = unit_config["error"]
             stats[label]["sizing_mode"] = "TO_WIN"
+            stats[label]["enabled"] = capper_control.is_enabled(core, label)
             stats[label]["positions"] = _position_items(
                 executions,
                 label,
@@ -2750,6 +2761,24 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     def nfl_capper_stats():
         return _stats_payload()
 
+    @app.put("/api/nfl-cappers/enabled/{capper_key}", dependencies=[Depends(dashboard._auth)])
+    def nfl_capper_enabled(capper_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        label = {
+            "slam": "Slam - NFL",
+            "syndicate": "Syndicate - NFL",
+        }.get(str(capper_key).strip().lower())
+        if label is None:
+            raise HTTPException(status_code=404, detail="Unknown NFL capper")
+        if not isinstance(payload.get("enabled"), bool):
+            raise HTTPException(status_code=400, detail="enabled must be true or false")
+        enabled_now = capper_control.set_enabled(core, label, payload["enabled"])
+        return {
+            "ok": True,
+            "capper": label,
+            "enabled": enabled_now,
+            "note": "Controls new automatic trades only; existing queued/open positions are unchanged.",
+        }
+
     @app.put("/api/nfl-cappers/unit-size/{capper_key}", dependencies=[Depends(dashboard._auth)])
     def nfl_capper_unit_size(capper_key: str, payload: dict[str, Any]) -> dict[str, Any]:
         label = {
@@ -2805,16 +2834,21 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     if 'id="nflCapperStats"' not in html:
         panel = r"""
   <div class="nfl-capper-panel" id="nflCapperStats">
-    <div class="nfl-capper-head"><div><div class="label">NFL capper auto-trading</div><div class="nfl-capper-state" id="nflCapperState">Loading…</div></div><div><div class="nfl-capper-meta" id="nflCapperMeta"></div><div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px"><button type="button" id="nflFinishedToggle" onclick="nflToggleFinished()">Hide finished</button><button type="button" data-capper-last24h-toggle onclick="capperToggleLast24h()">Last 24h only: OFF</button></div></div></div>
+    <div class="nfl-capper-head">
+      <div class="capper-panel-title">NFL capper auto-trading</div>
+      <div class="nfl-capper-state" id="nflCapperState">Loading…</div>
+      <div class="nfl-capper-meta" id="nflCapperMeta"></div>
+      <div class="capper-panel-actions"><button type="button" id="nflFinishedToggle" onclick="nflToggleFinished()">Hide finished</button><button type="button" data-capper-last24h-toggle onclick="capperToggleLast24h()">Last 24h only: OFF</button></div>
+    </div>
     <div class="nfl-capper-grid">
-      <div class="nfl-capper-card"><b>Slam - NFL</b><div class="nfl-capper-kpis" id="nflCapperSlam">—</div></div>
-      <div class="nfl-capper-card"><b>Syndicate - NFL</b><div class="nfl-capper-kpis" id="nflCapperSyndicate">—</div></div>
+      <div class="nfl-capper-card"><div class="capper-card-head"><b>Slam - NFL</b><button type="button" class="badge capper-power-btn" id="nflCapperPower-slam" data-enabled="1" aria-pressed="true" onclick="nflToggleCapper('slam',this)" title="Toggle Slam - NFL automatic trading"><span class="dot"></span><span class="capper-power-text">Online</span></button></div><div class="nfl-capper-kpis" id="nflCapperSlam">—</div></div>
+      <div class="nfl-capper-card"><div class="capper-card-head"><b>Syndicate - NFL</b><button type="button" class="badge capper-power-btn" id="nflCapperPower-syndicate" data-enabled="1" aria-pressed="true" onclick="nflToggleCapper('syndicate',this)" title="Toggle Syndicate - NFL automatic trading"><span class="dot"></span><span class="capper-power-text">Online</span></button></div><div class="nfl-capper-kpis" id="nflCapperSyndicate">—</div></div>
     </div>
   </div>
 """
         html = html.replace('  <div class="tabs">', panel + '  <div class="tabs">', 1)
         css = r"""
-.nfl-capper-panel{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px;margin:14px 0}.nfl-capper-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.nfl-capper-state{font-size:15px;font-weight:850;margin-top:5px}.nfl-capper-meta{font-size:12px;color:var(--muted);text-align:right;line-height:1.45}.nfl-capper-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.nfl-capper-card{border:1px solid var(--border);border-radius:10px;background:#0d1522;padding:13px}.nfl-capper-card>b{font-size:18px;line-height:1.3}.nfl-capper-kpis{font-size:14px;color:var(--muted);line-height:1.75;margin-top:7px}.nfl-capper-kpis .capper-pnl{font-size:17px;font-weight:900}.nfl-capper-kpis .capper-pnl.positive,.nfl-result-line.positive{color:#86efac}.nfl-capper-kpis .capper-pnl.negative,.nfl-result-line.negative{color:#fca5a5}.nfl-capper-kpis .capper-pnl.flat,.nfl-result-line.flat{color:var(--muted)}.nfl-position-row{margin-top:8px;padding:9px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.08)}.nfl-position-row.win{background:rgba(34,197,94,.11);border-color:rgba(34,197,94,.40);border-left:4px solid #22c55e}.nfl-position-row.loss{background:rgba(239,68,68,.10);border-color:rgba(239,68,68,.40);border-left:4px solid #ef4444}.nfl-position-row.push{background:rgba(245,158,11,.10);border-color:rgba(245,158,11,.38);border-left:4px solid #f59e0b}.nfl-position-row.open{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.46);border-left:4px solid #f59e0b}.nfl-position-title{font-size:15px;font-weight:850}.nfl-position-pnl,.nfl-result-line{font-size:16px;font-weight:900}.nfl-position-pnl.positive{color:#86efac}.nfl-position-pnl.negative{color:#fca5a5}.nfl-result-line{margin-top:6px;line-height:1.35}@media(max-width:650px){.nfl-capper-grid{grid-template-columns:1fr}.nfl-capper-head{flex-direction:column}.nfl-capper-meta{text-align:left}.nfl-capper-card>b{font-size:19px}.nfl-capper-kpis{font-size:15px}.nfl-capper-kpis .capper-pnl{font-size:18px}.nfl-position-title{font-size:16px}.nfl-position-pnl,.nfl-result-line{font-size:17px}}
+.nfl-capper-panel{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px;margin:14px 0}.nfl-capper-head{display:flex;flex-direction:column;justify-content:flex-start;gap:4px;align-items:flex-start;text-align:left}.capper-panel-title{font-size:15px;font-weight:900;line-height:1.25;text-transform:uppercase}.nfl-capper-state{font-size:15px;font-weight:850;margin-top:2px}.nfl-capper-meta{font-size:12px;color:var(--muted);text-align:left;line-height:1.45}.capper-panel-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-start;margin-top:4px}.nfl-capper-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.nfl-capper-card{border:1px solid var(--border);border-radius:10px;background:#0d1522;padding:13px}.capper-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px;text-align:left}.capper-card-head>b{font-size:18px;line-height:1.3}.capper-power-btn{flex:0 0 auto;white-space:nowrap}.nfl-capper-kpis{font-size:14px;color:var(--muted);line-height:1.75;margin-top:7px}.nfl-capper-kpis .capper-pnl{font-size:17px;font-weight:900}.nfl-capper-kpis .capper-pnl.positive,.nfl-result-line.positive{color:#86efac}.nfl-capper-kpis .capper-pnl.negative,.nfl-result-line.negative{color:#fca5a5}.nfl-capper-kpis .capper-pnl.flat,.nfl-result-line.flat{color:var(--muted)}.nfl-position-row{margin-top:8px;padding:9px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.08)}.nfl-position-row.win{background:rgba(34,197,94,.11);border-color:rgba(34,197,94,.40);border-left:4px solid #22c55e}.nfl-position-row.loss{background:rgba(239,68,68,.10);border-color:rgba(239,68,68,.40);border-left:4px solid #ef4444}.nfl-position-row.push{background:rgba(245,158,11,.10);border-color:rgba(245,158,11,.38);border-left:4px solid #f59e0b}.nfl-position-row.open{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.46);border-left:4px solid #f59e0b}.nfl-position-title{font-size:15px;font-weight:850}.nfl-position-pnl,.nfl-result-line{font-size:16px;font-weight:900}.nfl-position-pnl.positive{color:#86efac}.nfl-position-pnl.negative{color:#fca5a5}.nfl-result-line{margin-top:6px;line-height:1.35}@media(max-width:650px){.nfl-capper-grid{grid-template-columns:1fr}.nfl-capper-meta{text-align:left}.capper-card-head>b{font-size:19px}.nfl-capper-kpis{font-size:15px}.nfl-capper-kpis .capper-pnl{font-size:18px}.nfl-position-title{font-size:16px}.nfl-position-pnl,.nfl-result-line{font-size:17px}}
 """
         html = html.replace("</style>", css + "</style>", 1)
         js = r"""
@@ -2853,10 +2887,37 @@ function nflUpdateFinishedToggle(){
  const btn=document.getElementById('nflFinishedToggle');
  if(btn){btn.textContent=nflHideFinished?'Show finished':'Hide finished';btn.classList.toggle('active',nflHideFinished);btn.setAttribute('aria-pressed',nflHideFinished?'true':'false')}
 }
+function nflSyncPowerButton(sourceKey,enabled){
+ const btn=document.getElementById('nflCapperPower-'+sourceKey);
+ if(!btn)return;
+ const on=enabled!==false;
+ btn.dataset.enabled=on?'1':'0';
+ btn.classList.toggle('active',on);
+ btn.classList.toggle('offline',!on);
+ btn.setAttribute('aria-pressed',on?'true':'false');
+ const text=btn.querySelector('.capper-power-text');
+ if(text)text.textContent=on?'Online':'Offline';
+}
+async function nflToggleCapper(sourceKey,btn){
+ const online=btn.dataset.enabled!=='0';
+ if(online&&!confirm('Turn this NFL capper OFFLINE? New automatic trades from it will pause.'))return;
+ btn.disabled=true;
+ try{
+  const r=await fetch('/api/nfl-cappers/enabled/'+encodeURIComponent(sourceKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!online})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Capper status update failed');
+  await loadNflCapperStats();
+ }catch(e){alert(String(e.message||e))}
+ finally{btn.disabled=false}
+}
 function nflRenderCappers(){
  const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
  if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
  if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL'],'syndicate');
+ nflSyncPowerButton('slam',(nflLastCappers['Slam - NFL']||{}).enabled);
+ nflSyncPowerButton('syndicate',(nflLastCappers['Syndicate - NFL']||{}).enabled);
  capperSyncLast24hButtons();
 }
 window.addEventListener('capper-history-filter-change',nflRenderCappers);

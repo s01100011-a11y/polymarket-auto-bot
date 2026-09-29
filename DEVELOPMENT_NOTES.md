@@ -1,3 +1,15 @@
+## 2026-09-29 — Per-capper online/offline execution gates
+
+The dashboard now has a second level of operational control below the existing master bot switch. Each Slam/Syndicate NFL and CFB card and each WNBA/NBA monitor card persists its own enabled state in `data/capper_enabled_state.json`. The state defaults online so existing deployments do not silently change behavior after upgrade.
+
+NFL and CFB pollers test the source-specific state before market matching/order preparation. Offline calls are recorded as `PAUSED_CAPPER` instead of being discarded; the state is non-terminal so re-enabling the capper allows the signal to flow through the normal age/game-state guards rather than bypassing them. Existing queued/open trades are intentionally unaffected.
+
+The NBA/WNBA path is gated in `dashboard_live_control_v4._slack_trade_handler` before either paper or live monitor order preparation. This ensures the new monitor Online/Offline buttons affect execution rather than only the status display.
+
+UI changes use the existing Win95/retro dashboard language: each sport title bar is a vertical, left-aligned stack with title first, AUTO state directly below, then metadata/actions. Each capper card gets a green/red Online/Offline button. The obsolete top-strip `S01-807 · POLYMARKET SPORTS DESK` label was removed.
+
+Files changed: `app/capper_control.py`, `app/nfl_capper_ingest.py`, `app/cfb_capper_preview.py`, `app/basketball_monitor_capper.py`, `app/dashboard_live_control_v4.py`, `app/wnba_pw_research_v13.py`, tests, `CHANGES.md`, and `DEVELOPMENT_NOTES.md`.
+
 ## 2026-09-28 — Termux online-but-not-polling startup fix
 
 - Production showed fresh authenticated `/api/executor/heartbeat` traffic from the phone while `/api/executor/next` had stopped completely, leaving the recovered Syndicate Bears +4 order queued but unclaimed.

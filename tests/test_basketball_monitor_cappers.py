@@ -58,3 +58,15 @@ def test_basketball_monitor_has_independent_to_win_unit_controls():
     assert '"strategy_units": "1" if monitor_sport else None' in live
     assert '"strategy_unit_usdc": str(unit_usdc) if unit_usdc is not None else None' in live
     assert '"sizing_mode": "TO_WIN" if monitor_sport else "STAKE"' in live
+
+
+def test_basketball_monitors_have_persistent_online_controls_and_execution_gate():
+    source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+    live = Path("app/dashboard_live_control_v4.py").read_text(encoding="utf-8")
+
+    assert '"/api/basketball-monitor/enabled/{sport_key}"' in source
+    assert "monitorToggleCapper" in source
+    assert 'id="monitorCapperPower-wnba"' in source
+    assert 'id="monitorCapperPower-nba"' in source
+    assert "capper_control.is_enabled(core, monitor_label)" in live
+    assert 'raise ValueError(f"{monitor_label} is OFFLINE")' in live
