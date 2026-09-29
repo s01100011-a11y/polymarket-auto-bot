@@ -2280,3 +2280,14 @@ class CfbDashboardHistoryFilterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_cfb_capper_dashboard_has_persistent_online_controls():
+    source = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
+
+    assert '"/api/cfb-cappers/enabled/{capper_key}"' in source
+    assert "capper_control.is_enabled(core, source_label)" in source
+    assert '"PAUSED_CAPPER"' in source
+    assert "cfbToggleCapper" in source
+    assert 'id="cfbCapperPower-slam"' in source
+    assert 'id="cfbCapperPower-syndicate"' in source
