@@ -3013,9 +3013,9 @@ function nflPositionList(x){
    : '';
   return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+statusLabel+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+manual+'</div>';
  };
- let html='<div style="margin-top:9px"><b>Open positions</b>'+(open.length?open.map(renderOpen).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>')+'</div>';
+ let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+(open.length?open.map(renderOpen).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>')+'</div>';
  if(!nflHideFinished&&(settled.length||capperLast24hOnly)){
-  html+='<div style="margin-top:12px"><b>Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</b>'+(settled.length?settled.map(renderSettled).join(''):'<div style="margin-top:7px;opacity:.7">No settled positions in the last 24 hours.</div>')+'</div>';
+  html+='<div style="margin-top:12px"><span class="capper-section-badge">Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</span>'+(settled.length?settled.map(renderSettled).join(''):'<div style="margin-top:7px;opacity:.7">No settled positions in the last 24 hours.</div>')+'</div>';
  }
  return html;
 }
@@ -3121,7 +3121,7 @@ function nflPickList(title,items,kind){
   const sellAction=(item.trade_id&&item.sell_available)?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
   const marketAction=(String(item.event_phase||'').toUpperCase()!=='CLOSED'&&item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+nflEsc(item.market_url)+'">OPEN MARKET</a>':'';
   const visual=nflPhaseVisual(item);
-  const badge=visual.label?'<span style="display:inline-block;margin-left:7px;padding:2px 6px;border-radius:999px;font-size:12px;font-weight:850;letter-spacing:.03em;vertical-align:1px;'+visual.badge+'">'+visual.label+'</span>':'';
+  const badge=visual.label?'<span class="capper-event-badge" style="'+visual.badge+'">'+visual.label+'</span>':'';
   let pnlLine='';
   if(String(item.event_phase||'').toUpperCase()==='CLOSED'){
    if(item.trade_executed){
@@ -3138,7 +3138,7 @@ function nflPickList(title,items,kind){
   const action=sellAction+marketAction;
   return '<div style="margin-top:7px;padding:9px 10px;border-radius:8px;'+visual.row+'"><b style="font-size:15px">'+nflEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+pnlLine+(action?'<br>'+action:'')+'</div>';
  }).join('');
- return '<div style="margin-top:8px"><b>'+nflEsc(title)+'</b>'+rows+'</div>';
+ return '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(title)+'</span>'+rows+'</div>';
 }
 async function nflSetUnitSize(sourceKey,btn){
  const input=document.getElementById('nflUnitSize-'+sourceKey);
@@ -3230,7 +3230,9 @@ function nflCapperLine(x,sourceKey){
  const specs=nflTabSpec(x);
  const tabs='<div class="capper-tabs">'+specs.map(s=>'<button type="button" class="'+(s[0]===active?'active':'')+'" aria-pressed="'+(s[0]===active?'true':'false')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')"><span>'+nflEsc(s[1])+'</span><b>'+s[2]+'</b></button>').join('')+'</div>';
  const spec=specs.find(s=>s[0]===active)||specs[0];
- const body=(spec[3]||[]).length?nflPickList(spec[1]+' signals',spec[3],spec[4]):'<div style="margin-top:8px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div>';
+ const body=(spec[3]||[]).length
+  ? nflPickList(spec[1],spec[3],spec[4])
+  : '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(spec[1])+'</span><div style="margin-top:7px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div></div>';
  const unitValue=Number(x.unit_usdc||10).toFixed(2);
  const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
  const pctValue=Number(x.portfolio_pct||10).toFixed(2);
