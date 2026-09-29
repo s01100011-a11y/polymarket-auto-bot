@@ -2266,9 +2266,6 @@ class CfbLegacyBridgeNormalizationTests(unittest.TestCase):
         self.assertEqual(len(row["event_hints"]), 2)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 class CfbDashboardHistoryFilterTests(unittest.TestCase):
     def test_cfb_uses_shared_last_24h_filter_for_signals_and_settled_positions(self):
         source = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
@@ -2280,3 +2277,6 @@ class CfbDashboardHistoryFilterTests(unittest.TestCase):
         self.assertIn("No settled positions in the last 24 hours.", source)
         self.assertIn("cfbPositionList", source)
 
+
+if __name__ == "__main__":
+    unittest.main()
