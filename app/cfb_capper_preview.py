@@ -2912,12 +2912,25 @@ function cfbCapperLine(x,sourceKey){
  const pnl30=(pnl30Raw>0?'+':'')+'$'+pnl30Raw.toFixed(2);
  const pnl7Class=pnl7Raw===0?'flat':(pnl7Raw>0?'positive':'negative');
  const pnl30Class=pnl30Raw===0?'flat':(pnl30Raw>0?'positive':'negative');
- const performance='<div class="cfb-capper-performance"><div>Bets '+(p.bets||0)+' · Open '+(p.open||0)+' · W-L-P '+(p.wins||0)+'-'+(p.losses||0)+'-'+(p.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(p.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">Realized P/L '+pnl+'</span> · ROI '+roi+'</div><div><span class="capper-pnl '+pnl7Class+'">7D P/L '+pnl7+'</span> · <span class="capper-pnl '+pnl30Class+'">30D P/L '+pnl30+'</span></div><div><span class="capper-pnl '+liveClass+'">Live P/L '+livePnl+'</span> · Open value '+openValue+'</div><div>Missed '+Number(p.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div></div>';
+ const performance='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>Bets</span><b>'+(p.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+(p.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+(p.wins||0)+'-'+(p.losses||0)+'-'+(p.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+winPct+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(p.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+pnlClass+'">'+pnl+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+liveClass+'">'+livePnl+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="capper-pnl '+pnl7Class+'">'+pnl7+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="capper-pnl '+pnl30Class+'">'+pnl30+'</b></div>'
+  +'<div class="capper-metric"><span>Open value</span><b>'+openValue+'</b></div>'
+  +'<div class="capper-metric"><span>Missed P/L</span><b class="capper-pnl '+missedClass+'">'+missedPnl+' <small>('+Number(p.missed_graded||0)+')</small></b></div>'
+  +'</div>';
  const active=cfbActiveTabs[sourceKey]||'signals';
  const specs=cfbTabSpec(x);
- const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>{
+ const tabs='<div class="capper-tabs">'+specs.map(s=>{
   const selected=s[0]===active;
-  return '<button type="button" class="'+(selected?'active':'')+'" aria-pressed="'+(selected?'true':'false')+'" style="padding:5px 8px;min-height:34px;'+(selected?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="cfbSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+cfbEsc(s[1])+' '+s[2]+'</button>';
+  return '<button type="button" class="'+(selected?'active':'')+'" aria-pressed="'+(selected?'true':'false')+'" onclick="cfbSetTab(\''+sourceKey+'\',\''+s[0]+'\')"><span>'+cfbEsc(s[1])+'</span><b>'+s[2]+'</b></button>';
  }).join('')+'</div>';
  const spec=specs.find(s=>s[0]===active)||specs[0];
  const items=spec[3]||[];
@@ -2932,7 +2945,11 @@ function cfbCapperLine(x,sourceKey){
   : ('FIXED · 1u WIN $'+fixedValue);
  const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
  const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
- const unitControl='<div style="margin:6px 0 9px"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:12px">FIXED 1u WIN $</b><input id="cfbUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'" style="width:82px"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="padding:5px 8px;min-height:34px;'+fixedBtnStyle+'" onclick="cfbSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><b style="font-size:12px;margin-left:4px">% PORTFOLIO</b><input id="cfbPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'" style="width:72px"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="padding:5px 8px;min-height:34px;'+autoBtnStyle+'" onclick="cfbSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button></div><div style="font-size:11px;opacity:.78;margin-top:3px">'+modeText+' · percentage mode recalculates before each new/retried order; risk still varies by odds</div></div>';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win</span><div class="capper-sizing-controls"><span>$</span><input id="cfbUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="cfbSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio</span><div class="capper-sizing-controls"><input id="cfbPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"><span>%</span><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="cfbSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk varies by odds · auto recalculates before new/retried orders</span></div>'
+  +'</div>';
  return unitControl+performance+cfbPositionList(x)+tabs+body;
 }
 async function loadCfbCapperStats(){
