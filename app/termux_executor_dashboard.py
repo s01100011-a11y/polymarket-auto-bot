@@ -481,6 +481,8 @@ def request_preview(req: live_trading.LiveTestBuy):
 
 @app.post("/api/executor/request-buy", dependencies=[Depends(dashboard._auth)])
 def request_buy(req: live_trading.LiveTestBuy):
+    if not core.bot_enabled():
+        raise HTTPException(status_code=409, detail="Dashboard master switch is OFF")
     _validate_remote_buy(req)
     trade_id = f"live-test-remote-{uuid.uuid4().hex[:10]}"
     rec = _enqueue("BUY", _buy_payload(req, trade_id=trade_id))
