@@ -95,6 +95,7 @@ def _install_s01807_win95_theme() -> None:
       <div class="win95-title-left">
         <span class="win95-logo" aria-hidden="true"><i class="win95-logo-red"></i><i class="win95-logo-green"></i><i class="win95-logo-blue"></i><i class="win95-logo-yellow"></i></span>
         <span class="win95-title-text" id="win95Title">S01807 v—</span>
+        <span class="win95-title-date" id="versionDateLabel">Version date —</span>
       </div>
       <div class="win95-window-controls" aria-hidden="true">
         <span class="win95-window-control win95-minimize">_</span>
@@ -103,11 +104,11 @@ def _install_s01807_win95_theme() -> None:
       </div>
     </div>
     <div class="win95-info-strip">
-      <div class="win95-info-group">
-        <span class="versionchip" id="versionDateLabel">Version date —</span>
+      <div class="win95-info-group win95-time-group">
+        <span class="win95-time-box" id="updated">Updated —</span>
+        <span class="win95-time-box" id="uptime">Uptime —</span>
       </div>
       <div class="win95-info-group win95-info-right">
-        <span class="sub" id="updated">Loading status…</span>
         <button type="button" class="badge" id="botPowerBtn" data-enabled="1" aria-pressed="true" title="Dashboard master bot switch"><span class="dot"></span><span id="serviceState">Connecting</span></button>
       </div>
     </div>
@@ -187,6 +188,16 @@ a{color:#0000ee;text-decoration:underline}
  font-weight:800;
  letter-spacing:0;
  text-shadow:1px 1px #000;
+}
+.win95-title-date{
+ flex:0 0 auto;
+ color:#fff;
+ font-family:"MS Sans Serif",Tahoma,Arial,sans-serif;
+ font-size:11px;
+ line-height:20px;
+ font-weight:700;
+ text-shadow:1px 1px #000;
+ white-space:nowrap;
 }
 .win95-logo{
  flex:0 0 18px;
@@ -274,6 +285,26 @@ a{color:#0000ee;text-decoration:underline}
  letter-spacing:.02em;
  white-space:nowrap;
 }
+.win95-time-group{gap:6px}
+.win95-time-box{
+ display:inline-flex;
+ align-items:center;
+ min-height:30px;
+ padding:5px 9px;
+ box-sizing:border-box;
+ background:#fff;
+ color:#000;
+ border-top:2px solid #404040;
+ border-left:2px solid #404040;
+ border-right:2px solid #fff;
+ border-bottom:2px solid #fff;
+ font-family:"Lucida Console","Courier New",monospace;
+ font-size:12px;
+ line-height:1.2;
+ font-weight:900;
+ letter-spacing:.01em;
+ white-space:nowrap;
+}
 .eyebrow{display:none!important}
 .title{display:none!important}
 .sub{color:#404040!important;font-size:10px}
@@ -324,6 +355,17 @@ a{color:#0000ee;text-decoration:underline}
 .red,.negative,.performance-value.red{color:#b00000!important}
 .yellow{color:#8a5b00!important}
 .wallet-live-layout{gap:10px;margin:10px 0!important}
+.top.win95-app-chrome>.wallet-live-layout{
+ margin:4px 2px 2px!important;
+ padding:2px;
+ background:#c0c0c0!important;
+ box-sizing:border-box;
+}
+.top.win95-app-chrome>.wallet-live-layout .wallet-strip{
+ border:0!important;
+ box-shadow:none!important;
+ padding:6px!important;
+}
 .wallet-strip{padding:2px!important;overflow:hidden}
 .wallet-main{padding:8px 9px 10px;background:#000!important;color:#fff!important}
 .wallet-main>.label{display:none!important}
@@ -1025,8 +1067,11 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 .capper-section-badge{
  display:inline-flex!important;
  align-items:center!important;
- min-height:24px!important;
- padding:4px 8px!important;
+ justify-content:center!important;
+ width:calc((100% - 20px)/5)!important;
+ min-width:100px!important;
+ min-height:34px!important;
+ padding:5px 9px!important;
  background:#c0c0c0!important;
  color:#000!important;
  border-top:2px solid #fff!important;
@@ -1034,9 +1079,9 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
  border-right:2px solid #404040!important;
  border-bottom:2px solid #404040!important;
  box-shadow:1px 1px 0 #000!important;
- font:700 11px/1.1 "MS Sans Serif",Tahoma,Arial,sans-serif!important;
- text-transform:uppercase!important;
- letter-spacing:.03em!important;
+ font:700 13px/1.1 "MS Sans Serif",Tahoma,Arial,sans-serif!important;
+ text-transform:none!important;
+ letter-spacing:0!important;
  box-sizing:border-box!important;
 }
 .capper-event-badge{
@@ -1067,6 +1112,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 @media(max-width:650px){
  .capper-metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
  .capper-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .capper-section-badge{width:calc((100% - 10px)/3)!important;min-width:0!important}
  .capper-sizing-row{grid-template-columns:1fr;gap:4px}
  .capper-sizing-controls{display:grid;grid-template-columns:auto minmax(72px,1fr) auto;gap:5px}
  .capper-sizing-controls input{width:100%!important;min-width:0}
@@ -1093,9 +1139,10 @@ function s01807MiniControls(){
  return '<span class="win95-mini-controls" aria-hidden="true"><span class="win95-mini-control">_</span><span class="win95-mini-control">□</span><span class="win95-mini-control">×</span></span>';
 }
 function s01807InstallSectionWindows(){
- const wallet=document.querySelector('.wallet-strip');
- if(wallet&&!wallet.querySelector(':scope > .win95-section-titlebar')){
-  wallet.insertAdjacentHTML('afterbegin','<div class="win95-section-titlebar"><span class="win95-section-title">WALLET</span>'+s01807MiniControls()+'</div>');
+ const top=document.querySelector('.top.win95-app-chrome');
+ const walletLayout=document.querySelector('.wallet-live-layout');
+ if(top&&walletLayout&&walletLayout.parentElement!==top){
+  top.appendChild(walletLayout);
  }
 
  const statsFilter=document.getElementById('statsModeFilter');
