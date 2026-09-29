@@ -308,24 +308,39 @@ def install(*, app: Any, dashboard: Any, core: Any, ingest: Any, nfl: Any) -> No
         return
 
     panel = r"""
-  <div class="nfl-capper-panel" id="basketballMonitorStats">
-    <div class="nfl-capper-head">
-      <div class="capper-panel-title">Basketball monitor auto-trading</div>
-      <div class="nfl-capper-state" id="basketballMonitorState">Loading WNBA / NBA monitor feeds…</div>
-      <div class="capper-panel-actions">
-        <button type="button" data-capper-last24h-toggle onclick="capperToggleLast24h()">Last 24h only: OFF</button>
+  <div id="basketballMonitorStats">
+    <div class="nfl-capper-panel" id="wnbaAutoTradingPanel">
+      <div class="nfl-capper-head">
+        <div class="capper-panel-title">WNBA AUTO-TRADING</div>
+      </div>
+      <div class="capper-panel-status-row">
+        <div class="nfl-capper-state" id="wnbaMonitorState">Loading…</div>
+        <button type="button" class="badge capper-power-btn sport-power-btn" id="monitorCapperPower-wnba" data-enabled="1" aria-pressed="true" onclick="monitorToggleCapper('wnba',this)" title="Toggle WNBA automatic trading"><span class="dot"></span><span class="capper-power-text">Online</span></button>
+      </div>
+      <div class="capper-panel-actions"><button type="button" data-capper-last24h-toggle onclick="capperToggleLast24h()">Last 24h only: OFF</button></div>
+      <div class="nfl-capper-grid single-capper-grid">
+        <div class="nfl-capper-card"><div class="capper-card-head"><b>WNBA Monitor</b></div><div class="nfl-capper-kpis" id="wnbaMonitorCard">—</div></div>
       </div>
     </div>
-    <div class="nfl-capper-grid">
-      <div class="nfl-capper-card"><div class="capper-card-head"><b>WNBA Monitor - WNBA</b><button type="button" class="badge capper-power-btn" id="monitorCapperPower-wnba" data-enabled="1" aria-pressed="true" onclick="monitorToggleCapper('wnba',this)" title="Toggle WNBA Monitor automatic trading"><span class="dot"></span><span class="capper-power-text">Online</span></button></div><div class="nfl-capper-kpis" id="wnbaMonitorCard">—</div></div>
-      <div class="nfl-capper-card"><div class="capper-card-head"><b>NBA Monitor - NBA</b><button type="button" class="badge capper-power-btn" id="monitorCapperPower-nba" data-enabled="1" aria-pressed="true" onclick="monitorToggleCapper('nba',this)" title="Toggle NBA Monitor automatic trading"><span class="dot"></span><span class="capper-power-text">Online</span></button></div><div class="nfl-capper-kpis" id="nbaMonitorCard">—</div></div>
+    <div class="nfl-capper-panel" id="nbaAutoTradingPanel">
+      <div class="nfl-capper-head">
+        <div class="capper-panel-title">NBA AUTO-TRADING</div>
+      </div>
+      <div class="capper-panel-status-row">
+        <div class="nfl-capper-state" id="nbaMonitorState">Loading…</div>
+        <button type="button" class="badge capper-power-btn sport-power-btn" id="monitorCapperPower-nba" data-enabled="1" aria-pressed="true" onclick="monitorToggleCapper('nba',this)" title="Toggle NBA automatic trading"><span class="dot"></span><span class="capper-power-text">Online</span></button>
+      </div>
+      <div class="capper-panel-actions"><button type="button" data-capper-last24h-toggle onclick="capperToggleLast24h()">Last 24h only: OFF</button></div>
+      <div class="nfl-capper-grid single-capper-grid">
+        <div class="nfl-capper-card"><div class="capper-card-head"><b>NBA Monitor</b></div><div class="nfl-capper-kpis" id="nbaMonitorCard">—</div></div>
+      </div>
     </div>
   </div>
 """
     html = html.replace('  <div class="tabs">', panel + '  <div class="tabs">', 1)
 
     css = r"""
-.monitor-performance{font-size:14px;line-height:1.7;margin:3px 0 9px}.monitor-feed{font-size:11px;margin:5px 0 9px}.monitor-signal{margin-top:7px;padding:8px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.10)}.monitor-signal b{font-size:14px}.monitor-meta{font-size:11px;line-height:1.5;margin-top:3px}.monitor-action{font-size:12px;font-weight:850;margin-top:4px}.monitor-empty{margin-top:7px;opacity:.7}
+.single-capper-grid{grid-template-columns:1fr!important}.monitor-performance{font-size:14px;line-height:1.7;margin:3px 0 9px}.monitor-feed{font-size:11px;margin:5px 0 9px}.monitor-signal{margin-top:7px;padding:8px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.10)}.monitor-signal b{font-size:14px}.monitor-meta{font-size:11px;line-height:1.5;margin-top:3px}.monitor-action{font-size:12px;font-weight:850;margin-top:4px}.monitor-empty{margin-top:7px;opacity:.7}
 """
     html = html.replace("</style>", css + "</style>", 1)
 
@@ -521,12 +536,16 @@ async function loadBasketballMonitors(){
   const r=await fetch('/api/basketball-monitor/status',{cache:'no-store'}),d=await r.json();
   if(!r.ok)throw new Error(d.detail||'Monitor status failed');
   basketballMonitorData=d.cappers||{};
-  const state=document.getElementById('basketballMonitorState');
-  if(state)state.textContent=Number(d.online_count||0)===0?'ALL CAPPERS OFFLINE':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
+  const wnba=basketballMonitorData['WNBA Monitor - WNBA']||{};
+  const nba=basketballMonitorData['NBA Monitor - NBA']||{};
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent=(wnba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
+  if(nbaState)nbaState.textContent=(nba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
   renderBasketballMonitors();
  }catch(e){
-  const state=document.getElementById('basketballMonitorState');
-  if(state)state.textContent='Monitor error: '+String(e.message||e);
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent='Status unavailable';
+  if(nbaState)nbaState.textContent='Status unavailable';
  }
 }
 
