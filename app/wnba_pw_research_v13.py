@@ -104,7 +104,6 @@ def _install_s01807_win95_theme() -> None:
     </div>
     <div class="win95-info-strip">
       <div class="win95-info-group">
-        <span class="win95-info-cell">S01-807 · POLYMARKET SPORTS DESK</span>
         <span class="versionchip" id="versionDateLabel">Version date —</span>
       </div>
       <div class="win95-info-group win95-info-right">
@@ -519,11 +518,18 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
  background:linear-gradient(90deg,#000080,#1084d0)!important;
  color:#fff!important;
  margin:-6px -6px 6px!important;
- padding:4px 6px!important;
- align-items:center!important;
+ padding:5px 6px!important;
+ flex-direction:column!important;
+ align-items:flex-start!important;
+ justify-content:flex-start!important;
+ gap:3px!important;
+ text-align:left!important;
 }
-.nfl-capper-head .label,.nfl-capper-head .nfl-capper-meta{color:#fff!important}
-.nfl-capper-state{color:#fff!important;text-shadow:1px 1px #000}
+.nfl-capper-head .label,.nfl-capper-head .capper-panel-title,.nfl-capper-head .nfl-capper-meta{color:#fff!important;text-align:left!important}
+.capper-panel-title{font-size:15px!important;font-weight:900!important;line-height:1.2!important;text-transform:uppercase}
+.nfl-capper-state{color:#fff!important;text-shadow:1px 1px #000;text-align:left!important;margin:0!important}
+.nfl-capper-meta{width:100%;text-align:left!important}
+.capper-panel-actions{justify-content:flex-start!important;margin-top:3px!important}
 .nfl-capper-card,.more-stats-row{
  background:#000!important;
  color:#d8d8d8!important;
@@ -533,7 +539,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
  border-bottom:2px solid #fff!important;
  box-shadow:none!important;
 }
-.nfl-capper-card>b,.more-stats-row .name{color:#fff!important}
+.nfl-capper-card>b,.capper-card-head>b,.more-stats-row .name{color:#fff!important}
 .nfl-capper-kpis,.cfb-capper-performance{color:#bcbcbc!important}
 .nfl-position-row,.cfb-open-position,.cfb-settled-position{
  background:#050505!important;
@@ -593,11 +599,15 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 .pnl-chart-range{color:var(--retro-gray)!important}
 .pnl-axis{fill:var(--retro-gray)!important;font-family:"Lucida Console","Courier New",monospace!important}
 .nfl-capper-card,.more-stats-row{color:var(--retro-gray)!important}
-.nfl-capper-card>b,.more-stats-row .name{
+.nfl-capper-card>b,.capper-card-head>b,.more-stats-row .name{
  color:var(--retro-white)!important;
  font-family:"Lucida Console","Courier New",monospace!important;
  letter-spacing:.02em;
 }
+.capper-card-head{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:7px!important;text-align:left!important}
+.capper-power-btn{flex:0 0 auto!important;margin:0!important;white-space:nowrap!important}
+.capper-power-btn.offline .dot{background:#ff1616!important;border-color:#600!important}
+.capper-power-btn.offline .capper-power-text{color:#900!important}
 .nfl-capper-kpis,.cfb-capper-performance{color:var(--retro-gray)!important}
 .nfl-position-row,.cfb-open-position,.cfb-settled-position{
  font-family:"Lucida Console","Courier New",monospace!important;
@@ -951,7 +961,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
  white-space:nowrap;
 }
 .capper-tabs button b{font-size:11px}
-.nfl-capper-card>b{
+.nfl-capper-card>b,.capper-card-head>b{
  display:block;
  margin-bottom:5px;
  font-size:20px!important;
@@ -970,7 +980,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
  .capper-sizing-controls input{width:100%!important;min-width:0}
  .capper-sizing-controls button{white-space:nowrap}
  .nfl-capper-card{padding:10px!important}
- .nfl-capper-card>b{font-size:19px!important}
+ .nfl-capper-card>b,.capper-card-head>b{font-size:19px!important}
 }
 @media(max-width:520px){
  body{font-size:12px}
