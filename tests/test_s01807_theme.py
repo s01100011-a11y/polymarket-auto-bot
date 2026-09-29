@@ -20,7 +20,8 @@ def test_theme_keeps_dark_data_areas_and_mobile_layout():
 
     assert ".pnl-chart-card{" in source
     assert "background:#000!important" in source
-    assert ".nfl-capper-card,.more-stats-row{" in source
+    assert ".nfl-capper-card{" in source
+    assert ".more-stats-row{" in source
     assert "@media(max-width:900px)" in source
 
 
@@ -91,7 +92,9 @@ def test_windows_use_grey_bodies_with_separated_black_data_boxes():
     assert "Win95 grey window bodies with inset black data boxes" in source
     assert ".wallet-strip,.panel,.nfl-capper-panel,.more-stats-panel,.pnl-chart-card{" in source
     assert "background:#c0c0c0!important" in source
-    assert ".wallet-data-box,.performance-card,.nfl-capper-card,.more-stats-row" in source
+    assert ".wallet-data-box,.performance-card,.more-stats-row" in source
+    assert ".nfl-capper-card{" in source
+    assert "background:#c0c0c0!important" in source
     assert "background:#000!important" in source
     assert ".wallet-dashboard-row{gap:7px!important" in source
 
@@ -141,24 +144,40 @@ def test_sport_title_bars_and_status_rows_use_independent_power_controls():
     basketball = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
 
     assert ".capper-panel-status-row" in theme
+    assert ".capper-status-field" in theme
+    assert ".capper-status-label" in theme
+    assert "background:#fff!important" in theme
     assert ".sport-power-btn" in theme
     assert ".capper-power-btn.offline .dot" in theme
 
     assert '<div class="capper-panel-title">NFL AUTO-TRADING</div>' in nfl
-    assert 'id="nflCapperState"' in nfl
+    assert '<div class="capper-status-label">STATUS</div><div class="nfl-capper-state" id="nflCapperState">' in nfl
     assert 'id="nflSportPower"' in nfl
     assert 'id="nflCapperPower-slam"' in nfl
     assert 'id="nflCapperPower-syndicate"' in nfl
 
     assert '<div class="capper-panel-title">CFB AUTO-TRADING</div>' in cfb
-    assert 'id="cfbCapperState"' in cfb
+    assert '<div class="capper-status-label">STATUS</div><div class="nfl-capper-state" id="cfbCapperState">' in cfb
     assert 'id="cfbSportPower"' in cfb
     assert 'id="cfbCapperPower-slam"' in cfb
     assert 'id="cfbCapperPower-syndicate"' in cfb
 
     assert '<div class="capper-panel-title">WNBA AUTO-TRADING</div>' in basketball
     assert '<div class="capper-panel-title">NBA AUTO-TRADING</div>' in basketball
-    assert 'id="wnbaMonitorState"' in basketball
-    assert 'id="nbaMonitorState"' in basketball
+    assert '<div class="capper-status-label">STATUS</div><div class="nfl-capper-state" id="wnbaMonitorState">' in basketball
+    assert '<div class="capper-status-label">STATUS</div><div class="nfl-capper-state" id="nbaMonitorState">' in basketball
     assert 'id="monitorCapperPower-wnba"' in basketball
     assert 'id="monitorCapperPower-nba"' in basketball
+
+
+def test_capper_outer_cards_are_grey_with_black_data_boxes():
+    source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+
+    assert ".nfl-capper-card{" in source
+    assert "background:#c0c0c0!important" in source
+    assert ".capper-sizing{" in source
+    assert "background:#101010" in source
+    assert ".capper-metric{" in source
+    assert "background:#080808" in source
+    assert ".capper-card-head>b{" in source
+    assert "color:#000!important" in source
