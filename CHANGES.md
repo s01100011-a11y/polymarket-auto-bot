@@ -1,5 +1,12 @@
 # CHANGES
 
+## 2026-09-30 — Event badge parity
+
+- Changed NFL/CFB result/state badges such as WIN, LOSS, PUSH, LIVE, FINISHED, PREGAME, QUEUED, DONE, FAILED, and RETRYING to use the same raised Windows-grey badge frame as the other capper badges.
+- Removed the translucent coloured badge backgrounds/borders that were making those badges look like a different component family.
+- Preserved status meaning using text colour only: green for positive/live, red for loss/failure, amber for push, blue for pregame, and dark grey for neutral/finished states.
+- Matched badge height, font size, padding, border treatment, and shadow to the existing capper badge system.
+
 ## 2026-09-30 — Merge Wallet into app window and normalize signal badge
 
 - Moved the Wallet/live P&L layout inside the main S01807 application window so it is visually part of the top window instead of a separate window below it.
