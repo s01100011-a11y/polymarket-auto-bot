@@ -42,6 +42,7 @@ def test_win95_app_chrome_has_one_line_title_and_fake_window_controls():
     assert 'id="versionLabel"' in source
     assert 'id="versionDateLabel"' in source
     assert 'id="updated"' in source
+    assert 'id="uptime"' in source
     assert 'id="serviceState"' in source
 
 
@@ -52,8 +53,9 @@ def test_major_dashboard_windows_show_teal_desktop_between_sections():
     assert "background:transparent" in source
     assert ".wallet-live-layout{gap:10px" in source
     assert "win95-stats-window" in source
-    assert '>WALLET</span>' in source
+    assert '>WALLET</span>' not in source
     assert ">STATS</span>" in source
+    assert "top.appendChild(walletLayout)" in source
     assert "s01807InstallSectionWindows" in source
     assert "s01807MiniControls" in source
 
@@ -188,6 +190,23 @@ def test_capper_section_and_event_badges_share_consistent_formatting():
 
     assert ".capper-section-badge{" in source
     assert ".capper-event-badge{" in source
-    assert 'font:700 11px/1.1 "MS Sans Serif",Tahoma,Arial,sans-serif!important' in source
+    assert "min-height:34px!important" in source
+    assert 'font:700 13px/1.1 "MS Sans Serif",Tahoma,Arial,sans-serif!important' in source
     assert 'font:700 11px/1 "MS Sans Serif",Tahoma,Arial,sans-serif!important' in source
     assert "border-radius:0!important" in source
+
+
+def test_version_date_and_time_boxes_live_in_top_window():
+    theme = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+    dashboard = Path("app/dashboard.py").read_text(encoding="utf-8")
+    top = theme.split("new_top = '''", 1)[1].split("'''", 1)[0]
+
+    assert 'class="win95-title-date" id="versionDateLabel"' in top
+    assert '<span class="win95-time-box" id="updated">Updated —</span>' in top
+    assert '<span class="win95-time-box" id="uptime">Uptime —</span>' in top
+    assert ".win95-time-box{" in theme
+    assert "background:#fff" in theme
+    assert "font-size:12px" in theme
+    assert "top.appendChild(walletLayout)" in theme
+    assert "wallet.insertAdjacentHTML" not in theme
+    assert "uptimeEl.textContent='Uptime '" in dashboard
