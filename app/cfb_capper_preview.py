@@ -15,6 +15,7 @@ import httpx
 from fastapi import Depends, HTTPException
 from polymarket import PublicClient
 
+from app import capper_control
 from app import dashboard_live_control_v4 as live_control
 from app import nfl_capper_ingest as nfl
 
@@ -2555,10 +2556,15 @@ def _inject_dashboard_panel(html: str) -> str:
 
     panel = r"""
   <div class="nfl-capper-panel" id="cfbCapperStats">
-    <div class="nfl-capper-head"><div><div class="label">CFB capper auto-trading</div><div class="nfl-capper-state" id="cfbCapperState">Loading…</div></div><div><div class="nfl-capper-meta" id="cfbCapperMeta"></div><div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px"><button type="button" id="cfbFinishedToggle" onclick="cfbToggleFinished()">Hide finished</button><button type="button" data-capper-last24h-toggle onclick="capperToggleLast24h()">Last 24h only: OFF</button></div></div></div>
+    <div class="nfl-capper-head">
+      <div class="capper-panel-title">CFB capper auto-trading</div>
+      <div class="nfl-capper-state" id="cfbCapperState">Loading…</div>
+      <div class="nfl-capper-meta" id="cfbCapperMeta"></div>
+      <div class="capper-panel-actions"><button type="button" id="cfbFinishedToggle" onclick="cfbToggleFinished()">Hide finished</button><button type="button" data-capper-last24h-toggle onclick="capperToggleLast24h()">Last 24h only: OFF</button></div>
+    </div>
     <div class="nfl-capper-grid">
-      <div class="nfl-capper-card"><b>Slam - CFB</b><div class="nfl-capper-kpis" id="cfbCapperSlam">—</div></div>
-      <div class="nfl-capper-card"><b>Syndicate - CFB</b><div class="nfl-capper-kpis" id="cfbCapperSyndicate">—</div></div>
+      <div class="nfl-capper-card"><div class="capper-card-head"><b>Slam - CFB</b><button type="button" class="badge capper-power-btn" id="cfbCapperPower-slam" data-enabled="1" aria-pressed="true" onclick="cfbToggleCapper('slam',this)" title="Toggle Slam - CFB automatic trading"><span class="dot"></span><span class="capper-power-text">Online</span></button></div><div class="nfl-capper-kpis" id="cfbCapperSlam">—</div></div>
+      <div class="nfl-capper-card"><div class="capper-card-head"><b>Syndicate - CFB</b><button type="button" class="badge capper-power-btn" id="cfbCapperPower-syndicate" data-enabled="1" aria-pressed="true" onclick="cfbToggleCapper('syndicate',this)" title="Toggle Syndicate - CFB automatic trading"><span class="dot"></span><span class="capper-power-text">Online</span></button></div><div class="nfl-capper-kpis" id="cfbCapperSyndicate">—</div></div>
     </div>
   </div>
 """
@@ -2769,10 +2775,37 @@ function cfbUpdateFinishedToggle(){
  const btn=document.getElementById('cfbFinishedToggle');
  if(btn){btn.textContent=cfbHideFinished?'Show finished':'Hide finished';btn.classList.toggle('active',cfbHideFinished);btn.setAttribute('aria-pressed',cfbHideFinished?'true':'false')}
 }
+function cfbSyncPowerButton(sourceKey,enabled){
+ const btn=document.getElementById('cfbCapperPower-'+sourceKey);
+ if(!btn)return;
+ const on=enabled!==false;
+ btn.dataset.enabled=on?'1':'0';
+ btn.classList.toggle('active',on);
+ btn.classList.toggle('offline',!on);
+ btn.setAttribute('aria-pressed',on?'true':'false');
+ const text=btn.querySelector('.capper-power-text');
+ if(text)text.textContent=on?'Online':'Offline';
+}
+async function cfbToggleCapper(sourceKey,btn){
+ const online=btn.dataset.enabled!=='0';
+ if(online&&!confirm('Turn this CFB capper OFFLINE? New automatic trades from it will pause.'))return;
+ btn.disabled=true;
+ try{
+  const r=await fetch('/api/cfb-cappers/enabled/'+encodeURIComponent(sourceKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!online})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Capper status update failed');
+  await loadCfbCapperStats();
+ }catch(e){alert(String(e.message||e))}
+ finally{btn.disabled=false}
+}
 function cfbRenderCappers(){
  const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
  if(s&&cfbLastSources['Slam - CFB'])s.innerHTML=cfbCapperLine(cfbLastSources['Slam - CFB'],'slam');
  if(y&&cfbLastSources['Syndicate - CFB'])y.innerHTML=cfbCapperLine(cfbLastSources['Syndicate - CFB'],'syndicate');
+ cfbSyncPowerButton('slam',(cfbLastSources['Slam - CFB']||{}).enabled);
+ cfbSyncPowerButton('syndicate',(cfbLastSources['Syndicate - CFB']||{}).enabled);
  capperSyncLast24hButtons();
 }
 window.addEventListener('capper-history-filter-change',cfbRenderCappers);
@@ -3291,6 +3324,15 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 changed = True
                 continue
 
+            if not capper_control.is_enabled(core, source_label):
+                record["status"] = "PAUSED_CAPPER"
+                record["reason"] = f"{source_label} is offline; automatic trading is paused"
+                record["updated_at"] = _now_iso()
+                record.pop("last_error", None)
+                signals[fp] = record
+                changed = True
+                continue
+
             if unit_config.get("error"):
                 record["status"] = "RETRYING"
                 record["last_error"] = str(unit_config["error"])
@@ -3663,6 +3705,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "portfolio_value_usdc": unit_config["portfolio_value_usdc"],
                 "unit_error": unit_config["error"],
                 "sizing_mode": "TO_WIN",
+                "enabled": capper_control.is_enabled(core, label),
                 "performance": performance.get(label, {}),
                 "positions": nfl._position_items(
                     executions,
@@ -3719,6 +3762,24 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             "status": dict(_STATUS),
         }
 
+
+    @app.put("/api/cfb-cappers/enabled/{capper_key}", dependencies=[Depends(dashboard._auth)])
+    def cfb_capper_enabled(capper_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        label = {
+            "slam": "Slam - CFB",
+            "syndicate": "Syndicate - CFB",
+        }.get(str(capper_key).strip().lower())
+        if label is None:
+            raise HTTPException(status_code=404, detail="Unknown CFB capper")
+        if not isinstance(payload.get("enabled"), bool):
+            raise HTTPException(status_code=400, detail="enabled must be true or false")
+        enabled_now = capper_control.set_enabled(core, label, payload["enabled"])
+        return {
+            "ok": True,
+            "capper": label,
+            "enabled": enabled_now,
+            "note": "Controls new automatic CFB trades only; existing queued/open positions are unchanged.",
+        }
 
     @app.put("/api/cfb-cappers/unit-size/{capper_key}", dependencies=[Depends(dashboard._auth)])
     def cfb_capper_unit_size(capper_key: str, payload: dict[str, Any]) -> dict[str, Any]:
