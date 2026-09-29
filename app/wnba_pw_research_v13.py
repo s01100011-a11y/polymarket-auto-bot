@@ -267,16 +267,17 @@ a{color:#0000ee;text-decoration:underline}
 .win95-close{font-size:15px}
 .top-mode-status-row{
  margin:0!important;
- padding:7px 5px 4px!important;
+ padding:7px 8px 5px!important;
  background:#c0c0c0!important;
  box-sizing:border-box!important;
 }
-.top-mode-field{flex:1 1 auto!important}
+.top-mode-field{flex:1 1 auto!important;min-width:0!important}
 .top-mode-state{width:100%!important;box-sizing:border-box!important}
 .top-mode-status-row #botPowerBtn{
  align-self:flex-end!important;
  min-height:30px!important;
  margin:0 0 0 auto!important;
+ flex:0 0 auto!important;
 }
 .win95-info-strip{
  display:flex;
@@ -489,8 +490,12 @@ a{color:#0000ee;text-decoration:underline}
 }
 .pnl-chart-duration-row .pnl-chart-range{
  color:#000!important;
- font-family:"Lucida Console","Courier New",monospace!important;
- font-weight:700!important;
+ font-family:"MS Sans Serif",Tahoma,Arial,sans-serif!important;
+ font-size:12px!important;
+ line-height:1.45!important;
+ font-weight:400!important;
+ letter-spacing:0!important;
+ text-align:left!important;
 }
 .pnl-chart-value{font-family:"Courier New",monospace;color:#00ff66!important}
 .pnl-chart{background:#000!important;margin:0!important;padding:6px!important}
@@ -723,7 +728,14 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 .pnl-chart-value.green{color:var(--retro-green)!important}
 .pnl-chart-value.red{color:var(--retro-red)!important}
 .pnl-chart-body .label{color:var(--retro-yellow)!important}
-.pnl-chart-duration-row .pnl-chart-range{color:#000!important}
+.pnl-chart-duration-row .pnl-chart-range{
+ color:#000!important;
+ font-family:"MS Sans Serif",Tahoma,Arial,sans-serif!important;
+ font-size:12px!important;
+ line-height:1.45!important;
+ font-weight:400!important;
+ letter-spacing:0!important;
+}
 .pnl-axis{fill:var(--retro-gray)!important;font-family:"Lucida Console","Courier New",monospace!important}
 .more-stats-row{color:var(--retro-gray)!important}
 .nfl-capper-card{color:#000!important}
