@@ -1,5 +1,14 @@
 # CHANGES
 
+## 2026-09-29 — Per-capper online controls and left-aligned sport headers
+
+- NFL, CFB, WNBA, and NBA capper/monitor cards now have their own persistent **Online / Offline** control, using the same green/red status-button language as the dashboard master switch.
+- Turning a capper offline stops that source from creating new automatic trades without touching existing queued orders or open positions. NFL/CFB paused signals remain visible and can resume normal freshness checks after the capper is turned back online.
+- NBA/WNBA execution now checks the same persisted per-monitor switch before paper/live order preparation, so the dashboard button is an actual execution gate rather than a display-only control.
+- Sport headers were reformatted as a left-aligned stack: **[SPORT] capper auto-trading** is the title, the **ENABLED · AUTO LIVE/OFF** state appears immediately below it, followed by sizing/meta text and controls.
+- The redundant `S01-807 · POLYMARKET SPORTS DESK` text was removed from the top application info strip while preserving the version/date and master Online/Offline control.
+- Added regression coverage for persistent independent capper states, backend execution gates, Online/Offline buttons, and the left-aligned title-bar layout.
+
 ## 2026-09-28 — Missed P/L uses call-time unit size
 
 - Missed-P/L calculations no longer use the capper's current fixed/AUTO % unit value as the fallback for historical calls.
