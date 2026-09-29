@@ -2898,14 +2898,14 @@ function nflPhaseVisual(item){
  const phase=String(item.event_phase||'').toUpperCase();
  const status=String(item.status||'').toUpperCase();
  const result=String(item.trade_result||item.pick_result||'').toUpperCase();
- if(phase==='CLOSED'&&result==='WIN')return {label:'WIN',row:'background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.42);border-left:4px solid #22c55e;',badge:'background:rgba(34,197,94,.20);border:1px solid rgba(34,197,94,.50);color:#86efac;'};
- if(phase==='CLOSED'&&result==='LOSS')return {label:'LOSS',row:'background:rgba(239,68,68,.11);border:1px solid rgba(239,68,68,.42);border-left:4px solid #ef4444;',badge:'background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.50);color:#fca5a5;'};
- if(phase==='CLOSED'&&result==='PUSH')return {label:'PUSH',row:'background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.38);border-left:4px solid #f59e0b;',badge:'background:rgba(245,158,11,.16);border:1px solid rgba(245,158,11,.45);color:#fcd34d;'};
- if(phase==='LIVE')return {label:'LIVE',row:'background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.38);border-left:4px solid #22c55e;',badge:'background:rgba(34,197,94,.18);border:1px solid rgba(34,197,94,.45);color:#86efac;'};
- if(phase==='CLOSED')return {label:'FINISHED',row:'background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.24);border-left:4px solid #94a3b8;opacity:.82;',badge:'background:rgba(148,163,184,.15);border:1px solid rgba(148,163,184,.32);color:#cbd5e1;'};
- if(phase==='PREGAME')return {label:'PREGAME',row:'background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.35);border-left:4px solid #3b82f6;',badge:'background:rgba(59,130,246,.17);border:1px solid rgba(59,130,246,.42);color:#93c5fd;'};
+ if(phase==='CLOSED'&&result==='WIN')return {label:'WIN',row:'background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.42);border-left:4px solid #22c55e;',badge:'color:#008000;'};
+ if(phase==='CLOSED'&&result==='LOSS')return {label:'LOSS',row:'background:rgba(239,68,68,.11);border:1px solid rgba(239,68,68,.42);border-left:4px solid #ef4444;',badge:'color:#b00000;'};
+ if(phase==='CLOSED'&&result==='PUSH')return {label:'PUSH',row:'background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.38);border-left:4px solid #f59e0b;',badge:'color:#8a5b00;'};
+ if(phase==='LIVE')return {label:'LIVE',row:'background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.38);border-left:4px solid #22c55e;',badge:'color:#008000;'};
+ if(phase==='CLOSED')return {label:'FINISHED',row:'background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.24);border-left:4px solid #94a3b8;opacity:.82;',badge:'color:#404040;'};
+ if(phase==='PREGAME')return {label:'PREGAME',row:'background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.35);border-left:4px solid #3b82f6;',badge:'color:#000080;'};
  const label=status==='RETRYING'?'RETRYING':status==='EXECUTOR_FAILED'?'FAILED':status==='EXECUTOR_DONE'?'DONE':status==='QUEUED'?'QUEUED':'';
- return {label,row:'border:1px solid rgba(255,255,255,.07);',badge:'background:rgba(148,163,184,.12);border:1px solid rgba(148,163,184,.25);color:#cbd5e1;'};
+ return {label,row:'border:1px solid rgba(255,255,255,.07);',badge:'color:#404040;'};
 }
 let nflHideFinished=localStorage.getItem('nflHideFinished')==='1';
 const nflActiveTabs={slam:'signals',syndicate:'signals'};
