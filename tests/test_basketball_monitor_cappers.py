@@ -42,3 +42,19 @@ def test_more_stats_infers_legacy_pw_export_monitor_trades():
     assert "def _legacy_monitor_identity" in source
     assert 'event_id.startswith("pwexport-")' in source
     assert 'f"{league} Monitor - {league}"' in source
+
+
+def test_basketball_monitor_has_independent_to_win_unit_controls():
+    source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+    live = Path("app/dashboard_live_control_v4.py").read_text(encoding="utf-8")
+
+    assert '"/api/basketball-monitor/unit-size/{sport_key}"' in source
+    assert '"/api/basketball-monitor/unit-percent/{sport_key}"' in source
+    assert "FIXED 1u WIN $" in source
+    assert "SET 1U" in source
+    assert "AUTO %" in source
+    assert "sizing is TO WIN" in source
+    assert "_monitor_stake_to_win" in live
+    assert '"strategy_units": "1" if monitor_sport else None' in live
+    assert '"strategy_unit_usdc": str(unit_usdc) if unit_usdc is not None else None' in live
+    assert '"sizing_mode": "TO_WIN" if monitor_sport else "STAKE"' in live
