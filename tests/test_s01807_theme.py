@@ -190,9 +190,10 @@ def test_capper_section_and_event_badges_share_consistent_formatting():
 
     assert ".capper-section-badge{" in source
     assert ".capper-event-badge{" in source
-    assert "min-height:34px!important" in source
-    assert 'font:700 13px/1.1 "MS Sans Serif",Tahoma,Arial,sans-serif!important' in source
-    assert 'font:700 11px/1 "MS Sans Serif",Tahoma,Arial,sans-serif!important' in source
+    assert source.count("min-height:34px!important") >= 2
+    assert source.count('font:700 13px/1.1 "MS Sans Serif",Tahoma,Arial,sans-serif!important') >= 2
+    assert "background:#c0c0c0!important" in source
+    assert "box-shadow:1px 1px 0 #000!important" in source
     assert "border-radius:0!important" in source
 
 
@@ -210,3 +211,15 @@ def test_version_date_and_time_boxes_live_in_top_window():
     assert "top.appendChild(walletLayout)" in theme
     assert "wallet.insertAdjacentHTML" not in theme
     assert "uptimeEl.textContent='Uptime '" in dashboard
+
+
+def test_event_badges_keep_only_status_colour_inline():
+    nfl = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
+    cfb = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
+
+    assert "badge:'background:rgba(" not in nfl
+    assert "badge:'background:rgba(" not in cfb
+    assert "badge:'color:#008000;'" in nfl
+    assert "badge:'color:#b00000;'" in nfl
+    assert "badge:'color:#008000;'" in cfb
+    assert "badge:'color:#b00000;'" in cfb

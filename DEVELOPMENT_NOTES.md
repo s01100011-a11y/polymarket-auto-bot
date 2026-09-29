@@ -1,3 +1,7 @@
+## 2026-09-30 — Unified event/result badge component
+
+`capper-event-badge` now uses the same Win95 raised-grey component treatment as the capper section/tab badges: 34px minimum height, 13px MS Sans Serif label, raised white/dark border, and 1px black shadow. NFL/CFB phase helpers no longer emit translucent `background` or `border` styles inline; they provide only a semantic text colour. This prevents inline styles from visually overriding the shared badge component while retaining WIN/LOSS/LIVE/PREGAME colour cues.
+
 ## 2026-09-30 — Top chrome / Wallet merge and time fields
 
 The Win95 theme now moves `.wallet-live-layout` into `.top.win95-app-chrome` at DOM install time. This keeps the existing Wallet data/graph logic intact while making the Wallet body part of the top application window. The old synthetic `WALLET` section title bar is no longer created. The nested `.wallet-strip` loses its extra outer frame when hosted inside the top chrome so the Wallet reads as content rather than a second window.

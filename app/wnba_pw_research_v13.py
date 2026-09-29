@@ -1088,14 +1088,20 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
  display:inline-flex!important;
  align-items:center!important;
  justify-content:center!important;
- min-height:22px!important;
+ min-height:34px!important;
  margin-left:7px!important;
- padding:3px 7px!important;
+ padding:5px 9px!important;
+ background:#c0c0c0!important;
+ border-top:2px solid #fff!important;
+ border-left:2px solid #fff!important;
+ border-right:2px solid #404040!important;
+ border-bottom:2px solid #404040!important;
+ box-shadow:1px 1px 0 #000!important;
  border-radius:0!important;
- font:700 11px/1 "MS Sans Serif",Tahoma,Arial,sans-serif!important;
- letter-spacing:.03em!important;
+ font:700 13px/1.1 "MS Sans Serif",Tahoma,Arial,sans-serif!important;
+ letter-spacing:0!important;
  text-transform:uppercase!important;
- vertical-align:1px!important;
+ vertical-align:middle!important;
  box-sizing:border-box!important;
 }
 .nfl-capper-card>b,.capper-card-head>b{
