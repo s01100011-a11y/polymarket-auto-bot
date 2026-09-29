@@ -4,7 +4,7 @@ import os
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -296,8 +296,13 @@ def _performance_metrics(executions: dict[str, dict[str, Any]]) -> dict[str, Any
     losses = 0
     pushes = 0
     realized_total = Decimal("0")
+    realized_7d = Decimal("0")
+    realized_30d = Decimal("0")
     stake_total = Decimal("0")
     graded = 0
+    now = datetime.now(timezone.utc)
+    cutoff_7d = now - timedelta(days=7)
+    cutoff_30d = now - timedelta(days=30)
 
     for rec in executions.values():
         if rec.get("parent_trade_id"):
@@ -311,6 +316,30 @@ def _performance_metrics(executions: dict[str, dict[str, Any]]) -> dict[str, Any
 
         stake = _d(rec.get("budget_usdc"))
         realized_total += realized
+
+        realized_at = None
+        for raw_time in (
+            rec.get("closed_at"),
+            rec.get("updated_at"),
+            rec.get("submitted_at"),
+            rec.get("created_at"),
+        ):
+            if not raw_time:
+                continue
+            try:
+                parsed = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            realized_at = parsed.astimezone(timezone.utc)
+            break
+        if realized_at is not None:
+            if realized_at >= cutoff_30d:
+                realized_30d += realized
+            if realized_at >= cutoff_7d:
+                realized_7d += realized
+
         if stake > 0:
             stake_total += stake
         graded += 1
@@ -333,6 +362,8 @@ def _performance_metrics(executions: dict[str, dict[str, Any]]) -> dict[str, Any
         "graded_trades": graded,
         "graded_stake_usdc": str(stake_total.quantize(Decimal("0.01"))),
         "realized_pnl_for_metrics": str(realized_total.quantize(Decimal("0.01"))),
+        "realized_pnl_7d_usdc": str(realized_7d.quantize(Decimal("0.01"))),
+        "realized_pnl_30d_usdc": str(realized_30d.quantize(Decimal("0.01"))),
         "accuracy_pct": str(accuracy.quantize(Decimal("0.1"))) if accuracy is not None else None,
         "roi_pct": str(roi.quantize(Decimal("0.1"))) if roi is not None else None,
     }
@@ -366,6 +397,8 @@ def _install_performance_and_paper_ui() -> None:
   <div class="performance-strip">
     <div class="performance-card"><div class="label">Portfolio value</div><div class="performance-value" id="performancePortfolio">—</div><div class="performance-sub">available USDC + positions</div></div>
     <div class="performance-card"><div class="label">Missed P/L · total</div><div class="performance-value" id="performanceMissedPnl">—</div><div class="performance-sub" id="performanceMissedCount">NFL + CFB untraded calls</div></div>
+    <div class="performance-card"><div class="label">Last 7 days P/L</div><div class="performance-value" id="performancePnl7d">—</div><div class="performance-sub">realized</div></div>
+    <div class="performance-card"><div class="label">Last 30 days P/L</div><div class="performance-value" id="performancePnl30d">—</div><div class="performance-sub">realized</div></div>
     <div class="performance-card"><div class="label">ROI · closed trades</div><div class="performance-value" id="performanceRoi">—</div></div>
     <div class="performance-card"><div class="label">Win / Loss</div><div class="performance-value" id="performanceWL">—</div><div class="performance-sub" id="performancePushes"></div></div>
     <div class="performance-card"><div class="label">Accuracy</div><div class="performance-value" id="performanceAccuracy">—</div><div class="performance-sub" id="performanceGraded"></div></div>
@@ -374,7 +407,7 @@ def _install_performance_and_paper_ui() -> None:
     html = html.replace('  <div class="tabs">', performance_html + '  <div class="tabs">', 1)
 
     css = '''
-.performance-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:18px 0}.performance-card{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px}.performance-value{font-size:24px;font-weight:900;margin-top:6px}.performance-sub{font-size:10px;color:var(--muted);margin-top:4px}.paper-close-btn{border:1px solid #7c5b15;background:#33270c;color:#fde68a;border-radius:8px;padding:7px 11px;font-size:11px;font-weight:850;cursor:pointer;white-space:nowrap}.paper-close-btn:hover{background:#49350d}.paper-close-btn:disabled{opacity:.55;cursor:wait}@media(max-width:1100px){.performance-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:700px){.performance-strip{grid-template-columns:1fr 1fr}.performance-card:last-child{grid-column:1/-1}}
+.performance-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:18px 0}.performance-card{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:14px;padding:15px}.performance-value{font-size:24px;font-weight:900;margin-top:6px}.performance-sub{font-size:10px;color:var(--muted);margin-top:4px}.paper-close-btn{border:1px solid #7c5b15;background:#33270c;color:#fde68a;border-radius:8px;padding:7px 11px;font-size:11px;font-weight:850;cursor:pointer;white-space:nowrap}.paper-close-btn:hover{background:#49350d}.paper-close-btn:disabled{opacity:.55;cursor:wait}@media(max-width:1100px){.performance-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:700px){.performance-strip{grid-template-columns:1fr 1fr}.performance-card:last-child{grid-column:1/-1}}
 '''
     html = html.replace("</style>", css + "</style>", 1)
 
@@ -383,7 +416,75 @@ def _install_performance_and_paper_ui() -> None:
     html = html.replace(live_only, with_paper)
     metric_anchor = "document.getElementById('budget').textContent=money(s.daily_budget_used)+' / '+money(s.max_daily_budget_usdc);"
     metric_js = """document.getElementById('budget').textContent=money(s.daily_budget_used)+' / '+money(s.max_daily_budget_usdc);
-  const roi=document.getElementById('performanceRoi'),wl=document.getElementById('performanceWL'),acc=document.getElementById('performanceAccuracy'),push=document.getElementById('performancePushes'),graded=document.getElementById('performanceGraded');
+  const roi=document.getElementById('performanceRoi'),wl=document.getElementById('performanceWL'),acc=document.getElementById('performanceAccuracy'),push=document.getElementById('performancePushes'),graded=document.getElementById('performanceGraded'),p7=document.getElementById('performancePnl7d'),p30=document.getElementById('performancePnl30d');
+  if(p7){const n=Number(s.realized_pnl_7d_usdc||0);p7.textContent=(n>0?'+':'')+'
+  if(wl)wl.textContent=String(s.wins||0)+' / '+String(s.losses||0);
+  if(push)push.textContent=(s.pushes||0)+' push'+((s.pushes||0)===1?'':'es');
+  if(acc){const a=Number(s.accuracy_pct);acc.textContent=s.accuracy_pct===null||s.accuracy_pct===undefined?'—':a.toFixed(1)+'%'}
+  if(graded)graded.textContent=(s.graded_trades||0)+' graded closed trades';"""
+    html = html.replace(metric_anchor, metric_js)
+
+    paper_js = r'''
+document.addEventListener('click',async function(ev){
+ const btn=ev.target.closest('[data-paper-close]');
+ if(!btn)return;
+ const tradeId=btn.getAttribute('data-paper-close');
+ if(!tradeId)return;
+ if(!confirm('Close this PAPER position at the current Polymarket SELL price? No real order will be sent.'))return;
+ const original=btn.textContent;
+ try{
+  btn.disabled=true;btn.textContent='CLOSING…';
+  const r=await fetch('/api/paper/close/'+encodeURIComponent(tradeId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Paper close failed');
+  btn.textContent='CLOSED';
+  setTimeout(()=>load(),350);
+ }catch(e){
+  btn.disabled=false;btn.textContent=original;
+  alert('Paper close failed: '+String(e));
+ }
+});
+'''
+    html = html.replace("</script>", paper_js + "\n</script>", 1)
+    dashboard.DASHBOARD_HTML = html
+
+
+_install_performance_and_paper_ui()
++n.toFixed(2);p7.className='performance-value '+(n>0?'green':n<0?'red':'')}
+  if(p30){const n=Number(s.realized_pnl_30d_usdc||0);p30.textContent=(n>0?'+':'')+'
+  if(wl)wl.textContent=String(s.wins||0)+' / '+String(s.losses||0);
+  if(push)push.textContent=(s.pushes||0)+' push'+((s.pushes||0)===1?'':'es');
+  if(acc){const a=Number(s.accuracy_pct);acc.textContent=s.accuracy_pct===null||s.accuracy_pct===undefined?'—':a.toFixed(1)+'%'}
+  if(graded)graded.textContent=(s.graded_trades||0)+' graded closed trades';"""
+    html = html.replace(metric_anchor, metric_js)
+
+    paper_js = r'''
+document.addEventListener('click',async function(ev){
+ const btn=ev.target.closest('[data-paper-close]');
+ if(!btn)return;
+ const tradeId=btn.getAttribute('data-paper-close');
+ if(!tradeId)return;
+ if(!confirm('Close this PAPER position at the current Polymarket SELL price? No real order will be sent.'))return;
+ const original=btn.textContent;
+ try{
+  btn.disabled=true;btn.textContent='CLOSING…';
+  const r=await fetch('/api/paper/close/'+encodeURIComponent(tradeId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Paper close failed');
+  btn.textContent='CLOSED';
+  setTimeout(()=>load(),350);
+ }catch(e){
+  btn.disabled=false;btn.textContent=original;
+  alert('Paper close failed: '+String(e));
+ }
+});
+'''
+    html = html.replace("</script>", paper_js + "\n</script>", 1)
+    dashboard.DASHBOARD_HTML = html
+
+
+_install_performance_and_paper_ui()
++n.toFixed(2);p30.className='performance-value '+(n>0?'green':n<0?'red':'')}
   if(roi){const n=Number(s.roi_pct);roi.textContent=s.roi_pct===null||s.roi_pct===undefined?'—':n.toFixed(1)+'%';roi.className='performance-value '+(n>0?'green':n<0?'red':'')}
   if(wl)wl.textContent=String(s.wins||0)+' / '+String(s.losses||0);
   if(push)push.textContent=(s.pushes||0)+' push'+((s.pushes||0)===1?'':'es');
