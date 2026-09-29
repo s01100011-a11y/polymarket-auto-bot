@@ -362,18 +362,21 @@ def _install_trading_ui() -> None:
 
     chart_html = '''
     <div class="pnl-chart-card">
-      <div class="pnl-chart-head"><div class="label">Portfolio P/L · LIVE</div><div class="pnl-chart-range" id="pnlChartRange">Waiting for samples…</div></div>
+      <div class="pnl-chart-head"><div class="label">Portfolio P/L · LIVE</div></div>
+      <div class="pnl-chart-duration-row">
+        <div class="pnl-chart-controls" role="group" aria-label="P/L chart range">
+          <button type="button" data-pnl-range="1d">1D</button>
+          <button type="button" data-pnl-range="1w">1W</button>
+          <button type="button" data-pnl-range="1m">1M</button>
+          <button type="button" data-pnl-range="1y">1Y</button>
+          <button type="button" data-pnl-range="ytd">YTD</button>
+          <button type="button" data-pnl-range="all">ALL</button>
+        </div>
+        <div class="pnl-chart-range" id="pnlChartRange">Waiting for samples…</div>
+      </div>
       <div class="pnl-chart-body">
         <div class="pnl-chart-summary">
           <div><div class="label">Live P/L</div><div class="pnl-chart-value" id="pnlChartValue">$0.00</div></div>
-          <div class="pnl-chart-controls" role="group" aria-label="P/L chart range">
-            <button type="button" data-pnl-range="1d">1D</button>
-            <button type="button" data-pnl-range="1w">1W</button>
-            <button type="button" data-pnl-range="1m">1M</button>
-            <button type="button" data-pnl-range="1y">1Y</button>
-            <button type="button" data-pnl-range="ytd">YTD</button>
-            <button type="button" data-pnl-range="all">ALL</button>
-          </div>
         </div>
         <div id="pnlChart" class="pnl-chart"><div class="empty">Collecting live P/L samples…</div></div>
       </div>
@@ -382,7 +385,7 @@ def _install_trading_ui() -> None:
     html = html.replace('    <div id="currentBody"></div>', chart_html + '    <div id="currentBody"></div>')
 
     css = '''
-.pnl-chart-card{border:1px solid var(--border);background:#0d1522;border-radius:12px;padding:14px;margin:0 0 18px}.pnl-chart-head{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:0}.pnl-chart-body{padding-top:8px}.pnl-chart-summary{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:0 0 7px}.pnl-chart-value{font-size:24px;font-weight:850;margin-top:3px}.pnl-chart-range{font-size:11px;color:var(--muted);text-align:right}.pnl-chart-controls{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}.pnl-chart-controls button{min-width:42px;padding:4px 7px;font-size:10px;font-weight:850}.pnl-chart-controls button.active{font-weight:900}.pnl-chart{height:225px;position:relative;overflow:hidden}.pnl-chart svg{width:100%;height:100%;display:block}.pnl-line{fill:none;stroke:currentColor;stroke-width:3;vector-effect:non-scaling-stroke}.pnl-zero{stroke:#43516a;stroke-width:1;stroke-dasharray:5 5;vector-effect:non-scaling-stroke}.pnl-fill{fill:currentColor;opacity:.08}.pnl-axis{fill:var(--muted);font-size:22px}.side-buy{color:var(--accent);font-weight:850}.side-sell{color:var(--bad);font-weight:850}.pnl-sub{display:block;color:var(--muted);font-size:10px;margin-top:3px;text-transform:uppercase;letter-spacing:.05em}@media(max-width:650px){.pnl-chart-summary{align-items:flex-start}.pnl-chart-controls{justify-content:flex-start}.pnl-chart-controls button{min-width:39px}}
+.pnl-chart-card{border:1px solid var(--border);background:#0d1522;border-radius:12px;padding:14px;margin:0 0 18px}.pnl-chart-head{display:flex;justify-content:flex-start;align-items:center;gap:14px;margin-bottom:0}.pnl-chart-duration-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:8px 8px 0}.pnl-chart-body{padding-top:8px}.pnl-chart-summary{display:flex;justify-content:flex-start;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:0 0 7px}.pnl-chart-value{font-size:24px;font-weight:850;margin-top:3px}.pnl-chart-range{font-size:11px;color:var(--muted);text-align:right}.pnl-chart-controls{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-start}.pnl-chart-controls button{min-width:42px;padding:4px 7px;font-size:10px;font-weight:850}.pnl-chart-controls button.active{font-weight:900}.pnl-chart{height:225px;position:relative;overflow:hidden}.pnl-chart svg{width:100%;height:100%;display:block}.pnl-line{fill:none;stroke:currentColor;stroke-width:3;vector-effect:non-scaling-stroke}.pnl-zero{stroke:#43516a;stroke-width:1;stroke-dasharray:5 5;vector-effect:non-scaling-stroke}.pnl-fill{fill:currentColor;opacity:.08}.pnl-axis{fill:var(--muted);font-size:22px}.side-buy{color:var(--accent);font-weight:850}.side-sell{color:var(--bad);font-weight:850}.pnl-sub{display:block;color:var(--muted);font-size:10px;margin-top:3px;text-transform:uppercase;letter-spacing:.05em}@media(max-width:650px){.pnl-chart-summary{align-items:flex-start}.pnl-chart-duration-row{align-items:flex-start;flex-direction:column}.pnl-chart-range{text-align:left}.pnl-chart-controls{justify-content:flex-start}.pnl-chart-controls button{min-width:39px}}
 '''
     html = html.replace('</style>', css + '</style>')
 
