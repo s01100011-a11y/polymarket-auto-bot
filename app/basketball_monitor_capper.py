@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 
 _INSTALLED = False
 
@@ -17,6 +18,8 @@ SPORTS = {
         "state_file": "pw_nba_export_ingest_state.json",
     },
 }
+
+DEFAULT_UNIT_USDC = Decimal("10")
 
 
 def _parse_dt(value: Any) -> datetime | None:
@@ -186,6 +189,7 @@ def install(*, app: Any, dashboard: Any, core: Any, ingest: Any, nfl: Any) -> No
         cappers: dict[str, Any] = {}
         for sport, spec in SPORTS.items():
             label = spec["label"]
+            unit_config = nfl._capper_unit_config(core, label, DEFAULT_UNIT_USDC)
             stats = nfl._stats_from_executions(
                 executions,
                 labels=(label,),
@@ -211,6 +215,13 @@ def install(*, app: Any, dashboard: Any, core: Any, ingest: Any, nfl: Any) -> No
                 **stats,
                 "sport": sport,
                 "source": f"{sport} Monitor",
+                "unit_usdc": unit_config["unit_usdc"],
+                "fixed_unit_usdc": unit_config["fixed_unit_usdc"],
+                "unit_mode": unit_config["mode"],
+                "portfolio_pct": unit_config["portfolio_pct"],
+                "portfolio_value_usdc": unit_config["portfolio_value_usdc"],
+                "unit_error": unit_config["error"],
+                "sizing_mode": "TO_WIN",
                 "signals": signals,
                 "positions": positions,
                 "feed": {
@@ -228,6 +239,45 @@ def install(*, app: Any, dashboard: Any, core: Any, ingest: Any, nfl: Any) -> No
         return {
             "cappers": cappers,
             "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _monitor_label(sport_key: str) -> str:
+        sport = str(sport_key or "").strip().upper()
+        spec = SPORTS.get(sport)
+        if spec is None:
+            raise HTTPException(status_code=404, detail="Unknown basketball monitor sport")
+        return str(spec["label"])
+
+    @app.put("/api/basketball-monitor/unit-size/{sport_key}", dependencies=[Depends(dashboard._auth)])
+    def basketball_monitor_unit_size(sport_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        label = _monitor_label(sport_key)
+        try:
+            nfl._set_capper_unit_usdc(core, label, payload.get("unit_usdc"))
+            config = nfl._capper_unit_config(core, label, DEFAULT_UNIT_USDC)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "capper": label,
+            **config,
+            "sizing_mode": "TO_WIN",
+            "note": "Fixed mode enabled. Applies to new monitor trades only; existing queued/open positions are unchanged.",
+        }
+
+    @app.put("/api/basketball-monitor/unit-percent/{sport_key}", dependencies=[Depends(dashboard._auth)])
+    def basketball_monitor_unit_percent(sport_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        label = _monitor_label(sport_key)
+        try:
+            nfl._set_capper_portfolio_pct(core, label, payload.get("portfolio_pct", 10))
+            config = nfl._capper_unit_config(core, label, DEFAULT_UNIT_USDC)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "capper": label,
+            **config,
+            "sizing_mode": "TO_WIN",
+            "note": "Portfolio-percentage mode enabled. 1u recalculates from total wallet value before each new monitor order.",
         }
 
     html = dashboard.DASHBOARD_HTML
@@ -335,13 +385,241 @@ function monitorSignals(x){
  return '<div style="margin-top:12px"><b>Signals'+(capperLast24hOnly?' · last 24h':'')+'</b>'+rows+'</div>';
 }
 
-function monitorCard(x){
+async function monitorSetUnitSize(sportKey,btn){
+ const input=document.getElementById('monitorUnitSize-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-size/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSetPortfolioPct(sportKey,btn){
+ const input=document.getElementById('monitorPortfolioPct-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-percent/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+
+function monitorCard(x,sportKey){
  if(!x)return 'No data.';
  const win=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
  const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
  const feed=x.feed||{};
  const feedOk=feed.last_success_at&&!Number(feed.consecutive_errors||0);
- return '<div class="monitor-performance">Bets '+Number(x.bets||0)+' · Open '+Number(x.open||0)+' · W-L-P '+Number(x.wins||0)+'-'+Number(x.losses||0)+'-'+Number(x.pushes||0)+' · Win '+win+
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+monitorEsc(x.unit_error)):('AUTO '+pctValue+'% of   '<br>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+monitorPnlClass(x.realized_pnl_usdc)+'">Realized P/L '+monitorMoney(x.realized_pnl_usdc)+'</span> · ROI '+roi+
+  '<br><span class="'+monitorPnlClass(x.realized_pnl_7d_usdc)+'">7D P/L '+monitorMoney(x.realized_pnl_7d_usdc)+'</span> · <span class="'+monitorPnlClass(x.realized_pnl_30d_usdc)+'">30D P/L '+monitorMoney(x.realized_pnl_30d_usdc)+'</span>'+
+  '<br><span class="capper-pnl '+monitorPnlClass(x.total_live_pnl_usdc)+'">Live P/L '+monitorMoney(x.total_live_pnl_usdc)+'</span></div>'+
+  '<div class="monitor-feed '+(feedOk?'positive':'negative')+'">Feed '+(feedOk?'CONNECTED':'CHECK')+' · last success '+monitorTime(feed.last_success_at)+' · records '+Number(feed.last_poll_records||0)+(feed.last_record_error?' · '+monitorEsc(feed.last_record_error):'')+'</div>'+
+  monitorPositions(x)+monitorSignals(x);
+}
+
+function renderBasketballMonitors(){
+ const w=document.getElementById('wnbaMonitorCard'),n=document.getElementById('nbaMonitorCard');
+ if(w)w.innerHTML=monitorCard(basketballMonitorData['WNBA Monitor - WNBA'],'wnba');
+ if(n)n.innerHTML=monitorCard(basketballMonitorData['NBA Monitor - NBA'],'nba');
+ capperSyncLast24hButtons();
+}
+window.addEventListener('capper-history-filter-change',renderBasketballMonitors);
+
+async function loadBasketballMonitors(){
+ try{
+  const r=await fetch('/api/basketball-monitor/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status failed');
+  basketballMonitorData=d.cappers||{};
+  const state=document.getElementById('basketballMonitorState');
+  if(state)state.textContent='WNBA Monitor + NBA Monitor · PW export feeds · shared capper tracking';
+  renderBasketballMonitors();
+ }catch(e){
+  const state=document.getElementById('basketballMonitorState');
+  if(state)state.textContent='Monitor error: '+String(e.message||e);
+ }
+}
+
+async function monitorSell(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'}),q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'}),sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){await loadBasketballMonitors();return}
+   if(sd.status==='FAILED')throw new Error(sd.error||'SELL failed');
+  }
+  throw new Error('SELL timed out');
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSettle(tradeId,result,btn){
+ if(!confirm('Manually settle this position as '+result+'?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(result),{method:'POST'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+loadBasketballMonitors();
+setInterval(loadBasketballMonitors,10000);
+"""
+    html = html.replace("</script>", js + "\n</script>", 1)
+    dashboard.DASHBOARD_HTML = html
++portfolioValue.toFixed(2)+' = 1u WIN   '<br>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+monitorPnlClass(x.realized_pnl_usdc)+'">Realized P/L '+monitorMoney(x.realized_pnl_usdc)+'</span> · ROI '+roi+
+  '<br><span class="'+monitorPnlClass(x.realized_pnl_7d_usdc)+'">7D P/L '+monitorMoney(x.realized_pnl_7d_usdc)+'</span> · <span class="'+monitorPnlClass(x.realized_pnl_30d_usdc)+'">30D P/L '+monitorMoney(x.realized_pnl_30d_usdc)+'</span>'+
+  '<br><span class="capper-pnl '+monitorPnlClass(x.total_live_pnl_usdc)+'">Live P/L '+monitorMoney(x.total_live_pnl_usdc)+'</span></div>'+
+  '<div class="monitor-feed '+(feedOk?'positive':'negative')+'">Feed '+(feedOk?'CONNECTED':'CHECK')+' · last success '+monitorTime(feed.last_success_at)+' · records '+Number(feed.last_poll_records||0)+(feed.last_record_error?' · '+monitorEsc(feed.last_record_error):'')+'</div>'+
+  monitorPositions(x)+monitorSignals(x);
+}
+
+function renderBasketballMonitors(){
+ const w=document.getElementById('wnbaMonitorCard'),n=document.getElementById('nbaMonitorCard');
+ if(w)w.innerHTML=monitorCard(basketballMonitorData['WNBA Monitor - WNBA']);
+ if(n)n.innerHTML=monitorCard(basketballMonitorData['NBA Monitor - NBA']);
+ capperSyncLast24hButtons();
+}
+window.addEventListener('capper-history-filter-change',renderBasketballMonitors);
+
+async function loadBasketballMonitors(){
+ try{
+  const r=await fetch('/api/basketball-monitor/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status failed');
+  basketballMonitorData=d.cappers||{};
+  const state=document.getElementById('basketballMonitorState');
+  if(state)state.textContent='WNBA Monitor + NBA Monitor · PW export feeds · shared capper tracking';
+  renderBasketballMonitors();
+ }catch(e){
+  const state=document.getElementById('basketballMonitorState');
+  if(state)state.textContent='Monitor error: '+String(e.message||e);
+ }
+}
+
+async function monitorSell(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'}),q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'}),sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){await loadBasketballMonitors();return}
+   if(sd.status==='FAILED')throw new Error(sd.error||'SELL failed');
+  }
+  throw new Error('SELL timed out');
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSettle(tradeId,result,btn){
+ if(!confirm('Manually settle this position as '+result+'?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(result),{method:'POST'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+loadBasketballMonitors();
+setInterval(loadBasketballMonitors,10000);
+"""
+    html = html.replace("</script>", js + "\n</script>", 1)
+    dashboard.DASHBOARD_HTML = html
++unitValue))
+  : ('FIXED · 1u WIN   '<br>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+monitorPnlClass(x.realized_pnl_usdc)+'">Realized P/L '+monitorMoney(x.realized_pnl_usdc)+'</span> · ROI '+roi+
+  '<br><span class="'+monitorPnlClass(x.realized_pnl_7d_usdc)+'">7D P/L '+monitorMoney(x.realized_pnl_7d_usdc)+'</span> · <span class="'+monitorPnlClass(x.realized_pnl_30d_usdc)+'">30D P/L '+monitorMoney(x.realized_pnl_30d_usdc)+'</span>'+
+  '<br><span class="capper-pnl '+monitorPnlClass(x.total_live_pnl_usdc)+'">Live P/L '+monitorMoney(x.total_live_pnl_usdc)+'</span></div>'+
+  '<div class="monitor-feed '+(feedOk?'positive':'negative')+'">Feed '+(feedOk?'CONNECTED':'CHECK')+' · last success '+monitorTime(feed.last_success_at)+' · records '+Number(feed.last_poll_records||0)+(feed.last_record_error?' · '+monitorEsc(feed.last_record_error):'')+'</div>'+
+  monitorPositions(x)+monitorSignals(x);
+}
+
+function renderBasketballMonitors(){
+ const w=document.getElementById('wnbaMonitorCard'),n=document.getElementById('nbaMonitorCard');
+ if(w)w.innerHTML=monitorCard(basketballMonitorData['WNBA Monitor - WNBA']);
+ if(n)n.innerHTML=monitorCard(basketballMonitorData['NBA Monitor - NBA']);
+ capperSyncLast24hButtons();
+}
+window.addEventListener('capper-history-filter-change',renderBasketballMonitors);
+
+async function loadBasketballMonitors(){
+ try{
+  const r=await fetch('/api/basketball-monitor/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status failed');
+  basketballMonitorData=d.cappers||{};
+  const state=document.getElementById('basketballMonitorState');
+  if(state)state.textContent='WNBA Monitor + NBA Monitor · PW export feeds · shared capper tracking';
+  renderBasketballMonitors();
+ }catch(e){
+  const state=document.getElementById('basketballMonitorState');
+  if(state)state.textContent='Monitor error: '+String(e.message||e);
+ }
+}
+
+async function monitorSell(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'}),q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'}),sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){await loadBasketballMonitors();return}
+   if(sd.status==='FAILED')throw new Error(sd.error||'SELL failed');
+  }
+  throw new Error('SELL timed out');
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSettle(tradeId,result,btn){
+ if(!confirm('Manually settle this position as '+result+'?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(result),{method:'POST'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+loadBasketballMonitors();
+setInterval(loadBasketballMonitors,10000);
+"""
+    html = html.replace("</script>", js + "\n</script>", 1)
+    dashboard.DASHBOARD_HTML = html
++fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div style="margin:6px 0 9px"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:12px">FIXED 1u WIN $</b><input id="monitorUnitSize-'+sportKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px;'+fixedBtnStyle+'" onclick="monitorSetUnitSize(\''+sportKey+'\',this)">SET 1U</button><b style="font-size:12px;margin-left:4px">% PORTFOLIO</b><input id="monitorPortfolioPct-'+sportKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'" style="width:72px"><button type="button" style="padding:5px 8px;min-height:34px;'+autoBtnStyle+'" onclick="monitorSetPortfolioPct(\''+sportKey+'\',this)">AUTO %</button></div><div style="font-size:11px;opacity:.78;margin-top:3px">'+modeText+' · sizing is TO WIN; risk changes with the live price</div></div>';
+ return unitControl+'<div class="monitor-performance">Bets '+Number(x.bets||0)+' · Open '+Number(x.open||0)+' · W-L-P '+Number(x.wins||0)+'-'+Number(x.losses||0)+'-'+Number(x.pushes||0)+' · Win '+win+
   '<br>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+monitorPnlClass(x.realized_pnl_usdc)+'">Realized P/L '+monitorMoney(x.realized_pnl_usdc)+'</span> · ROI '+roi+
   '<br><span class="'+monitorPnlClass(x.realized_pnl_7d_usdc)+'">7D P/L '+monitorMoney(x.realized_pnl_7d_usdc)+'</span> · <span class="'+monitorPnlClass(x.realized_pnl_30d_usdc)+'">30D P/L '+monitorMoney(x.realized_pnl_30d_usdc)+'</span>'+
   '<br><span class="capper-pnl '+monitorPnlClass(x.total_live_pnl_usdc)+'">Live P/L '+monitorMoney(x.total_live_pnl_usdc)+'</span></div>'+
