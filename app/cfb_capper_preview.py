@@ -2765,7 +2765,7 @@ async function cfbSellPosition(tradeId,btn){
 let cfbHideFinished=localStorage.getItem('cfbHideFinished')==='1';
 function cfbUpdateFinishedToggle(){
  const btn=document.getElementById('cfbFinishedToggle');
- if(btn)btn.textContent=cfbHideFinished?'Show finished':'Hide finished';
+ if(btn){btn.textContent=cfbHideFinished?'Show finished':'Hide finished';btn.classList.toggle('active',cfbHideFinished);btn.setAttribute('aria-pressed',cfbHideFinished?'true':'false')}
 }
 function cfbRenderCappers(){
  const s=document.getElementById('cfbCapperSlam'),y=document.getElementById('cfbCapperSyndicate');
@@ -2915,7 +2915,7 @@ function cfbCapperLine(x,sourceKey){
  const specs=cfbTabSpec(x);
  const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>{
   const selected=s[0]===active;
-  return '<button type="button" style="padding:5px 8px;min-height:34px;'+(selected?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="cfbSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+cfbEsc(s[1])+' '+s[2]+'</button>';
+  return '<button type="button" class="'+(selected?'active':'')+'" aria-pressed="'+(selected?'true':'false')+'" style="padding:5px 8px;min-height:34px;'+(selected?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="cfbSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+cfbEsc(s[1])+' '+s[2]+'</button>';
  }).join('')+'</div>';
  const spec=specs.find(s=>s[0]===active)||specs[0];
  const items=spec[3]||[];
@@ -2930,7 +2930,7 @@ function cfbCapperLine(x,sourceKey){
   : ('FIXED · 1u WIN $'+fixedValue);
  const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
  const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
- const unitControl='<div style="margin:6px 0 9px"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:12px">FIXED 1u WIN $</b><input id="cfbUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px;'+fixedBtnStyle+'" onclick="cfbSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><b style="font-size:12px;margin-left:4px">% PORTFOLIO</b><input id="cfbPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'" style="width:72px"><button type="button" style="padding:5px 8px;min-height:34px;'+autoBtnStyle+'" onclick="cfbSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button></div><div style="font-size:11px;opacity:.78;margin-top:3px">'+modeText+' · percentage mode recalculates before each new/retried order; risk still varies by odds</div></div>';
+ const unitControl='<div style="margin:6px 0 9px"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:12px">FIXED 1u WIN $</b><input id="cfbUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'" style="width:82px"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="padding:5px 8px;min-height:34px;'+fixedBtnStyle+'" onclick="cfbSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><b style="font-size:12px;margin-left:4px">% PORTFOLIO</b><input id="cfbPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'" style="width:72px"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="padding:5px 8px;min-height:34px;'+autoBtnStyle+'" onclick="cfbSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button></div><div style="font-size:11px;opacity:.78;margin-top:3px">'+modeText+' · percentage mode recalculates before each new/retried order; risk still varies by odds</div></div>';
  return unitControl+performance+cfbPositionList(x)+tabs+body;
 }
 async function loadCfbCapperStats(){
