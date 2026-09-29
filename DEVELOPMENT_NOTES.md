@@ -1,3 +1,11 @@
+## 2026-09-29 — Sport-level AUTO-TRADING status row
+
+The auto-trading windows now use a consistent two-level control model. The blue Win95 title bar contains only the sport title (`NFL AUTO-TRADING`, `CFB AUTO-TRADING`, `WNBA AUTO-TRADING`, `NBA AUTO-TRADING`). Immediately below it, a dedicated grey status row shows `ENABLED · AUTO LIVE` or `ENABLED · AUTO OFF` plus the sport's Online/Offline button.
+
+NFL and CFB gained persistent sport master keys (`NFL Auto-Trading`, `CFB Auto-Trading`) in the existing `capper_enabled_state.json` store. These gates are checked before the per-capper Slam/Syndicate gates, so the sport can be paused without changing individual capper preferences. New signals become `PAUSED_SPORT` while offline and remain eligible for the existing freshness/game-state logic after re-enable. Queued and open positions are not modified.
+
+WNBA and NBA were split into independent dashboard windows. Their existing monitor-enabled state already functions as the execution gate, so the same per-sport switch is now displayed in the new status row instead of inside the monitor card.
+
 ## 2026-09-29 — Per-capper online/offline execution gates
 
 The dashboard now has a second level of operational control below the existing master bot switch. Each Slam/Syndicate NFL and CFB card and each WNBA/NBA monitor card persists its own enabled state in `data/capper_enabled_state.json`. The state defaults online so existing deployments do not silently change behavior after upgrade.

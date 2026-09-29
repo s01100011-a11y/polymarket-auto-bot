@@ -66,6 +66,10 @@ def test_basketball_monitors_have_persistent_online_controls_and_execution_gate(
 
     assert '"/api/basketball-monitor/enabled/{sport_key}"' in source
     assert "monitorToggleCapper" in source
+    assert '<div class="capper-panel-title">WNBA AUTO-TRADING</div>' in source
+    assert '<div class="capper-panel-title">NBA AUTO-TRADING</div>' in source
+    assert 'id="wnbaMonitorState"' in source
+    assert 'id="nbaMonitorState"' in source
     assert 'id="monitorCapperPower-wnba"' in source
     assert 'id="monitorCapperPower-nba"' in source
     assert "capper_control.is_enabled(core, monitor_label)" in live
