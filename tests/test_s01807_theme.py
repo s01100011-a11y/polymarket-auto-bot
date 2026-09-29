@@ -115,3 +115,20 @@ def test_capper_cards_use_clean_responsive_layout():
     assert 'class="capper-tabs"' in cfb
     assert 'class="capper-sizing"' in basketball
     assert 'class="capper-metrics-grid"' in basketball
+
+
+def test_pw_and_legacy_panels_follow_main_win95_theme():
+    source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+
+    assert "Normalize legacy PW/research/control panels to the Win95 dashboard system" in source
+    assert ".slack-mode-box{" in source
+    assert ".pw-strategy-card{" in source
+    assert ".pw-strategy-metric{" in source
+    assert ".pw-filter-table-wrap{" in source
+    assert ".pw-filter-final{" in source
+    assert ".live-test-warning,.live-test-lock,.live-test-result{" in source
+    assert "background:#c0c0c0!important" in source
+    assert "background:#000!important" in source
+    assert "color:#fff!important" in source
+    assert "var(--retro-green)" in source
+    assert "var(--retro-red)" in source
