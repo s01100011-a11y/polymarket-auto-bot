@@ -95,7 +95,7 @@ def _install_s01807_win95_theme() -> None:
       <div class="win95-title-left">
         <span class="win95-logo" aria-hidden="true"><i class="win95-logo-red"></i><i class="win95-logo-green"></i><i class="win95-logo-blue"></i><i class="win95-logo-yellow"></i></span>
         <span class="win95-title-text" id="win95Title">S01807 v—</span>
-        <span class="win95-title-date" id="versionDateLabel">Version date —</span>
+        <span class="win95-title-date" id="versionDateLabel">—</span>
       </div>
       <div class="win95-window-controls" aria-hidden="true">
         <span class="win95-window-control win95-minimize">_</span>
@@ -103,13 +103,17 @@ def _install_s01807_win95_theme() -> None:
         <span class="win95-window-control win95-close">×</span>
       </div>
     </div>
+    <div class="top-mode-status-row capper-panel-status-row">
+      <div class="capper-status-field top-mode-field">
+        <div class="capper-status-label">MODE</div>
+        <div class="nfl-capper-state top-mode-state" id="mode">—</div>
+      </div>
+      <button type="button" class="badge capper-power-btn sport-power-btn" id="botPowerBtn" data-enabled="1" aria-pressed="true" title="Dashboard master bot switch"><span class="dot"></span><span id="serviceState">Connecting</span></button>
+    </div>
     <div class="win95-info-strip">
       <div class="win95-info-group win95-time-group">
         <span class="win95-time-box" id="updated">Updated —</span>
         <span class="win95-time-box" id="uptime">Uptime —</span>
-      </div>
-      <div class="win95-info-group win95-info-right">
-        <button type="button" class="badge" id="botPowerBtn" data-enabled="1" aria-pressed="true" title="Dashboard master bot switch"><span class="dot"></span><span id="serviceState">Connecting</span></button>
       </div>
     </div>
   </div>'''
@@ -146,6 +150,17 @@ a{color:#0000ee;text-decoration:underline}
  background:transparent;
  border:0;
  box-shadow:none;
+}
+.wrap > .top.win95-app-chrome,
+.wrap > .nfl-capper-panel,
+.wrap > #basketballMonitorStats,
+.wrap > .win95-stats-window,
+.wrap > .panel,
+.wrap > .slack-mode-box{
+ width:calc(100% - 16px)!important;
+ margin-left:auto!important;
+ margin-right:auto!important;
+ box-sizing:border-box!important;
 }
 .top.win95-app-chrome{
  display:block!important;
@@ -249,15 +264,28 @@ a{color:#0000ee;text-decoration:underline}
 .win95-minimize{align-items:flex-end;padding-bottom:2px}
 .win95-maximize{font-size:12px}
 .win95-close{font-size:15px}
+.top-mode-status-row{
+ margin:0!important;
+ padding:7px 5px 4px!important;
+ background:#c0c0c0!important;
+ box-sizing:border-box!important;
+}
+.top-mode-field{flex:1 1 auto!important}
+.top-mode-state{width:100%!important;box-sizing:border-box!important}
+.top-mode-status-row #botPowerBtn{
+ align-self:flex-end!important;
+ min-height:30px!important;
+ margin:0 0 0 auto!important;
+}
 .win95-info-strip{
  display:flex;
  align-items:center;
- justify-content:space-between;
+ justify-content:flex-start;
  gap:8px;
  flex-wrap:wrap;
- padding:4px 5px 3px;
+ padding:4px 5px 5px;
  background:#c0c0c0;
- border-top:1px solid #dfdfdf;
+ border-top:0;
  color:#000;
 }
 .win95-info-group{
@@ -1111,6 +1139,12 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 }
 @media(max-width:900px){
  .wrap{margin:0;padding:2px;box-shadow:none}
+ .wrap > .top.win95-app-chrome,
+ .wrap > .nfl-capper-panel,
+ .wrap > #basketballMonitorStats,
+ .wrap > .win95-stats-window,
+ .wrap > .panel,
+ .wrap > .slack-mode-box{width:calc(100% - 12px)!important}
  .wallet-live-layout{grid-template-columns:1fr!important}
  .win95-info-strip{align-items:flex-start}
  .win95-info-right{margin-left:0;justify-content:flex-start}
