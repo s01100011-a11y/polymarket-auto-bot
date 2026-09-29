@@ -1775,7 +1775,7 @@ class CfbFinishedResultsAndPerformanceTests(unittest.TestCase):
         rendered = capper._inject_dashboard_panel(html)
 
         self.assertIn("cfb-capper-performance", rendered)
-        self.assertIn("CFB capper auto-trading", rendered)
+        self.assertIn("CFB AUTO-TRADING", rendered)
         self.assertIn("ENABLED · AUTO LIVE", rendered)
         self.assertIn("ENABLED · AUTO OFF", rendered)
         self.assertIn("Trade P/L", rendered)
