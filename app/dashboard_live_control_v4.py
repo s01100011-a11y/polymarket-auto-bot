@@ -111,7 +111,9 @@ def _mode() -> dict[str, Any]:
     saved = core._load(SLACK_MODE_FILE)
     # Railway AUTO_TRADING is authoritative. When enabled, no saved/dashboard
     # state may disable automatic live preparation/execution.
-    auto_prepare_enabled = bool(core.auto_trading_enabled()) or bool(saved.get("auto_prepare_enabled", saved.get("live_enabled", False)))
+    auto_prepare_enabled = bool(core.bot_enabled()) and (
+        bool(core.auto_trading_enabled()) or bool(saved.get("auto_prepare_enabled", saved.get("live_enabled", False)))
+    )
     default_stake = min(Decimal("5"), core.MAX_AUTO_TRADE_USDC)
     stake = Decimal(str(saved.get("stake_usdc") or default_stake))
     stake = min(stake, core.MAX_AUTO_TRADE_USDC)
@@ -120,7 +122,7 @@ def _mode() -> dict[str, Any]:
 
 def _save_mode(auto_prepare_enabled: bool, stake_usdc: Decimal) -> dict[str, Any]:
     stake = min(Decimal(str(stake_usdc)), core.MAX_AUTO_TRADE_USDC)
-    effective_auto = bool(core.auto_trading_enabled()) or bool(auto_prepare_enabled)
+    effective_auto = bool(core.bot_enabled()) and (bool(core.auto_trading_enabled()) or bool(auto_prepare_enabled))
     data = {"auto_prepare_enabled": effective_auto, "live_enabled": bool(core.auto_trading_enabled()), "stake_usdc": str(stake), "railway_override": bool(core.auto_trading_enabled())}
     core._save(SLACK_MODE_FILE, data)
     # Railway AUTO_TRADING authorizes unattended dispatch; normal risk filters still apply.
@@ -207,6 +209,8 @@ def _slack_trade_handler(
     slack_event_id: str,
     slack_event: dict[str, Any],
 ) -> dict[str, Any]:
+    if not core.bot_enabled():
+        raise ValueError("Dashboard master switch is OFF")
     mode = _mode()
     monitor_sport = str(slack_event.get("monitor_sport") or "").upper()
     monitor_source = str(slack_event.get("monitor_source") or "").strip()
