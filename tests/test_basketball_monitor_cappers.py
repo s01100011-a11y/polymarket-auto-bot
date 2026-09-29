@@ -74,3 +74,12 @@ def test_basketball_monitors_have_persistent_online_controls_and_execution_gate(
     assert 'id="monitorCapperPower-nba"' in source
     assert "capper_control.is_enabled(core, monitor_label)" in live
     assert 'raise ValueError(f"{monitor_label} is OFFLINE")' in live
+
+
+def test_basketball_sections_use_the_same_badge_format():
+    source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+
+    assert '<span class="capper-section-badge">Open positions</span>' in source
+    assert '<span class="capper-section-badge">Settled positions' in source
+    assert '<span class="capper-section-badge">Signals' in source
+    assert "Signals signals" not in source
