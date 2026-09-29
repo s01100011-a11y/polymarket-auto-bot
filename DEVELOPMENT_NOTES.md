@@ -1,3 +1,9 @@
+## 2026-09-30 — Shared capper section badge hierarchy
+
+Capper card section labels now use `.capper-section-badge` for a single consistent Win95 treatment. This applies to Open positions, Settled positions, and the active signal/status list heading across NFL/CFB plus the WNBA/NBA monitor sections. NFL and CFB now pass the tab label directly into their list renderer, removing the old concatenation that produced `Signals signals`.
+
+NFL/CFB event-state chips now use `.capper-event-badge`, which centralizes shape, type, spacing, and alignment while leaving the per-state color supplied by the existing phase visual logic. Empty tab sections render the same badge before their empty-state message so the card hierarchy remains stable.
+
 ## 2026-09-29 — STATUS field and capper container styling
 
 The AUTO-TRADING sport header now uses a labeled status control instead of bare text. Each sport renders a `STATUS` label with the live `ENABLED · AUTO LIVE/OFF` string inside a white inset Win95 text field, while the sport Online/Offline button remains on the same row.

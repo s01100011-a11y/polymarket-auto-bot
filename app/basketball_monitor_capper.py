@@ -381,7 +381,7 @@ function monitorPositions(x){
   return '<div class="nfl-position-row open"><div class="nfl-position-title">'+monitorEsc(item.selection||item.market||'Position')+' · OPEN</div><div>'+monitorEsc(item.outcome||'')+' · Entry '+entry+' · Live '+live+'</div><div class="nfl-position-pnl '+monitorPnlClass(raw)+'">Live P/L '+pnl+'</div>'+sell+'</div>';
  }).join(''):'<div class="monitor-empty">No open positions.</div>';
 
- let html='<div style="margin-top:9px"><b>Open positions</b>'+openHtml+'</div>';
+ let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+openHtml+'</div>';
  if(settled.length||capperLast24hOnly){
   const settledHtml=settled.length?settled.map(item=>{
    const result=String(item.result||'').toUpperCase();
@@ -392,7 +392,7 @@ function monitorPositions(x){
    const label=result?' · '+result:(awaiting?' · AWAITING SETTLEMENT':'');
    return '<div class="nfl-position-row '+(result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'')+'"><div class="nfl-position-title">'+monitorEsc(item.selection||item.market||'Position')+label+'</div><div>'+monitorEsc(item.outcome||'')+(item.stake_usdc?' · Stake $'+Number(item.stake_usdc).toFixed(2):'')+'</div>'+pnl+manual+'</div>';
   }).join(''):'<div class="monitor-empty">No settled positions in the last 24 hours.</div>';
-  html+='<div style="margin-top:12px"><b>Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</b>'+settledHtml+'</div>';
+  html+='<div style="margin-top:12px"><span class="capper-section-badge">Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</span>'+settledHtml+'</div>';
  }
  return html;
 }
@@ -400,7 +400,7 @@ function monitorPositions(x){
 function monitorSignals(x){
  let items=Array.isArray(x.signals)?x.signals:[];
  if(capperLast24hOnly)items=items.filter(item=>capperWithin24h(item.posted_at||item.received_at));
- if(!items.length)return '<div style="margin-top:12px"><b>Signals'+(capperLast24hOnly?' · last 24h':'')+'</b><div class="monitor-empty">No monitor signals in this window.</div></div>';
+ if(!items.length)return '<div style="margin-top:12px"><span class="capper-section-badge">Signals'+(capperLast24hOnly?' · last 24h':'')+'</span><div class="monitor-empty">No monitor signals in this window.</div></div>';
  const rows=items.map(item=>{
   const meta=[];
   if(item.posted_at)meta.push('Signal '+monitorTime(item.posted_at));
@@ -418,7 +418,7 @@ function monitorSignals(x){
   }
   return '<div class="monitor-signal"><b>'+monitorEsc(item.selection||'Unknown selection')+'</b><div class="monitor-meta">'+meta.join(' · ')+'</div>'+(action?'<div class="monitor-meta">'+monitorEsc(action)+'</div>':'')+trade+'</div>';
  }).join('');
- return '<div style="margin-top:12px"><b>Signals'+(capperLast24hOnly?' · last 24h':'')+'</b>'+rows+'</div>';
+ return '<div style="margin-top:12px"><span class="capper-section-badge">Signals'+(capperLast24hOnly?' · last 24h':'')+'</span>'+rows+'</div>';
 }
 
 async function monitorSetUnitSize(sportKey,btn){

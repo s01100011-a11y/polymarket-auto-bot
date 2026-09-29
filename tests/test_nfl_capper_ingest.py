@@ -1388,3 +1388,14 @@ def test_nfl_capper_dashboard_has_persistent_online_controls():
     assert 'id="nflSportPower"' in source
     assert 'id="nflCapperPower-slam"' in source
     assert 'id="nflCapperPower-syndicate"' in source
+
+
+def test_nfl_section_labels_are_not_duplicated_and_use_shared_badges():
+    source = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
+
+    assert "spec[1]+' signals'" not in source
+    assert "Signals signals" not in source
+    assert '<span class="capper-section-badge">Open positions</span>' in source
+    assert '<span class="capper-section-badge">Settled positions' in source
+    assert 'class="capper-event-badge"' in source
+    assert "nflPickList(spec[1],spec[3],spec[4])" in source

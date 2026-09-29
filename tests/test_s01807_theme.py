@@ -181,3 +181,13 @@ def test_capper_outer_cards_are_grey_with_black_data_boxes():
     assert "background:#080808" in source
     assert ".capper-card-head>b{" in source
     assert "color:#000!important" in source
+
+
+def test_capper_section_and_event_badges_share_consistent_formatting():
+    source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+
+    assert ".capper-section-badge{" in source
+    assert ".capper-event-badge{" in source
+    assert 'font:700 11px/1.1 "MS Sans Serif",Tahoma,Arial,sans-serif!important' in source
+    assert 'font:700 11px/1 "MS Sans Serif",Tahoma,Arial,sans-serif!important' in source
+    assert "border-radius:0!important" in source

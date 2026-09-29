@@ -2297,3 +2297,14 @@ def test_cfb_capper_dashboard_has_persistent_online_controls():
     assert 'id="cfbSportPower"' in source
     assert 'id="cfbCapperPower-slam"' in source
     assert 'id="cfbCapperPower-syndicate"' in source
+
+
+def test_cfb_section_labels_are_not_duplicated_and_use_shared_badges():
+    source = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
+
+    assert "spec[1]+' signals'" not in source
+    assert "Signals signals" not in source
+    assert '<span class="capper-section-badge">Open positions</span>' in source
+    assert '<span class="capper-section-badge">Settled positions' in source
+    assert 'class="capper-event-badge"' in source
+    assert "cfbPickList(spec[1],items,spec[4])" in source
