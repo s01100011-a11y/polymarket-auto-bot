@@ -42,3 +42,16 @@ def test_win95_app_chrome_has_one_line_title_and_fake_window_controls():
     assert 'id="versionDateLabel"' in source
     assert 'id="updated"' in source
     assert 'id="serviceState"' in source
+
+
+def test_major_dashboard_windows_show_teal_desktop_between_sections():
+    source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+
+    assert ".wrap{" in source
+    assert "background:transparent" in source
+    assert ".wallet-live-layout{gap:10px" in source
+    assert "win95-stats-window" in source
+    assert "POLYMARKET WALLET" in source
+    assert ">STATS</span>" in source
+    assert "s01807InstallSectionWindows" in source
+    assert "s01807MiniControls" in source
