@@ -1,5 +1,13 @@
 # CHANGES
 
+## 2026-09-29 — White STATUS fields and grey capper cards
+
+- Reworked the sport AUTO-TRADING status row so the current `ENABLED · AUTO LIVE/OFF` text sits inside a white Win95-style text field labeled `STATUS`.
+- Applied the same STATUS field treatment to NFL, CFB, WNBA, and NBA.
+- Changed the outer capper/monitor card background from black to Windows grey for Slam NFL, Syndicate NFL, Slam CFB, Syndicate CFB, WNBA Monitor, and NBA Monitor.
+- Kept the inner sizing, metrics, position, and signal data areas dark so the grey card acts as a clear container around the black data boxes.
+- Updated theme regression tests for the new status field and capper-card color hierarchy.
+
 ## 2026-09-29 — Sport AUTO-TRADING title bars and sport-level power buttons
 
 - Renamed the sport windows to the shorter consistent titles: **NFL AUTO-TRADING**, **CFB AUTO-TRADING**, **WNBA AUTO-TRADING**, and **NBA AUTO-TRADING**.

@@ -2862,7 +2862,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
       <div class="capper-panel-title">NFL AUTO-TRADING</div>
     </div>
     <div class="capper-panel-status-row">
-      <div class="nfl-capper-state" id="nflCapperState">Loading…</div>
+      <div class="capper-status-field"><div class="capper-status-label">STATUS</div><div class="nfl-capper-state" id="nflCapperState">Loading…</div></div>
       <button type="button" class="badge capper-power-btn sport-power-btn" id="nflSportPower" data-enabled="1" aria-pressed="true" onclick="nflToggleSport(this)" title="Toggle all NFL automatic trading"><span class="dot"></span><span class="capper-power-text">Online</span></button>
     </div>
     <div class="nfl-capper-meta" id="nflCapperMeta"></div>

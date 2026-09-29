@@ -2561,7 +2561,7 @@ def _inject_dashboard_panel(html: str) -> str:
       <div class="capper-panel-title">CFB AUTO-TRADING</div>
     </div>
     <div class="capper-panel-status-row">
-      <div class="nfl-capper-state" id="cfbCapperState">Loading…</div>
+      <div class="capper-status-field"><div class="capper-status-label">STATUS</div><div class="nfl-capper-state" id="cfbCapperState">Loading…</div></div>
       <button type="button" class="badge capper-power-btn sport-power-btn" id="cfbSportPower" data-enabled="1" aria-pressed="true" onclick="cfbToggleSport(this)" title="Toggle all CFB automatic trading"><span class="dot"></span><span class="capper-power-text">Online</span></button>
     </div>
     <div class="nfl-capper-meta" id="cfbCapperMeta"></div>

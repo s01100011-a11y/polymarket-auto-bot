@@ -1,3 +1,9 @@
+## 2026-09-29 — STATUS field and capper container styling
+
+The AUTO-TRADING sport header now uses a labeled status control instead of bare text. Each sport renders a `STATUS` label with the live `ENABLED · AUTO LIVE/OFF` string inside a white inset Win95 text field, while the sport Online/Offline button remains on the same row.
+
+The outer `.nfl-capper-card` visual role has been changed from a black data surface to a grey Win95 container. Its heading text is now black. Existing inner components such as `.capper-sizing`, `.capper-metric`, open/settled position rows, and monitor signal blocks remain dark, preserving the existing data-focused contrast while making individual cappers visually distinct from their internal data boxes.
+
 ## 2026-09-29 — Sport-level AUTO-TRADING status row
 
 The auto-trading windows now use a consistent two-level control model. The blue Win95 title bar contains only the sport title (`NFL AUTO-TRADING`, `CFB AUTO-TRADING`, `WNBA AUTO-TRADING`, `NBA AUTO-TRADING`). Immediately below it, a dedicated grey status row shows `ENABLED · AUTO LIVE` or `ENABLED · AUTO OFF` plus the sport's Online/Offline button.

@@ -529,17 +529,51 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
 .capper-panel-title{font-size:15px!important;font-weight:900!important;line-height:1.2!important;text-transform:uppercase}
 .capper-panel-status-row{
  display:flex!important;
- align-items:center!important;
+ align-items:flex-end!important;
  justify-content:space-between!important;
  gap:8px!important;
  padding:7px 0 5px!important;
  text-align:left!important;
 }
-.nfl-capper-state{color:#000!important;text-shadow:none!important;text-align:left!important;margin:0!important;font-weight:900!important}
+.capper-status-field{flex:1 1 auto;min-width:0}
+.capper-status-label{
+ display:block!important;
+ margin:0 0 3px!important;
+ color:#000!important;
+ font:700 11px/1.2 "MS Sans Serif",Tahoma,Arial,sans-serif!important;
+ text-transform:uppercase!important;
+ letter-spacing:.03em!important;
+}
+.nfl-capper-state{
+ min-height:30px!important;
+ display:flex!important;
+ align-items:center!important;
+ box-sizing:border-box!important;
+ padding:5px 8px!important;
+ background:#fff!important;
+ color:#000!important;
+ border-top:2px solid #404040!important;
+ border-left:2px solid #404040!important;
+ border-right:2px solid #fff!important;
+ border-bottom:2px solid #fff!important;
+ text-shadow:none!important;
+ text-align:left!important;
+ margin:0!important;
+ font-weight:900!important;
+}
 .nfl-capper-meta{width:100%;text-align:left!important;color:#000!important}
 .capper-panel-actions{justify-content:flex-start!important;margin-top:5px!important}
 .sport-power-btn{margin-left:auto!important}
-.nfl-capper-card,.more-stats-row{
+.nfl-capper-card{
+ background:#c0c0c0!important;
+ color:#000!important;
+ border-top:2px solid #fff!important;
+ border-left:2px solid #fff!important;
+ border-right:2px solid #404040!important;
+ border-bottom:2px solid #404040!important;
+ box-shadow:1px 1px 0 #000!important;
+}
+.more-stats-row{
  background:#000!important;
  color:#d8d8d8!important;
  border-top:2px solid #404040!important;
@@ -548,8 +582,9 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
  border-bottom:2px solid #fff!important;
  box-shadow:none!important;
 }
-.nfl-capper-card>b,.capper-card-head>b,.more-stats-row .name{color:#fff!important}
-.nfl-capper-kpis,.cfb-capper-performance{color:#bcbcbc!important}
+.nfl-capper-card>b,.capper-card-head>b{color:#000!important}
+.more-stats-row .name{color:#fff!important}
+.nfl-capper-kpis,.cfb-capper-performance{color:#000!important}
 .nfl-position-row,.cfb-open-position,.cfb-settled-position{
  background:#050505!important;
  color:#d8d8d8!important;
@@ -607,8 +642,14 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 .pnl-chart-body .label{color:var(--retro-yellow)!important}
 .pnl-chart-range{color:var(--retro-gray)!important}
 .pnl-axis{fill:var(--retro-gray)!important;font-family:"Lucida Console","Courier New",monospace!important}
-.nfl-capper-card,.more-stats-row{color:var(--retro-gray)!important}
-.nfl-capper-card>b,.capper-card-head>b,.more-stats-row .name{
+.more-stats-row{color:var(--retro-gray)!important}
+.nfl-capper-card{color:#000!important}
+.nfl-capper-card>b,.capper-card-head>b{
+ color:#000!important;
+ font-family:"Lucida Console","Courier New",monospace!important;
+ letter-spacing:.02em;
+}
+.more-stats-row .name{
  color:var(--retro-white)!important;
  font-family:"Lucida Console","Courier New",monospace!important;
  letter-spacing:.02em;
@@ -617,7 +658,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 .capper-power-btn{flex:0 0 auto!important;margin:0!important;white-space:nowrap!important}
 .capper-power-btn.offline .dot{background:#ff1616!important;border-color:#600!important}
 .capper-power-btn.offline .capper-power-text{color:#900!important}
-.nfl-capper-kpis,.cfb-capper-performance{color:var(--retro-gray)!important}
+.nfl-capper-kpis,.cfb-capper-performance{color:#000!important}
 .nfl-position-row,.cfb-open-position,.cfb-settled-position{
  font-family:"Lucida Console","Courier New",monospace!important;
 }
@@ -648,7 +689,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
  background:#c0c0c0!important;
  color:#000!important;
 }
-.wallet-data-box,.performance-card,.nfl-capper-card,.more-stats-row,
+.wallet-data-box,.performance-card,.more-stats-row,
 .setting,.ro,.exec-status-box,.monitor-signal,.table-wrap{
  background:#000!important;
  color:#fff!important;
@@ -658,18 +699,29 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
  border-bottom:2px solid #fff!important;
  box-sizing:border-box;
 }
+.nfl-capper-card{
+ background:#c0c0c0!important;
+ color:#000!important;
+ border-top:2px solid #fff!important;
+ border-left:2px solid #fff!important;
+ border-right:2px solid #404040!important;
+ border-bottom:2px solid #404040!important;
+ box-sizing:border-box;
+}
 .wallet-dashboard-row{gap:7px!important;margin-top:7px!important}
 .wallet-data-box{padding:9px!important}
-.wallet-data-box .label,.performance-card .label,.nfl-capper-card .label,
+.wallet-data-box .label,.performance-card .label,
 .more-stats-row .label,.setting .label,.ro .label,.exec-status-box .label,
 .monitor-signal .label,.table-wrap .label{
  color:#fff!important;
 }
+.nfl-capper-card .label{color:#000!important}
 .wallet-data-box .wallet-state,.wallet-data-box .performance-sub,
-.performance-card .performance-sub,.nfl-capper-card .muted,
+.performance-card .performance-sub,
 .more-stats-row .muted,.setting label,.ro .toggle-note,.exec-status-box .note{
  color:#fff!important;
 }
+.nfl-capper-card .muted{color:#000!important}
 .wallet-address,.wallet-state,.wallet-secondary{color:#fff!important}
 .win95-stats-window{background:#c0c0c0!important}
 .win95-stats-body{padding:7px!important}
