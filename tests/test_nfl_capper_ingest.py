@@ -1376,9 +1376,15 @@ if __name__ == "__main__":
 def test_nfl_capper_dashboard_has_persistent_online_controls():
     source = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
 
+    assert '"/api/nfl-cappers/sport-enabled"' in source
     assert '"/api/nfl-cappers/enabled/{capper_key}"' in source
+    assert "capper_control.is_enabled(core, SPORT_CONTROL_LABEL)" in source
     assert "capper_control.is_enabled(core, source_label)" in source
+    assert '"PAUSED_SPORT"' in source
     assert '"PAUSED_CAPPER"' in source
+    assert "nflToggleSport" in source
     assert "nflToggleCapper" in source
+    assert '<div class="capper-panel-title">NFL AUTO-TRADING</div>' in source
+    assert 'id="nflSportPower"' in source
     assert 'id="nflCapperPower-slam"' in source
     assert 'id="nflCapperPower-syndicate"' in source
