@@ -622,7 +622,16 @@ def _live_fill_snapshot(client: PublicClient, wallet: str, rec: dict[str, Any], 
 def _estimate_pnl_with_paper(records: list[dict]) -> tuple[list[dict], Decimal]:
     current: list[dict] = []
     total = Decimal("0")
-    active = [r for r in records if r.get("status") in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED", "PAPER_OPEN"}]
+    active = [
+        r
+        for r in records
+        if r.get("status") in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED", "PAPER_OPEN"}
+        or (
+            r.get("status") == "CLOSED_RECONCILED"
+            and r.get("realized_pnl") is None
+            and not (r.get("settlement") or {}).get("result")
+        )
+    ]
     if not active:
         return current, total
 
