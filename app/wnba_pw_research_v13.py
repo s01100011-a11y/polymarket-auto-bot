@@ -1022,6 +1022,37 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
  white-space:nowrap;
 }
 .capper-tabs button b{font-size:11px}
+.capper-section-badge{
+ display:inline-flex!important;
+ align-items:center!important;
+ min-height:24px!important;
+ padding:4px 8px!important;
+ background:#c0c0c0!important;
+ color:#000!important;
+ border-top:2px solid #fff!important;
+ border-left:2px solid #fff!important;
+ border-right:2px solid #404040!important;
+ border-bottom:2px solid #404040!important;
+ box-shadow:1px 1px 0 #000!important;
+ font:700 11px/1.1 "MS Sans Serif",Tahoma,Arial,sans-serif!important;
+ text-transform:uppercase!important;
+ letter-spacing:.03em!important;
+ box-sizing:border-box!important;
+}
+.capper-event-badge{
+ display:inline-flex!important;
+ align-items:center!important;
+ justify-content:center!important;
+ min-height:22px!important;
+ margin-left:7px!important;
+ padding:3px 7px!important;
+ border-radius:0!important;
+ font:700 11px/1 "MS Sans Serif",Tahoma,Arial,sans-serif!important;
+ letter-spacing:.03em!important;
+ text-transform:uppercase!important;
+ vertical-align:1px!important;
+ box-sizing:border-box!important;
+}
 .nfl-capper-card>b,.capper-card-head>b{
  display:block;
  margin-bottom:5px;
