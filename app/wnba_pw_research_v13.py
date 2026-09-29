@@ -678,11 +678,124 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 .panel>.note{color:#000!important}
 .panel .exec-status-box .note{color:#fff!important}
 .empty{background:#000!important;color:#fff!important}
+
+/* Clean capper card information hierarchy */
+.capper-sizing{
+ margin:8px 0 10px;
+ padding:7px;
+ background:#101010;
+ border:1px solid #555;
+}
+.capper-sizing-row{
+ display:grid;
+ grid-template-columns:110px minmax(0,1fr);
+ align-items:center;
+ gap:8px;
+ padding:5px 0;
+}
+.capper-sizing-row+.capper-sizing-row{border-top:1px solid #333}
+.capper-sizing-label{
+ color:#fff;
+ font:700 11px/1.2 "MS Sans Serif",Tahoma,Arial,sans-serif;
+ text-transform:uppercase;
+ letter-spacing:.03em;
+}
+.capper-sizing-controls{
+ display:flex;
+ align-items:center;
+ gap:5px;
+ min-width:0;
+ flex-wrap:wrap;
+}
+.capper-sizing-controls input{
+ width:84px!important;
+ min-width:70px;
+ box-sizing:border-box;
+}
+.capper-sizing-controls button{
+ min-height:30px!important;
+ padding:4px 8px!important;
+}
+.capper-sizing-note{
+ margin-top:5px;
+ padding-top:6px;
+ border-top:1px solid #333;
+ color:#fff;
+ font:700 11px/1.45 "Lucida Console","Courier New",monospace;
+}
+.capper-sizing-note span{font-weight:400;color:#d8d8d8}
+.capper-metrics-grid{
+ display:grid;
+ grid-template-columns:repeat(4,minmax(0,1fr));
+ gap:6px;
+ margin:9px 0 10px;
+}
+.capper-metric{
+ min-width:0;
+ padding:7px 8px;
+ background:#080808;
+ border:1px solid #3f3f3f;
+}
+.capper-metric>span{
+ display:block;
+ margin-bottom:3px;
+ color:#bfbfbf;
+ font:700 10px/1.2 "MS Sans Serif",Tahoma,Arial,sans-serif;
+ text-transform:uppercase;
+ letter-spacing:.03em;
+}
+.capper-metric>b{
+ display:block;
+ overflow-wrap:anywhere;
+ color:#fff;
+ font:700 14px/1.25 "Lucida Console","Courier New",monospace;
+ font-variant-numeric:tabular-nums;
+}
+.capper-metric .capper-pnl{font-size:14px!important}
+.capper-metric small{font-size:10px;font-weight:400;color:#bbb}
+.capper-tabs{
+ display:grid;
+ grid-template-columns:repeat(5,minmax(0,1fr));
+ gap:5px;
+ margin-top:10px;
+}
+.capper-tabs button{
+ min-width:0;
+ min-height:34px!important;
+ padding:5px 6px!important;
+ display:flex;
+ align-items:center;
+ justify-content:center;
+ gap:4px;
+ opacity:.8;
+}
+.capper-tabs button.active{opacity:1}
+.capper-tabs button span{
+ overflow:hidden;
+ text-overflow:ellipsis;
+ white-space:nowrap;
+}
+.capper-tabs button b{font-size:11px}
+.nfl-capper-card>b{
+ display:block;
+ margin-bottom:5px;
+ font-size:20px!important;
+}
 @media(max-width:900px){
  .wrap{margin:0;padding:2px;box-shadow:none}
  .wallet-live-layout{grid-template-columns:1fr!important}
  .win95-info-strip{align-items:flex-start}
  .win95-info-right{margin-left:0;justify-content:flex-start}
+}
+@media(max-width:650px){
+ .capper-metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+ .capper-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .capper-sizing-row{grid-template-columns:1fr;gap:4px}
+ .capper-sizing-controls{display:grid;grid-template-columns:auto minmax(72px,1fr) auto;gap:5px}
+ .capper-sizing-controls input{width:100%!important;min-width:0}
+ .capper-sizing-controls button{white-space:nowrap}
+ .nfl-capper-card{padding:10px!important}
+ .nfl-capper-card>b{font-size:19px!important}
 }
 @media(max-width:520px){
  body{font-size:12px}

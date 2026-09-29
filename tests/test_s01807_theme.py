@@ -94,3 +94,24 @@ def test_windows_use_grey_bodies_with_separated_black_data_boxes():
     assert ".wallet-data-box,.performance-card,.nfl-capper-card,.more-stats-row" in source
     assert "background:#000!important" in source
     assert ".wallet-dashboard-row{gap:7px!important" in source
+
+
+def test_capper_cards_use_clean_responsive_layout():
+    theme = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+    nfl = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
+    cfb = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
+    basketball = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+
+    assert ".capper-sizing{" in theme
+    assert ".capper-metrics-grid{" in theme
+    assert ".capper-tabs{" in theme
+    assert "grid-template-columns:repeat(2,minmax(0,1fr))" in theme
+    assert "grid-template-columns:repeat(3,minmax(0,1fr))" in theme
+    assert 'class="capper-sizing"' in nfl
+    assert 'class="capper-metrics-grid"' in nfl
+    assert 'class="capper-tabs"' in nfl
+    assert 'class="capper-sizing"' in cfb
+    assert 'class="capper-metrics-grid"' in cfb
+    assert 'class="capper-tabs"' in cfb
+    assert 'class="capper-sizing"' in basketball
+    assert 'class="capper-metrics-grid"' in basketball

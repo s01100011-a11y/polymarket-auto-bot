@@ -438,11 +438,24 @@ function monitorCard(x,sportKey){
   : ('FIXED · 1u WIN $'+fixedValue);
  const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
  const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
- const unitControl='<div style="margin:6px 0 9px"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:12px">FIXED 1u WIN $</b><input id="monitorUnitSize-'+sportKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'" style="width:82px"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="padding:5px 8px;min-height:34px;'+fixedBtnStyle+'" onclick="monitorSetUnitSize(\''+sportKey+'\',this)">SET 1U</button><b style="font-size:12px;margin-left:4px">% PORTFOLIO</b><input id="monitorPortfolioPct-'+sportKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'" style="width:72px"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="padding:5px 8px;min-height:34px;'+autoBtnStyle+'" onclick="monitorSetPortfolioPct(\''+sportKey+'\',this)">AUTO %</button></div><div style="font-size:11px;opacity:.78;margin-top:3px">'+modeText+' · sizing is TO WIN; risk changes with the live price</div></div>';
- return unitControl+'<div class="monitor-performance">Bets '+Number(x.bets||0)+' · Open '+Number(x.open||0)+' · W-L-P '+Number(x.wins||0)+'-'+Number(x.losses||0)+'-'+Number(x.pushes||0)+' · Win '+win+
-  '<br>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+monitorPnlClass(x.realized_pnl_usdc)+'">Realized P/L '+monitorMoney(x.realized_pnl_usdc)+'</span> · ROI '+roi+
-  '<br><span class="'+monitorPnlClass(x.realized_pnl_7d_usdc)+'">7D P/L '+monitorMoney(x.realized_pnl_7d_usdc)+'</span> · <span class="'+monitorPnlClass(x.realized_pnl_30d_usdc)+'">30D P/L '+monitorMoney(x.realized_pnl_30d_usdc)+'</span>'+
-  '<br><span class="capper-pnl '+monitorPnlClass(x.total_live_pnl_usdc)+'">Live P/L '+monitorMoney(x.total_live_pnl_usdc)+'</span></div>'+
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win</span><div class="capper-sizing-controls"><span>$</span><input id="monitorUnitSize-'+sportKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="monitorSetUnitSize(\''+sportKey+'\',this)">SET 1U</button></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio</span><div class="capper-sizing-controls"><input id="monitorPortfolioPct-'+sportKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"><span>%</span><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="monitorSetPortfolioPct(\''+sportKey+'\',this)">AUTO %</button></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk changes with the live price</span></div>'
+  +'</div>';
+ const performance='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>Bets</span><b>'+Number(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+Number(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+Number(x.wins||0)+'-'+Number(x.losses||0)+'-'+Number(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+win+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+monitorPnlClass(x.realized_pnl_usdc)+'">'+monitorMoney(x.realized_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+monitorPnlClass(x.total_live_pnl_usdc)+'">'+monitorMoney(x.total_live_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_7d_usdc)+'">'+monitorMoney(x.realized_pnl_7d_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_30d_usdc)+'">'+monitorMoney(x.realized_pnl_30d_usdc)+'</b></div>'
+  +'</div>';
+ return unitControl+performance+
   '<div class="monitor-feed '+(feedOk?'positive':'negative')+'">Feed '+(feedOk?'CONNECTED':'CHECK')+' · last success '+monitorTime(feed.last_success_at)+' · records '+Number(feed.last_poll_records||0)+(feed.last_record_error?' · '+monitorEsc(feed.last_record_error):'')+'</div>'+
   monitorPositions(x)+monitorSignals(x);
 }
