@@ -2879,11 +2879,13 @@ function nflPositionList(x){
  };
  const renderSettled=item=>{
   const result=String(item.result||'').toUpperCase();
+  const awaiting=!result&&String(item.status||'').toUpperCase()==='CLOSED_RECONCILED';
   const cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
   const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
   const pnl=raw===null?'':('<div class="nfl-position-pnl '+(raw>0?'positive':raw<0?'negative':'')+'">Realized P/L '+(raw>0?'+':'')+'$'+raw.toFixed(2)+'</div>');
   const stake=item.stake_usdc===null||item.stake_usdc===undefined?'':' · Stake $'+Number(item.stake_usdc).toFixed(2);
-  return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+(result?' · '+nflEsc(result):'')+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+'</div>';
+  const statusLabel=result?(' · '+nflEsc(result)):(awaiting?' · AWAITING SETTLEMENT':'');
+  return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+statusLabel+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+'</div>';
  };
  let html='<div style="margin-top:9px"><b>Open positions</b>'+(open.length?open.map(renderOpen).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>')+'</div>';
  if(!nflHideFinished&&settled.length)html+='<div style="margin-top:12px"><b>Settled positions</b>'+settled.map(renderSettled).join('')+'</div>';
