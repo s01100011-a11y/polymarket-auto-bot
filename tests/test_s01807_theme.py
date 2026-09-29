@@ -29,7 +29,7 @@ def test_win95_app_chrome_has_one_line_title_and_fake_window_controls():
 
     assert "<title>s01807.exe</title>" in source
     assert "win95-titlebar" in source
-    assert "win95-title-text\">s01807.exe" in source
+    assert 'id="win95Title">S01807 v—</span>' in source
     assert "win95-logo-red" in source
     assert "win95-logo-green" in source
     assert "win95-logo-blue" in source
@@ -51,7 +51,7 @@ def test_major_dashboard_windows_show_teal_desktop_between_sections():
     assert "background:transparent" in source
     assert ".wallet-live-layout{gap:10px" in source
     assert "win95-stats-window" in source
-    assert "POLYMARKET WALLET" in source
+    assert '>WALLET</span>' in source
     assert ">STATS</span>" in source
     assert "s01807InstallSectionWindows" in source
     assert "s01807MiniControls" in source
@@ -75,11 +75,22 @@ def test_top_title_power_control_and_dark_data_surfaces():
     source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
     dashboard_source = Path("app/dashboard.py").read_text(encoding="utf-8")
 
-    assert 'id="win95Title">s01807</span>' in source
+    assert 'id="win95Title">S01807 v—</span>' in source
     assert 'id="botPowerBtn"' in source
     assert '<span class="versionchip" id="versionLabel">' not in source.split("new_top = '''", 1)[1].split("'''", 1)[0]
     assert "background:#000!important" in source
     assert 'button.active,button[aria-pressed="true"]' in source
     assert "--retro-gray:#ffffff" in source
     assert '"/api/dashboard/bot-enabled"' in dashboard_source
-    assert "win95Title.textContent='s01807 '+(s.version||'—')" in dashboard_source
+    assert "win95Title.textContent='S01807 v'+(s.version||'—')" in dashboard_source
+
+
+def test_windows_use_grey_bodies_with_separated_black_data_boxes():
+    source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+
+    assert "Win95 grey window bodies with inset black data boxes" in source
+    assert ".wallet-strip,.panel,.nfl-capper-panel,.more-stats-panel,.pnl-chart-card{" in source
+    assert "background:#c0c0c0!important" in source
+    assert ".wallet-data-box,.performance-card,.nfl-capper-card,.more-stats-row" in source
+    assert "background:#000!important" in source
+    assert ".wallet-dashboard-row{gap:7px!important" in source

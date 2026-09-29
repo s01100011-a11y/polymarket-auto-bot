@@ -49,16 +49,66 @@ def _install_wallet_ui() -> None:
     if 'id="walletBalance"' in html:
         return
 
+    cards_html = '''  <div class="cards">
+    <div class="card"><div class="label">Mode</div><div class="value small" id="mode">—</div></div>
+    <div class="card"><div class="label">Active watches</div><div class="value" id="watches">—</div></div>
+    <div class="card"><div class="label">Live trades</div><div class="value" id="liveTrades">—</div></div>
+    <div class="card"><div class="label">Est. P/L</div><div class="value" id="pnl">—</div></div>
+    <div class="card"><div class="label">Daily budget used</div><div class="value small" id="budget">—</div></div>
+  </div>
+
+'''
+    # Some earlier dashboard layers rename "Live trades" to "Current trades".
+    # Remove either spelling before recreating the same live IDs inside Wallet.
+    html = html.replace(cards_html, "", 1)
+    html = html.replace(cards_html.replace("Live trades", "Current trades"), "", 1)
+
     wallet_html = '''
   <div class="wallet-live-layout">
     <div class="wallet-strip">
       <div class="wallet-main">
-        <div class="label">Polymarket wallet</div>
-        <div class="wallet-address" id="walletAddress">Checking connection…</div>
-        <div class="wallet-state" id="walletState">Read-only balance check</div>
-        <div class="wallet-metrics-stack">
-          <div class="wallet-metric"><div class="label">Available USDC</div><div class="wallet-balance" id="walletBalance">—</div></div>
-          <div class="wallet-metric"><div class="label">Positions value</div><div class="wallet-secondary" id="walletPortfolio">—</div></div>
+        <div class="label">Wallet</div>
+
+        <div class="wallet-dashboard-row wallet-row-address">
+          <div class="wallet-data-box wallet-address-box">
+            <div class="label">Wallet address</div>
+            <div class="wallet-address" id="walletAddress">Checking connection…</div>
+            <div class="wallet-state" id="walletState">Read-only balance check</div>
+          </div>
+          <div class="wallet-data-box wallet-mode-box">
+            <div class="label">Mode</div>
+            <div class="value small" id="mode">—</div>
+          </div>
+        </div>
+
+        <div class="wallet-dashboard-row wallet-row-balance">
+          <div class="wallet-data-box wallet-metric">
+            <div class="label">Available USDC</div>
+            <div class="wallet-balance" id="walletBalance">—</div>
+          </div>
+          <div class="wallet-data-box wallet-metric">
+            <div class="label">Positions value</div>
+            <div class="wallet-secondary" id="walletPortfolio">—</div>
+          </div>
+          <div class="wallet-data-box wallet-summary-box">
+            <div class="label">Est. P/L</div>
+            <div class="value" id="pnl">—</div>
+          </div>
+        </div>
+
+        <div class="wallet-dashboard-row wallet-row-activity">
+          <div class="wallet-data-box wallet-summary-box">
+            <div class="label">Daily budget used</div>
+            <div class="value small" id="budget">—</div>
+          </div>
+          <div class="wallet-data-box wallet-summary-box">
+            <div class="label">Active watches</div>
+            <div class="value" id="watches">—</div>
+          </div>
+          <div class="wallet-data-box wallet-summary-box">
+            <div class="label">Current trades</div>
+            <div class="value" id="liveTrades">—</div>
+          </div>
         </div>
       </div>
     </div>
@@ -68,7 +118,7 @@ def _install_wallet_ui() -> None:
     html = html.replace('  <div class="tabs">', wallet_html + '  <div class="tabs">', 1)
 
     css = '''
-.wallet-live-layout{display:grid;grid-template-columns:minmax(300px,.85fr) minmax(0,1.65fr);gap:14px;align-items:stretch;margin:18px 0}.wallet-strip{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:16px;padding:16px;margin:0;height:100%;box-sizing:border-box}.wallet-main{height:100%;display:flex;flex-direction:column}.wallet-address{font-size:15px;font-weight:800;margin-top:6px;word-break:break-all}.wallet-state{font-size:11px;color:var(--muted);margin-top:4px}.wallet-metrics-stack{display:grid;grid-template-columns:1fr;gap:0;margin-top:14px;border-top:1px solid var(--border)}.wallet-metric{padding:12px 0;border-bottom:1px solid var(--border)}.wallet-metric:last-child{border-bottom:0}.wallet-balance{font-size:26px;font-weight:900;color:var(--accent);margin-top:5px}.wallet-secondary{font-size:20px;font-weight:850;margin-top:5px}.wallet-error{color:var(--bad)}.wallet-graph-slot{min-width:0}.wallet-graph-slot .pnl-chart-card{height:100%;box-sizing:border-box;margin:0}.wallet-graph-slot .pnl-chart{height:210px}@media(max-width:900px){.wallet-live-layout{grid-template-columns:1fr}.wallet-graph-slot .pnl-chart-card{height:auto}}@media(max-width:700px){.wallet-metrics-stack{grid-template-columns:1fr 1fr}.wallet-metric{border-bottom:0}.wallet-metric+.wallet-metric{border-left:1px solid var(--border);padding-left:14px}}
+.wallet-live-layout{display:grid;grid-template-columns:minmax(430px,1fr) minmax(0,1.35fr);gap:14px;align-items:stretch;margin:18px 0}.wallet-strip{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:16px;padding:16px;margin:0;height:100%;box-sizing:border-box}.wallet-main{height:100%}.wallet-dashboard-row{display:grid;gap:8px;margin-top:8px}.wallet-row-address{grid-template-columns:minmax(0,1.7fr) minmax(140px,.8fr)}.wallet-row-balance{grid-template-columns:repeat(3,minmax(0,1fr))}.wallet-row-activity{grid-template-columns:repeat(3,minmax(0,1fr))}.wallet-data-box{min-width:0;padding:10px}.wallet-address{font-size:15px;font-weight:800;margin-top:6px;word-break:break-all}.wallet-state{font-size:11px;color:var(--muted);margin-top:4px}.wallet-metric{border:0}.wallet-balance{font-size:26px;font-weight:900;color:var(--accent);margin-top:5px}.wallet-secondary{font-size:20px;font-weight:850;margin-top:5px}.wallet-error{color:var(--bad)}.wallet-graph-slot{min-width:0}.wallet-graph-slot .pnl-chart-card{height:100%;box-sizing:border-box;margin:0}.wallet-graph-slot .pnl-chart{height:210px}@media(max-width:1050px){.wallet-live-layout{grid-template-columns:1fr}.wallet-graph-slot .pnl-chart-card{height:auto}}@media(max-width:700px){.wallet-row-address,.wallet-row-balance,.wallet-row-activity{grid-template-columns:1fr}.wallet-dashboard-row{gap:6px}.wallet-data-box{padding:9px}}
 '''
     html = html.replace('</style>', css + '</style>', 1)
 

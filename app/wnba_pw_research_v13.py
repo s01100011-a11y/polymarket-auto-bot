@@ -94,7 +94,7 @@ def _install_s01807_win95_theme() -> None:
     <div class="win95-titlebar">
       <div class="win95-title-left">
         <span class="win95-logo" aria-hidden="true"><i class="win95-logo-red"></i><i class="win95-logo-green"></i><i class="win95-logo-blue"></i><i class="win95-logo-yellow"></i></span>
-        <span class="win95-title-text" id="win95Title">s01807</span>
+        <span class="win95-title-text" id="win95Title">S01807 v—</span>
       </div>
       <div class="win95-window-controls" aria-hidden="true">
         <span class="win95-window-control win95-minimize">_</span>
@@ -619,6 +619,65 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 .table-wrap td{color:var(--retro-gray)!important}
 .table-wrap td.green{color:var(--retro-green)!important}
 .table-wrap td.red{color:var(--retro-red)!important}
+
+/* Win95 grey window bodies with inset black data boxes */
+.wallet-strip,.panel,.nfl-capper-panel,.more-stats-panel,.pnl-chart-card{
+ background:#c0c0c0!important;
+ color:#000!important;
+}
+.wallet-main,.win95-stats-body{
+ background:#c0c0c0!important;
+ color:#000!important;
+}
+.wallet-data-box,.performance-card,.nfl-capper-card,.more-stats-row,
+.setting,.ro,.exec-status-box,.monitor-signal,.table-wrap{
+ background:#000!important;
+ color:#fff!important;
+ border-top:2px solid #404040!important;
+ border-left:2px solid #404040!important;
+ border-right:2px solid #fff!important;
+ border-bottom:2px solid #fff!important;
+ box-sizing:border-box;
+}
+.wallet-dashboard-row{gap:7px!important;margin-top:7px!important}
+.wallet-data-box{padding:9px!important}
+.wallet-data-box .label,.performance-card .label,.nfl-capper-card .label,
+.more-stats-row .label,.setting .label,.ro .label,.exec-status-box .label,
+.monitor-signal .label,.table-wrap .label{
+ color:#fff!important;
+}
+.wallet-data-box .wallet-state,.wallet-data-box .performance-sub,
+.performance-card .performance-sub,.nfl-capper-card .muted,
+.more-stats-row .muted,.setting label,.ro .toggle-note,.exec-status-box .note{
+ color:#fff!important;
+}
+.wallet-address,.wallet-state,.wallet-secondary{color:#fff!important}
+.win95-stats-window{background:#c0c0c0!important}
+.win95-stats-body{padding:7px!important}
+.win95-stats-body .performance-strip{gap:7px!important;margin:0 0 7px!important}
+.more-stats-panel{padding:7px!important}
+.more-stats-grid{gap:7px!important}
+.pnl-chart-card{padding:0!important}
+.pnl-chart-body{
+ margin:7px!important;
+ padding:8px!important;
+ background:#000!important;
+ color:#fff!important;
+ border-top:2px solid #404040!important;
+ border-left:2px solid #404040!important;
+ border-right:2px solid #fff!important;
+ border-bottom:2px solid #fff!important;
+ box-sizing:border-box;
+}
+.pnl-chart-body .label{color:var(--retro-yellow)!important}
+.pnl-chart{background:#000!important}
+.nfl-capper-panel{padding:8px!important}
+.nfl-capper-grid{gap:7px!important}
+.nfl-capper-card{padding:9px!important}
+.panel{padding:8px!important}
+.panel>.note{color:#000!important}
+.panel .exec-status-box .note{color:#fff!important}
+.empty{background:#000!important;color:#fff!important}
 @media(max-width:900px){
  .wrap{margin:0;padding:2px;box-shadow:none}
  .wallet-live-layout{grid-template-columns:1fr!important}
@@ -646,7 +705,7 @@ function s01807MiniControls(){
 function s01807InstallSectionWindows(){
  const wallet=document.querySelector('.wallet-strip');
  if(wallet&&!wallet.querySelector(':scope > .win95-section-titlebar')){
-  wallet.insertAdjacentHTML('afterbegin','<div class="win95-section-titlebar"><span class="win95-section-title">POLYMARKET WALLET</span>'+s01807MiniControls()+'</div>');
+  wallet.insertAdjacentHTML('afterbegin','<div class="win95-section-titlebar"><span class="win95-section-title">WALLET</span>'+s01807MiniControls()+'</div>');
  }
 
  const statsFilter=document.getElementById('statsModeFilter');
