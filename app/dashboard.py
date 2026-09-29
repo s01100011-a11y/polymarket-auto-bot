@@ -393,14 +393,20 @@ async function loadExecutorEvents(){
 async function load(){
  try{
   const r=await fetch('/api/dashboard',{cache:'no-store'}); if(!r.ok)throw new Error('HTTP '+r.status); const d=await r.json(),s=d.status;
-  const serviceState=document.getElementById('serviceState'),versionLabel=document.getElementById('versionLabel'),versionDateLabel=document.getElementById('versionDateLabel'),win95Title=document.getElementById('win95Title'),powerBtn=document.getElementById('botPowerBtn');
+  const serviceState=document.getElementById('serviceState'),versionLabel=document.getElementById('versionLabel'),versionDateLabel=document.getElementById('versionDateLabel'),win95Title=document.getElementById('win95Title'),powerBtn=document.getElementById('botPowerBtn'),updatedEl=document.getElementById('updated'),uptimeEl=document.getElementById('uptime');
   if(serviceState)serviceState.textContent=s.bot_enabled===false?'Offline':'Online';
   if(versionLabel)versionLabel.textContent='v'+(s.version||'—');
   if(versionDateLabel)versionDateLabel.textContent='Version date '+(s.version_date||'—');
   if(win95Title)win95Title.textContent='S01807 v'+(s.version||'—');
   document.title='S01807 v'+(s.version||'—');
   if(powerBtn){powerBtn.dataset.enabled=s.bot_enabled===false?'0':'1';powerBtn.classList.toggle('active',s.bot_enabled!==false);powerBtn.classList.toggle('offline',s.bot_enabled===false);powerBtn.setAttribute('aria-pressed',s.bot_enabled!==false?'true':'false')}
-  document.getElementById('updated').textContent='Updated '+new Date(d.generated_at).toLocaleTimeString()+' · uptime '+Math.floor(s.uptime_seconds/60)+'m';
+  if(updatedEl)updatedEl.textContent='Updated '+new Date(d.generated_at).toLocaleTimeString();
+  if(uptimeEl){
+   const uptimeSeconds=Math.max(0,Number(s.uptime_seconds||0));
+   const uptimeHours=Math.floor(uptimeSeconds/3600);
+   const uptimeMinutes=Math.floor((uptimeSeconds%3600)/60);
+   uptimeEl.textContent='Uptime '+(uptimeHours?uptimeHours+'h ':'')+uptimeMinutes+'m';
+  }
   document.getElementById('mode').textContent=(s.bot_enabled===false?'OFFLINE':(s.live_trading?'LIVE':'DRY RUN'))+' · Auto '+(s.auto_trading?'ON':'OFF'); document.getElementById('watches').textContent=s.active_watches; document.getElementById('liveTrades').textContent=s.submitted_live_trades; setPnl(document.getElementById('pnl'),s.estimated_total_pnl); document.getElementById('budget').textContent=money(s.daily_budget_used)+' / '+money(s.max_daily_budget_usdc); document.getElementById('pnlNote').textContent=s.pnl_note;
   document.getElementById('roLive').textContent=s.live_trading?'ENABLED':'DISABLED'; document.getElementById('roAuto').textContent=s.auto_trading?'ENABLED':'DISABLED'; document.getElementById('roPolitics').textContent=s.block_political_auto?'BLOCKED':'UNBLOCKED';
   const autoBtn=document.getElementById('autoTradingBtn'),autoNote=document.getElementById('autoTradingNote'); autoBtn.dataset.enabled=s.auto_trading?'1':'0'; autoBtn.textContent=s.auto_trading?'AUTO TRADING ON':'AUTO TRADING OFF'; autoBtn.classList.toggle('active',!!s.auto_trading); autoBtn.disabled=!!(s.live_trading&&!s.auto_trading); autoNote.textContent=s.live_trading?'Live mode is active: this control cannot enable unattended real-money execution.':'Controls paper trading and automatic order preparation.';
@@ -411,7 +417,12 @@ async function load(){
   document.getElementById('historyBody').innerHTML=table(['Status','Market','Outcome','Actual entry','Limit','Shares','Actual cost','Source','Time','Order ID'],hr);
   Object.entries(d.settings).forEach(([k,v])=>{const e=document.getElementById(k);if(e&&!e.dataset.dirty)e.value=v});
   await loadExecutorEvents();
- }catch(e){document.getElementById('serviceState').textContent='Dashboard error';document.getElementById('updated').textContent=String(e)}
+ }catch(e){
+  document.getElementById('serviceState').textContent='Dashboard error';
+  const updatedEl=document.getElementById('updated'),uptimeEl=document.getElementById('uptime');
+  if(updatedEl)updatedEl.textContent=String(e);
+  if(uptimeEl)uptimeEl.textContent='Uptime —';
+ }
 }
 async function setDashboardBotEnabled(enabled){
  const btn=document.getElementById('botPowerBtn');

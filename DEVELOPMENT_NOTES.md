@@ -1,3 +1,11 @@
+## 2026-09-30 — Top chrome / Wallet merge and time fields
+
+The Win95 theme now moves `.wallet-live-layout` into `.top.win95-app-chrome` at DOM install time. This keeps the existing Wallet data/graph logic intact while making the Wallet body part of the top application window. The old synthetic `WALLET` section title bar is no longer created. The nested `.wallet-strip` loses its extra outer frame when hosted inside the top chrome so the Wallet reads as content rather than a second window.
+
+`versionDateLabel` now renders inside the blue application title bar. Dashboard refresh logic keeps `Updated` and `Uptime` in separate elements; both are styled as larger white inset Win95 text fields. Uptime is formatted as hours/minutes instead of one long combined Updated/Uptime string.
+
+`.capper-section-badge` now follows the same visual dimensions as the capper tab badges (34px height, matching raised grey border, centered 13px label). Its width tracks the five-column desktop / three-column mobile capper grid so the section badge under Signals aligns with the badges above it.
+
 ## 2026-09-30 — Shared capper section badge hierarchy
 
 Capper card section labels now use `.capper-section-badge` for a single consistent Win95 treatment. This applies to Open positions, Settled positions, and the active signal/status list heading across NFL/CFB plus the WNBA/NBA monitor sections. NFL and CFB now pass the tab label directly into their list renderer, removing the old concatenation that produced `Signals signals`.

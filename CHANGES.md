@@ -1,5 +1,13 @@
 # CHANGES
 
+## 2026-09-30 — Merge Wallet into app window and normalize signal badge
+
+- Moved the Wallet/live P&L layout inside the main S01807 application window so it is visually part of the top window instead of a separate window below it.
+- Removed the injected `WALLET` title bar; the top S01807 title bar is now the only title bar for that combined top area.
+- Moved the version date into the blue S01807 title bar next to the version number.
+- Split `Updated` and `Uptime` into separate larger white inset text boxes under the title bar.
+- Increased the capper section badge to the same height, font weight, Win95 border treatment, and grid width as the surrounding signal/status badges so `Signals`, `Open positions`, and `Settled positions` no longer look like a different control style.
+
 ## 2026-09-30 — Consistent capper section badges
 
 - Fixed the duplicated `Signals signals` heading in the NFL and CFB capper cards; the section now reads simply `Signals`.
