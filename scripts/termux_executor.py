@@ -49,13 +49,56 @@ def _mask(value: str) -> str:
     return value[:6] + "…" + value[-4:]
 
 
+def _persist_env_value(key: str, value: str) -> None:
+    """Persist a non-empty executor setting in the local protected env file."""
+    value = value.strip()
+    if not value:
+        return
+    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lines = ENV_FILE.read_text().splitlines() if ENV_FILE.exists() else []
+    prefix = f"{key}="
+    rendered = f"{key}={value}"
+    replaced = False
+    output: list[str] = []
+    for line in lines:
+        if line.startswith(prefix):
+            if not replaced:
+                output.append(rendered)
+                replaced = True
+            continue
+        output.append(line)
+    if not replaced:
+        output.append(rendered)
+    ENV_FILE.write_text("\n".join(output).rstrip() + "\n")
+    os.chmod(ENV_FILE, 0o600)
+    os.environ[key] = value
+
+
+def _first_env(*keys: str) -> str:
+    for key in keys:
+        value = os.getenv(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _credentials() -> tuple[str, str]:
-    private_key = os.getenv("POLYMARKET_PRIVATE_KEY", "").strip()
-    wallet = os.getenv("POLYMARKET_DEPOSIT_WALLET", "").strip()
+    private_key = _first_env("POLYMARKET_PRIVATE_KEY")
+    wallet = _first_env(
+        "POLYMARKET_DEPOSIT_WALLET",
+        "POLYMARKET_FUNDER_WALLET",
+        "POLYMARKET_FUNDER_ADDRESS",
+        "POLYMARKET_WALLET",
+    )
     if not private_key:
         private_key = getpass.getpass("Polymarket private key (hidden, not saved): ").strip()
     if not wallet:
-        wallet = input("Polymarket deposit/funder wallet (0x…): ").strip()
+        wallet = input("Polymarket deposit/funder wallet (0x…; saved for future starts): ").strip()
+        if wallet:
+            _persist_env_value("POLYMARKET_DEPOSIT_WALLET", wallet)
+    elif not os.getenv("POLYMARKET_DEPOSIT_WALLET", "").strip():
+        # Migrate legacy wallet variable names into the canonical local env key.
+        _persist_env_value("POLYMARKET_DEPOSIT_WALLET", wallet)
     if not private_key or not wallet:
         raise RuntimeError("Both POLYMARKET_PRIVATE_KEY and POLYMARKET_DEPOSIT_WALLET are required")
     return private_key, wallet
