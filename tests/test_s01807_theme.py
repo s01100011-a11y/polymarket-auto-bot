@@ -257,3 +257,16 @@ def test_live_graph_is_a_separate_inset_window_with_ranges_below_title():
     assert 'class="pnl-chart-duration-row"' in chart
     assert chart.index('class="pnl-chart-duration-row"') > chart.index('class="pnl-chart-head"')
     assert "moveLivePnlGraphToStandaloneWindow" in wallet
+
+
+def test_graph_range_text_matches_capper_meta_and_top_mode_spacing():
+    source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+
+    assert 'padding:7px 8px 5px!important' in source
+    assert '.top-mode-field{flex:1 1 auto!important;min-width:0!important}' in source
+    assert '.pnl-chart-duration-row .pnl-chart-range{' in source
+    assert 'font-family:"MS Sans Serif",Tahoma,Arial,sans-serif!important' in source
+    assert 'font-size:12px!important' in source
+    assert 'line-height:1.45!important' in source
+    assert 'font-weight:400!important' in source
+    assert 'letter-spacing:0!important' in source
