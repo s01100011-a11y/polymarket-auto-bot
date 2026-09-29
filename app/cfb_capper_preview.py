@@ -2602,42 +2602,42 @@ function cfbPhaseVisual(item){
   return {
    label:'WIN',
    row:'background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.42);border-left:4px solid #22c55e;',
-   badge:'background:rgba(34,197,94,.20);border:1px solid rgba(34,197,94,.50);color:#86efac;'
+   badge:'color:#008000;'
   };
  }
  if(phase==='CLOSED'&&result==='LOSS'){
   return {
    label:'LOSS',
    row:'background:rgba(239,68,68,.11);border:1px solid rgba(239,68,68,.42);border-left:4px solid #ef4444;',
-   badge:'background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.50);color:#fca5a5;'
+   badge:'color:#b00000;'
   };
  }
  if(phase==='CLOSED'&&result==='PUSH'){
   return {
    label:'PUSH',
    row:'background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.38);border-left:4px solid #f59e0b;',
-   badge:'background:rgba(245,158,11,.16);border:1px solid rgba(245,158,11,.45);color:#fcd34d;'
+   badge:'color:#8a5b00;'
   };
  }
  if(phase==='LIVE'||status==='MATCHED_LIVE'||status==='MATCHED_LIVE_ALTERNATE'){
   return {
    label:'LIVE',
    row:'background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.38);border-left:4px solid #22c55e;',
-   badge:'background:rgba(34,197,94,.18);border:1px solid rgba(34,197,94,.45);color:#86efac;'
+   badge:'color:#008000;'
   };
  }
  if(phase==='CLOSED'||status==='EVENT_CLOSED'){
   return {
    label:'FINISHED',
    row:'background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.24);border-left:4px solid #94a3b8;opacity:.82;',
-   badge:'background:rgba(148,163,184,.15);border:1px solid rgba(148,163,184,.32);color:#cbd5e1;'
+   badge:'color:#404040;'
   };
  }
  if(phase==='PREGAME'||status==='MATCHED_PREGAME'||status==='MATCHED_PREGAME_ALTERNATE'){
   return {
    label:'PREGAME',
    row:'background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.35);border-left:4px solid #3b82f6;',
-   badge:'background:rgba(59,130,246,.17);border:1px solid rgba(59,130,246,.42);color:#93c5fd;'
+   badge:'color:#000080;'
   };
  }
  return {
