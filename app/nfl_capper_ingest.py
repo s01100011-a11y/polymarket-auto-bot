@@ -2805,7 +2805,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     if 'id="nflCapperStats"' not in html:
         panel = r"""
   <div class="nfl-capper-panel" id="nflCapperStats">
-    <div class="nfl-capper-head"><div><div class="label">NFL capper auto-trading</div><div class="nfl-capper-state" id="nflCapperState">Loading…</div></div><div><div class="nfl-capper-meta" id="nflCapperMeta"></div><button type="button" id="nflFinishedToggle" style="margin-top:8px" onclick="nflToggleFinished()">Hide finished</button></div></div>
+    <div class="nfl-capper-head"><div><div class="label">NFL capper auto-trading</div><div class="nfl-capper-state" id="nflCapperState">Loading…</div></div><div><div class="nfl-capper-meta" id="nflCapperMeta"></div><div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px"><button type="button" id="nflFinishedToggle" onclick="nflToggleFinished()">Hide finished</button><button type="button" id="nflLast24hToggle" onclick="nflToggleLast24h()">Last 24h only: OFF</button></div></div></div>
     <div class="nfl-capper-grid">
       <div class="nfl-capper-card"><b>Slam - NFL</b><div class="nfl-capper-kpis" id="nflCapperSlam">—</div></div>
       <div class="nfl-capper-card"><b>Syndicate - NFL</b><div class="nfl-capper-kpis" id="nflCapperSyndicate">—</div></div>
@@ -2847,11 +2847,32 @@ function nflPhaseVisual(item){
  return {label,row:'border:1px solid rgba(255,255,255,.07);',badge:'background:rgba(148,163,184,.12);border:1px solid rgba(148,163,184,.25);color:#cbd5e1;'};
 }
 let nflHideFinished=localStorage.getItem('nflHideFinished')==='1';
+let nflLast24hOnly=localStorage.getItem('nflLast24hOnly')==='1';
 const nflActiveTabs={slam:'signals',syndicate:'signals'};
 let nflLastCappers={};
 function nflUpdateFinishedToggle(){
  const btn=document.getElementById('nflFinishedToggle');
  if(btn)btn.textContent=nflHideFinished?'Show finished':'Hide finished';
+}
+function nflUpdateLast24hToggle(){
+ const btn=document.getElementById('nflLast24hToggle');
+ if(!btn)return;
+ btn.textContent='Last 24h only: '+(nflLast24hOnly?'ON':'OFF');
+ btn.style.fontWeight=nflLast24hOnly?'800':'';
+ btn.style.borderColor=nflLast24hOnly?'#86efac':'';
+}
+function nflWithin24h(v){
+ if(!v)return false;
+ const t=new Date(v).getTime();
+ return Number.isFinite(t)&&t>=(Date.now()-24*60*60*1000);
+}
+function nflToggleLast24h(){
+ nflLast24hOnly=!nflLast24hOnly;
+ localStorage.setItem('nflLast24hOnly',nflLast24hOnly?'1':'0');
+ nflUpdateLast24hToggle();
+ const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
+ if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
+ if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL'],'syndicate');
 }
 function nflToggleFinished(){
  nflHideFinished=!nflHideFinished;
@@ -2864,7 +2885,10 @@ function nflToggleFinished(){
 function nflPositionList(x){
  const items=Array.isArray(x.positions)?x.positions:[];
  const open=items.filter(item=>item.sell_available);
- const settled=items.filter(item=>!item.sell_available&&item.finished);
+ const settledAll=items.filter(item=>!item.sell_available&&item.finished);
+ const settled=nflLast24hOnly
+  ? settledAll.filter(item=>nflWithin24h(item.closed_at||item.submitted_at))
+  : settledAll;
  const renderOpen=item=>{
   const raw=item.live_pnl_usdc===null||item.live_pnl_usdc===undefined?null:Number(item.live_pnl_usdc);
   const pnlClass=raw===null||raw===0?'':(raw>0?'positive':'negative');
@@ -2891,7 +2915,9 @@ function nflPositionList(x){
   return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+statusLabel+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+manual+'</div>';
  };
  let html='<div style="margin-top:9px"><b>Open positions</b>'+(open.length?open.map(renderOpen).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>')+'</div>';
- if(!nflHideFinished&&settled.length)html+='<div style="margin-top:12px"><b>Settled positions</b>'+settled.map(renderSettled).join('')+'</div>';
+ if(!nflHideFinished&&(settled.length||nflLast24hOnly)){
+  html+='<div style="margin-top:12px"><b>Settled positions'+(nflLast24hOnly?' · last 24h':'')+'</b>'+(settled.length?settled.map(renderSettled).join(''):'<div style="margin-top:7px;opacity:.7">No settled positions in the last 24 hours.</div>')+'</div>';
+ }
  return html;
 }
 async function nflSellPosition(tradeId,btn){
@@ -2965,8 +2991,14 @@ function nflSetTab(sourceKey,tab){
 }
 function nflPickList(title,items,kind){
  if(!Array.isArray(items)||!items.length)return '';
- const visible=nflHideFinished?items.filter(item=>String(item.event_phase||'').toUpperCase()!=='CLOSED'):items;
- if(!visible.length)return '<div style="margin-top:8px;opacity:.7">'+(nflHideFinished?'Finished games hidden.':'No signals.')+'</div>';
+ const scoped=nflLast24hOnly&&kind==='signals'
+  ? items.filter(item=>nflWithin24h(item.posted_at||item.updated_at))
+  : items;
+ const visible=nflHideFinished?scoped.filter(item=>String(item.event_phase||'').toUpperCase()!=='CLOSED'):scoped;
+ if(!visible.length){
+  if(nflLast24hOnly&&kind==='signals')return '<div style="margin-top:8px;opacity:.7">No signals in the last 24 hours.</div>';
+  return '<div style="margin-top:8px;opacity:.7">'+(nflHideFinished?'Finished games hidden.':'No signals.')+'</div>';
+ }
  const rows=visible.map(item=>{
   const meta=[];
   if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(nflEsc(item.units)+'u');
@@ -3112,6 +3144,7 @@ async function loadNflCapperStats(){
   if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
   if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL'],'syndicate');
   nflUpdateFinishedToggle();
+  nflUpdateLast24hToggle();
  }catch(e){
   const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
  }
