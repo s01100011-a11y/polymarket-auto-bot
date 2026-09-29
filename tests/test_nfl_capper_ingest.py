@@ -1371,3 +1371,14 @@ class NflRollingPnlStatsTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+def test_nfl_capper_dashboard_has_persistent_online_controls():
+    source = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
+
+    assert '"/api/nfl-cappers/enabled/{capper_key}"' in source
+    assert "capper_control.is_enabled(core, source_label)" in source
+    assert '"PAUSED_CAPPER"' in source
+    assert "nflToggleCapper" in source
+    assert 'id="nflCapperPower-slam"' in source
+    assert 'id="nflCapperPower-syndicate"' in source
