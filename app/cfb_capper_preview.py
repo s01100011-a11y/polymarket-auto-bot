@@ -2697,7 +2697,7 @@ function cfbPickList(title,items,kind){
   const marketAction=(item.event_phase!=='CLOSED'&&String(item.match_status||'')!=='INVALID_FUTURE_MATCH'&&item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+cfbEsc(item.market_url)+'">OPEN MARKET</a>':'';
   const action=buyAction+altActions+sellAction+marketAction;
   const visual=cfbPhaseVisual(item);
-  const badge=visual.label?'<span style="display:inline-block;margin-left:7px;padding:2px 6px;border-radius:999px;font-size:12px;font-weight:850;letter-spacing:.03em;vertical-align:1px;'+visual.badge+'">'+visual.label+'</span>':'';
+  const badge=visual.label?'<span class="capper-event-badge" style="'+visual.badge+'">'+visual.label+'</span>':'';
   let pnlLine='';
   if(String(item.event_phase||'').toUpperCase()==='CLOSED'){
    if(item.trade_executed){
@@ -2711,7 +2711,7 @@ function cfbPickList(title,items,kind){
   }
   return '<div style="margin-top:7px;padding:9px 10px;border-radius:8px;'+visual.row+'"><b style="font-size:15px">'+cfbEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+pnlLine+(action?'<br>'+action:'')+'</div>';
  }).join('');
- return '<div style="margin-top:8px"><b>'+cfbEsc(title)+'</b>'+rows+'</div>';
+ return '<div style="margin-top:8px"><span class="capper-section-badge">'+cfbEsc(title)+'</span>'+rows+'</div>';
 }
 async function cfbManualBuy(signalId,btn){
  const original=btn.textContent;
@@ -2886,7 +2886,7 @@ function cfbPositionList(x){
   const sell=item.trade_id?'<button type="button" style="margin-top:6px" data-trade-id="'+cfbEsc(item.trade_id)+'" onclick="cfbSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
   return '<div class="cfb-open-position"><b style="font-size:15px">'+cfbEsc(item.selection||item.market||'CFB position')+' · OPEN</b><br><span>'+cfbEsc(item.outcome||'')+' · Entry '+entry+' · Live '+live+'</span><br><span>Shares '+shares+' · Cost $'+Number(cost||0).toFixed(2)+' · Value '+value+'</span><div class="live-pnl '+cls+'">Live P/L '+pnl+'</div>'+sell+'</div>';
  }).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>';
- let html='<div style="margin-top:9px"><b>Open positions</b>'+openHtml+'</div>';
+ let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+openHtml+'</div>';
  if(!cfbHideFinished&&(settled.length||capperLast24hOnly)){
   const settledHtml=settled.length?settled.map(item=>{
    const result=String(item.result||'').toUpperCase();
@@ -2897,7 +2897,7 @@ function cfbPositionList(x){
    const status=result?(' · '+cfbEsc(result)):(String(item.status||'').toUpperCase()==='CLOSED_RECONCILED'?' · AWAITING SETTLEMENT':'');
    return '<div class="cfb-settled-position '+cls+'"><b style="font-size:15px">'+cfbEsc(item.selection||item.market||'CFB position')+status+'</b><br><span>'+cfbEsc(item.outcome||'')+stake+'</span>'+pnl+'</div>';
   }).join(''):'<div style="margin-top:7px;opacity:.7">No settled positions in the last 24 hours.</div>';
-  html+='<div style="margin-top:12px"><b>Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</b>'+settledHtml+'</div>';
+  html+='<div style="margin-top:12px"><span class="capper-section-badge">Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</span>'+settledHtml+'</div>';
  }
  return html;
 }
@@ -2996,7 +2996,9 @@ function cfbCapperLine(x,sourceKey){
  }).join('')+'</div>';
  const spec=specs.find(s=>s[0]===active)||specs[0];
  const items=spec[3]||[];
- const body=items.length?cfbPickList(spec[1]+' signals',items,spec[4]):'<div style="margin-top:8px;opacity:.7">No '+cfbEsc(spec[1].toLowerCase())+' signals.</div>';
+ const body=items.length
+  ? cfbPickList(spec[1],items,spec[4])
+  : '<div style="margin-top:8px"><span class="capper-section-badge">'+cfbEsc(spec[1])+'</span><div style="margin-top:7px;opacity:.7">No '+cfbEsc(spec[1].toLowerCase())+' signals.</div></div>';
  const unitValue=Number(x.unit_usdc||10).toFixed(2);
  const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
  const pctValue=Number(x.portfolio_pct||10).toFixed(2);
