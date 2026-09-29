@@ -1,3 +1,9 @@
+## 2026-09-30 — Typography/spacing parity for graph and master MODE row
+
+The graph's `pnlChartRange` status now uses the same visual language as `.nfl-capper-meta`: MS Sans Serif/Tahoma/Arial, 12px, 1.45 line-height, normal weight, and no letter spacing. This removes the small Courier-style appearance under the range buttons.
+
+The root `.top-mode-status-row` now uses 8px horizontal padding and 5px bottom padding, matching the effective interior spacing of the sport capper panels. The MODE field remains flexible with `min-width:0`, while the master power button is fixed-width at the right edge.
+
 ## 2026-09-30 — Live graph separation
 
 The Wallet layout now contains only Wallet content. `walletLiveGraphSlot` is emitted as a sibling after `.wallet-live-layout`, so when the Win95 installer moves Wallet into `.top.win95-app-chrome`, the graph remains outside the top window. The existing P/L chart node is re-parented into that standalone slot by `moveLivePnlGraphToStandaloneWindow()`.
