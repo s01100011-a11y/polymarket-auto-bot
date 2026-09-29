@@ -1759,10 +1759,15 @@ def _stats_from_executions(
 ) -> dict[str, dict[str, Any]]:
     marks = live_marks or {}
     out: dict[str, dict[str, Any]] = {}
+    now = datetime.now(timezone.utc)
+    cutoff_7d = now - timedelta(days=7)
+    cutoff_30d = now - timedelta(days=30)
     for label in labels:
         wins = losses = pushes = open_trades = total = live_marked = 0
         stake = Decimal("0")
         realized = Decimal("0")
+        realized_7d = Decimal("0")
+        realized_30d = Decimal("0")
         units = Decimal("0")
         live_pnl = Decimal("0")
         open_cost_basis = Decimal("0")
@@ -1819,6 +1824,17 @@ def _stats_from_executions(
             except Exception:
                 continue
             realized += pnl
+            realized_at = _parse_iso(
+                rec.get("closed_at")
+                or rec.get("updated_at")
+                or rec.get("submitted_at")
+                or rec.get("created_at")
+            )
+            if realized_at is not None:
+                if realized_at >= cutoff_30d:
+                    realized_30d += pnl
+                if realized_at >= cutoff_7d:
+                    realized_7d += pnl
             try:
                 stake += Decimal(str(rec.get("actual_cost_usdc") or rec.get("budget_usdc") or "0"))
             except Exception:
@@ -1849,6 +1865,8 @@ def _stats_from_executions(
             "units_staked": str(units.quantize(Decimal("0.01"))),
             "graded_stake_usdc": str(stake.quantize(Decimal("0.01"))),
             "realized_pnl_usdc": str(realized.quantize(Decimal("0.01"))),
+            "realized_pnl_7d_usdc": str(realized_7d.quantize(Decimal("0.01"))),
+            "realized_pnl_30d_usdc": str(realized_30d.quantize(Decimal("0.01"))),
             "roi_pct": str(roi.quantize(Decimal("0.1"))) if roi is not None else None,
             "live_marked": live_marked,
             "live_pnl_usdc": str(live_pnl.quantize(Decimal("0.01"))) if live_marked else None,
@@ -3028,8 +3046,170 @@ function nflCapperLine(x,sourceKey){
  const liveRaw=x.live_pnl_usdc===null||x.live_pnl_usdc===undefined?null:Number(x.live_pnl_usdc);
  const livePnl=liveRaw===null?'—':(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
  const liveClass=liveRaw===null||liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
- const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
- const metrics='<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">Realized P/L '+pnl+'</span> · ROI '+roi+'</div><div><span class="capper-pnl '+liveClass+'">Live P/L '+livePnl+'</span> · Open value '+openValue+'</div><div>Missed '+Number(x.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div>';
+ const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'
+ const active=nflActiveTabs[sourceKey]||'signals';
+ const specs=nflTabSpec(x);
+ const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>'<button type="button" style="padding:5px 8px;min-height:34px;'+(s[0]===active?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+nflEsc(s[1])+' '+s[2]+'</button>').join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const body=(spec[3]||[]).length?nflPickList(spec[1]+' signals',spec[3],spec[4]):'<div style="margin-top:8px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div>';
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div style="margin:6px 0 9px"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:12px">FIXED 1u WIN $</b><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px;'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><b style="font-size:12px;margin-left:4px">% PORTFOLIO</b><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'" style="width:72px"><button type="button" style="padding:5px 8px;min-height:34px;'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button></div><div style="font-size:11px;opacity:.78;margin-top:3px">'+modeText+' · percentage mode recalculates before each new/retried order; risk still varies by odds</div></div>';
+ return unitControl+metrics+nflPositionList(x)+tabs+body;
+}
+async function loadNflCapperStats(){
+ try{
+  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
+  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  nflLastCappers=d.cappers||{};
+  const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
+  if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
+  if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL'],'syndicate');
+  nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++Number(x.open_value_usdc).toFixed(2);
+ const pnl7Raw=Number(x.realized_pnl_7d_usdc||0);
+ const pnl30Raw=Number(x.realized_pnl_30d_usdc||0);
+ const pnl7=(pnl7Raw>0?'+':'')+'
+ const active=nflActiveTabs[sourceKey]||'signals';
+ const specs=nflTabSpec(x);
+ const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>'<button type="button" style="padding:5px 8px;min-height:34px;'+(s[0]===active?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+nflEsc(s[1])+' '+s[2]+'</button>').join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const body=(spec[3]||[]).length?nflPickList(spec[1]+' signals',spec[3],spec[4]):'<div style="margin-top:8px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div>';
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div style="margin:6px 0 9px"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:12px">FIXED 1u WIN $</b><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px;'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><b style="font-size:12px;margin-left:4px">% PORTFOLIO</b><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'" style="width:72px"><button type="button" style="padding:5px 8px;min-height:34px;'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button></div><div style="font-size:11px;opacity:.78;margin-top:3px">'+modeText+' · percentage mode recalculates before each new/retried order; risk still varies by odds</div></div>';
+ return unitControl+metrics+nflPositionList(x)+tabs+body;
+}
+async function loadNflCapperStats(){
+ try{
+  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
+  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  nflLastCappers=d.cappers||{};
+  const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
+  if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
+  if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL'],'syndicate');
+  nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++pnl7Raw.toFixed(2);
+ const pnl30=(pnl30Raw>0?'+':'')+'
+ const active=nflActiveTabs[sourceKey]||'signals';
+ const specs=nflTabSpec(x);
+ const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>'<button type="button" style="padding:5px 8px;min-height:34px;'+(s[0]===active?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+nflEsc(s[1])+' '+s[2]+'</button>').join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const body=(spec[3]||[]).length?nflPickList(spec[1]+' signals',spec[3],spec[4]):'<div style="margin-top:8px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div>';
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div style="margin:6px 0 9px"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:12px">FIXED 1u WIN $</b><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px;'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><b style="font-size:12px;margin-left:4px">% PORTFOLIO</b><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'" style="width:72px"><button type="button" style="padding:5px 8px;min-height:34px;'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button></div><div style="font-size:11px;opacity:.78;margin-top:3px">'+modeText+' · percentage mode recalculates before each new/retried order; risk still varies by odds</div></div>';
+ return unitControl+metrics+nflPositionList(x)+tabs+body;
+}
+async function loadNflCapperStats(){
+ try{
+  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
+  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  nflLastCappers=d.cappers||{};
+  const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
+  if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
+  if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL'],'syndicate');
+  nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++pnl30Raw.toFixed(2);
+ const pnl7Class=pnl7Raw===0?'flat':(pnl7Raw>0?'positive':'negative');
+ const pnl30Class=pnl30Raw===0?'flat':(pnl30Raw>0?'positive':'negative');
+ const metrics='<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake 
+ const active=nflActiveTabs[sourceKey]||'signals';
+ const specs=nflTabSpec(x);
+ const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>'<button type="button" style="padding:5px 8px;min-height:34px;'+(s[0]===active?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+nflEsc(s[1])+' '+s[2]+'</button>').join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const body=(spec[3]||[]).length?nflPickList(spec[1]+' signals',spec[3],spec[4]):'<div style="margin-top:8px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div>';
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div style="margin:6px 0 9px"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:12px">FIXED 1u WIN $</b><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'" style="width:82px"><button type="button" style="padding:5px 8px;min-height:34px;'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><b style="font-size:12px;margin-left:4px">% PORTFOLIO</b><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'" style="width:72px"><button type="button" style="padding:5px 8px;min-height:34px;'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button></div><div style="font-size:11px;opacity:.78;margin-top:3px">'+modeText+' · percentage mode recalculates before each new/retried order; risk still varies by odds</div></div>';
+ return unitControl+metrics+nflPositionList(x)+tabs+body;
+}
+async function loadNflCapperStats(){
+ try{
+  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
+  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF');
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  nflLastCappers=d.cappers||{};
+  const s=document.getElementById('nflCapperSlam'),y=document.getElementById('nflCapperSyndicate');
+  if(s)s.innerHTML=nflCapperLine(nflLastCappers['Slam - NFL'],'slam');
+  if(y)y.innerHTML=nflCapperLine(nflLastCappers['Syndicate - NFL'],'syndicate');
+  nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">Realized P/L '+pnl+'</span> · ROI '+roi+'</div><div><span class="capper-pnl '+pnl7Class+'">7D P/L '+pnl7+'</span> · <span class="capper-pnl '+pnl30Class+'">30D P/L '+pnl30+'</span></div><div><span class="capper-pnl '+liveClass+'">Live P/L '+livePnl+'</span> · Open value '+openValue+'</div><div>Missed '+Number(x.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div>';
  const active=nflActiveTabs[sourceKey]||'signals';
  const specs=nflTabSpec(x);
  const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>'<button type="button" style="padding:5px 8px;min-height:34px;'+(s[0]===active?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+nflEsc(s[1])+' '+s[2]+'</button>').join('')+'</div>';
