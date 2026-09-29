@@ -1,5 +1,12 @@
 # CHANGES
 
+## 2026-09-30 — Consistent capper section badges
+
+- Fixed the duplicated `Signals signals` heading in the NFL and CFB capper cards; the section now reads simply `Signals`.
+- Standardized the `Open positions`, `Settled positions`, and signal/tab section headings onto one shared Win95-style badge treatment across NFL, CFB, WNBA, and NBA.
+- Standardized NFL/CFB lifecycle badges such as PREGAME, LIVE, FINISHED, WIN, LOSS, and PUSH onto one shared shape, typography, padding, and alignment while preserving their status colors.
+- Empty sections now keep the same section badge visible, so formatting does not change just because there are no rows.
+
 ## 2026-09-29 — White STATUS fields and grey capper cards
 
 - Reworked the sport AUTO-TRADING status row so the current `ENABLED · AUTO LIVE/OFF` text sits inside a white Win95-style text field labeled `STATUS`.
