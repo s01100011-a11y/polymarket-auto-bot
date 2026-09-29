@@ -7,6 +7,7 @@ from app import pw_game_reconstruction
 from app import pw_spread_backtest
 from app import nfl_capper_ingest
 from app import cfb_capper_preview
+from app import basketball_monitor_capper
 
 app = base.app
 history = base.history
@@ -65,6 +66,14 @@ cfb_capper_preview.install(
     app=app,
     dashboard=dashboard,
     core=core,
+)
+
+basketball_monitor_capper.install(
+    app=app,
+    dashboard=dashboard,
+    core=core,
+    ingest=ingest,
+    nfl=nfl_capper_ingest,
 )
 
 def _install_s01807_win95_theme() -> None:
