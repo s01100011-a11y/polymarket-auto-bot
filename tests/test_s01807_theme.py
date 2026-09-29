@@ -134,26 +134,31 @@ def test_pw_and_legacy_panels_follow_main_win95_theme():
     assert "var(--retro-red)" in source
 
 
-def test_capper_title_bars_and_power_buttons_are_left_aligned():
+def test_sport_title_bars_and_status_rows_use_independent_power_controls():
     theme = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
     nfl = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
     cfb = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
     basketball = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
 
-    assert "align-items:flex-start!important" in theme
-    assert "justify-content:flex-start!important" in theme
-    assert ".capper-panel-title" in theme
+    assert ".capper-panel-status-row" in theme
+    assert ".sport-power-btn" in theme
     assert ".capper-power-btn.offline .dot" in theme
 
-    assert '<div class="capper-panel-title">NFL capper auto-trading</div>' in nfl
-    assert '<div class="nfl-capper-state" id="nflCapperState">' in nfl
+    assert '<div class="capper-panel-title">NFL AUTO-TRADING</div>' in nfl
+    assert 'id="nflCapperState"' in nfl
+    assert 'id="nflSportPower"' in nfl
     assert 'id="nflCapperPower-slam"' in nfl
     assert 'id="nflCapperPower-syndicate"' in nfl
 
-    assert '<div class="capper-panel-title">CFB capper auto-trading</div>' in cfb
+    assert '<div class="capper-panel-title">CFB AUTO-TRADING</div>' in cfb
+    assert 'id="cfbCapperState"' in cfb
+    assert 'id="cfbSportPower"' in cfb
     assert 'id="cfbCapperPower-slam"' in cfb
     assert 'id="cfbCapperPower-syndicate"' in cfb
 
-    assert '<div class="capper-panel-title">Basketball monitor auto-trading</div>' in basketball
+    assert '<div class="capper-panel-title">WNBA AUTO-TRADING</div>' in basketball
+    assert '<div class="capper-panel-title">NBA AUTO-TRADING</div>' in basketball
+    assert 'id="wnbaMonitorState"' in basketball
+    assert 'id="nbaMonitorState"' in basketball
     assert 'id="monitorCapperPower-wnba"' in basketball
     assert 'id="monitorCapperPower-nba"' in basketball
