@@ -878,6 +878,88 @@ dashboard._estimate_pnl = _estimate_pnl_with_paper
 dashboard.DASHBOARD_HTML = dashboard.DASHBOARD_HTML.replace("Submitted live trades", "Current trades").replace("Live trades", "Current trades")
 
 
+@app.post("/api/dashboard/manual-settle/{trade_id}/{result}", dependencies=[dashboard.Depends(dashboard._auth)])
+def manual_settle_reconciled_trade(trade_id: str, result: str):
+    """Manually grade a reconciled-close trade when automatic settlement is unavailable."""
+    result = str(result or "").strip().upper()
+    if result not in {"WIN", "LOSS", "PUSH"}:
+        raise HTTPException(status_code=400, detail="Result must be WIN, LOSS, or PUSH")
+
+    executions = core._load(core.EXECUTIONS_FILE)
+    rec = executions.get(trade_id) if isinstance(executions, dict) else None
+    if not isinstance(rec, dict):
+        raise HTTPException(status_code=404, detail="Unknown trade")
+    if rec.get("paper"):
+        raise HTTPException(status_code=400, detail="Manual reconciliation settlement is only for live trades")
+    if str(rec.get("status") or "") != "CLOSED_RECONCILED":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Trade status is {rec.get('status')}; only unresolved CLOSED_RECONCILED trades can be manually settled",
+        )
+    existing_result = str((rec.get("settlement") or {}).get("result") or "").upper()
+    if existing_result in {"WIN", "LOSS", "PUSH"} or rec.get("realized_pnl") is not None:
+        raise HTTPException(status_code=409, detail="Trade is already settled")
+
+    q = rec.get("quote") or {}
+    shares = dashboard._safe_decimal(rec.get("filled_shares") or q.get("shares"))
+    cost = dashboard._safe_decimal(rec.get("actual_cost_usdc") or rec.get("budget_usdc"))
+    if cost <= 0:
+        entry = dashboard._safe_decimal(q.get("entry_price") or q.get("limit_price"))
+        if entry > 0 and shares > 0:
+            cost = entry * shares
+    if cost <= 0:
+        raise HTTPException(status_code=409, detail="Cannot manually settle: recorded cost basis is unavailable")
+    if result in {"WIN", "PUSH"} and shares <= 0:
+        raise HTTPException(status_code=409, detail="Cannot manually settle: recorded filled shares are unavailable")
+
+    terminal_price = {
+        "WIN": Decimal("1"),
+        "LOSS": Decimal("0"),
+        "PUSH": Decimal("0.5"),
+    }[result]
+    final_value = terminal_price * shares
+    realized = final_value - cost
+    stamp = datetime.now(timezone.utc).isoformat()
+
+    rec["status"] = {
+        "WIN": "SETTLED_WIN",
+        "LOSS": "SETTLED_LOSS",
+        "PUSH": "SETTLED_PUSH",
+    }[result]
+    rec["exit_price"] = str(terminal_price)
+    rec["realized_pnl"] = str(realized.quantize(Decimal("0.00001")))
+    rec["remaining_shares"] = "0"
+    rec["closed_at"] = rec.get("closed_at") or stamp
+    rec["manual_settled_at"] = stamp
+    rec["settlement"] = {
+        "source": "dashboard_manual",
+        "result": result,
+        "terminal_price": str(terminal_price),
+        "manual": True,
+    }
+    note = str(rec.get("reconciliation_note") or "").strip()
+    manual_note = f"Manually settled from dashboard as {result}."
+    rec["reconciliation_note"] = f"{note} {manual_note}".strip()
+
+    executions[trade_id] = rec
+    core._save(core.EXECUTIONS_FILE, executions)
+    print(
+        f"MANUAL_POSITION_SETTLED trade={trade_id} result={result} "
+        f"terminal={terminal_price} cost={cost} shares={shares} pnl={realized}",
+        flush=True,
+    )
+    return {
+        "ok": True,
+        "trade_id": trade_id,
+        "result": result,
+        "status": rec["status"],
+        "stake_usdc": str(cost.quantize(Decimal("0.01"))),
+        "shares": str(shares),
+        "realized_pnl_usdc": str(realized.quantize(Decimal("0.01"))),
+        "settled_at": stamp,
+    }
+
+
 @app.get("/api/slack/status", dependencies=[dashboard.Depends(dashboard._auth)])
 def slack_status():
     alerts = core._load(SLACK_ALERTS_FILE)
