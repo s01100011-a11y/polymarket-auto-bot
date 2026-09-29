@@ -33,3 +33,15 @@ def test_nfl_unresolved_settlement_card_has_manual_controls():
     assert "SETTLE PUSH" in source
     assert "nflManualSettle" in source
     assert "/api/dashboard/manual-settle/" in source
+
+
+def test_nfl_last_24h_toggle_filters_only_signals_and_settled_positions():
+    source = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
+
+    assert 'id="nflLast24hToggle"' in source
+    assert "nflToggleLast24h" in source
+    assert "nflWithin24h(item.closed_at||item.submitted_at)" in source
+    assert "nflLast24hOnly&&kind==='signals'" in source
+    assert "item.posted_at||item.updated_at" in source
+    assert "No settled positions in the last 24 hours." in source
+    assert "No signals in the last 24 hours." in source
