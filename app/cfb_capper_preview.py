@@ -2300,6 +2300,8 @@ def _prepare_manual_buy(
     strategy_alternate_line: str | None = None,
 ) -> dict[str, Any]:
     """Queue one user-authorized CFB BUY after refreshing the live market."""
+    if not core.bot_enabled():
+        raise RuntimeError("Dashboard master switch is OFF")
     kind, reason = _classify_pick(pick)
     if kind is None:
         raise RuntimeError(reason or "unsupported CFB pick")
