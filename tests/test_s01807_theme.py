@@ -69,3 +69,17 @@ def test_dopewars_inspired_data_typography_and_palette():
     assert ".nfl-position-row.win .nfl-position-title" in source
     assert ".nfl-position-row.loss .nfl-position-title" in source
     assert ".monitor-signal{" in source
+
+
+def test_top_title_power_control_and_dark_data_surfaces():
+    source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+    dashboard_source = Path("app/dashboard.py").read_text(encoding="utf-8")
+
+    assert 'id="win95Title">s01807</span>' in source
+    assert 'id="botPowerBtn"' in source
+    assert '<span class="versionchip" id="versionLabel">' not in source.split("new_top = '''", 1)[1].split("'''", 1)[0]
+    assert "background:#000!important" in source
+    assert 'button.active,button[aria-pressed="true"]' in source
+    assert "--retro-gray:#ffffff" in source
+    assert '"/api/dashboard/bot-enabled"' in dashboard_source
+    assert "win95Title.textContent='s01807 '+(s.version||'—')" in dashboard_source
