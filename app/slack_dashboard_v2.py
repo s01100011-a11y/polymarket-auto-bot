@@ -421,7 +421,8 @@ async function refreshPnlChartRange(){
  if(pnlChartLoading)return;
  pnlChartLoading=true;
  try{
-  const r=await fetch('/api/dashboard/pnl-history?range='+encodeURIComponent(pnlChartRangeKey),{cache:'no-store'});
+  const mode=(localStorage.getItem('dashboardStatsFilter')||'live').toLowerCase();
+  const r=await fetch('/api/dashboard/pnl-history-mode?mode='+encodeURIComponent(mode)+'&range='+encodeURIComponent(pnlChartRangeKey),{cache:'no-store'});
   const d=await r.json();
   if(!r.ok)throw new Error(d.detail||'P/L history failed');
   renderPnlChart(d.points||[],d);
