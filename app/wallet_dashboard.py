@@ -108,18 +108,18 @@ def _install_wallet_ui() -> None:
         </div>
       </div>
     </div>
-    <div class="wallet-graph-slot" id="walletLiveGraphSlot"></div>
   </div>
+  <div class="wallet-graph-slot" id="walletLiveGraphSlot"></div>
 '''
     html = html.replace('  <div class="tabs">', wallet_html + '  <div class="tabs">', 1)
 
     css = '''
-.wallet-live-layout{display:grid;grid-template-columns:minmax(430px,1fr) minmax(0,1.35fr);gap:14px;align-items:stretch;margin:18px 0}.wallet-strip{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:16px;padding:16px;margin:0;height:100%;box-sizing:border-box}.wallet-main{height:100%}.wallet-dashboard-row{display:grid;gap:8px;margin-top:8px}.wallet-row-address{grid-template-columns:1fr}.wallet-row-balance{grid-template-columns:repeat(3,minmax(0,1fr))}.wallet-row-activity{grid-template-columns:repeat(3,minmax(0,1fr))}.wallet-data-box{min-width:0;padding:10px}.wallet-address{font-size:15px;font-weight:800;margin-top:6px;word-break:break-all}.wallet-state{font-size:11px;color:var(--muted);margin-top:4px}.wallet-metric{border:0}.wallet-balance{font-size:26px;font-weight:900;color:var(--accent);margin-top:5px}.wallet-secondary{font-size:20px;font-weight:850;margin-top:5px}.wallet-error{color:var(--bad)}.wallet-graph-slot{min-width:0}.wallet-graph-slot .pnl-chart-card{height:100%;box-sizing:border-box;margin:0}.wallet-graph-slot .pnl-chart{height:210px}@media(max-width:1050px){.wallet-live-layout{grid-template-columns:1fr}.wallet-graph-slot .pnl-chart-card{height:auto}}@media(max-width:700px){.wallet-row-address,.wallet-row-balance,.wallet-row-activity{grid-template-columns:1fr}.wallet-dashboard-row{gap:6px}.wallet-data-box{padding:9px}}
+.wallet-live-layout{display:grid;grid-template-columns:1fr;gap:14px;align-items:stretch;margin:18px 0}.wallet-strip{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:16px;padding:16px;margin:0;height:100%;box-sizing:border-box}.wallet-main{height:100%}.wallet-dashboard-row{display:grid;gap:8px;margin-top:8px}.wallet-row-address{grid-template-columns:1fr}.wallet-row-balance{grid-template-columns:repeat(3,minmax(0,1fr))}.wallet-row-activity{grid-template-columns:repeat(3,minmax(0,1fr))}.wallet-data-box{min-width:0;padding:10px}.wallet-address{font-size:15px;font-weight:800;margin-top:6px;word-break:break-all}.wallet-state{font-size:11px;color:var(--muted);margin-top:4px}.wallet-metric{border:0}.wallet-balance{font-size:26px;font-weight:900;color:var(--accent);margin-top:5px}.wallet-secondary{font-size:20px;font-weight:850;margin-top:5px}.wallet-error{color:var(--bad)}.wallet-graph-slot{min-width:0;margin:14px 0}.wallet-graph-slot .pnl-chart-card{height:auto;box-sizing:border-box;margin:0}.wallet-graph-slot .pnl-chart{height:225px}@media(max-width:1050px){.wallet-live-layout{grid-template-columns:1fr}}@media(max-width:700px){.wallet-row-address,.wallet-row-balance,.wallet-row-activity{grid-template-columns:1fr}.wallet-dashboard-row{gap:6px}.wallet-data-box{padding:9px}}
 '''
     html = html.replace('</style>', css + '</style>', 1)
 
     wallet_js = r'''
-function moveLivePnlGraphIntoWallet(){
+function moveLivePnlGraphToStandaloneWindow(){
  const slot=document.getElementById('walletLiveGraphSlot');
  const chart=document.querySelector('.pnl-chart-card');
  if(slot&&chart&&chart.parentElement!==slot)slot.appendChild(chart);
@@ -140,7 +140,7 @@ async function loadWallet(){
  }
 }
 '''
-    html = html.replace('</script>', wallet_js + '\nmoveLivePnlGraphIntoWallet();loadWallet();setInterval(loadWallet,5000);\n</script>', 1)
+    html = html.replace('</script>', wallet_js + '\nmoveLivePnlGraphToStandaloneWindow();loadWallet();setInterval(loadWallet,5000);\n</script>', 1)
     dashboard.DASHBOARD_HTML = html
 
 

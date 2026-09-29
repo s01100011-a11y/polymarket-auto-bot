@@ -19,7 +19,9 @@ def test_pnl_chart_has_functional_range_buttons_and_value_in_body():
     for label in ("1D", "1W", "1M", "1Y", "YTD", "ALL"):
         assert f">{label}</button>" in source
 
-    assert 'class="pnl-chart-head"><div class="label">Portfolio P/L · LIVE</div>' in source
+    assert 'class="pnl-chart-head"><div class="label">Portfolio P/L · LIVE</div></div>' in source
+    assert 'class="pnl-chart-duration-row"' in source
+    assert source.index('class="pnl-chart-duration-row"') > source.index('class="pnl-chart-head"')
     assert 'class="pnl-chart-body"' in source
     assert '<div class="label">Live P/L</div><div class="pnl-chart-value" id="pnlChartValue">' in source
     assert "refreshPnlChartRange" in source

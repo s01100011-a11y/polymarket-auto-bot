@@ -242,3 +242,18 @@ def test_top_mode_row_and_window_insets_match_capper_controls():
     assert ".top-mode-status-row #botPowerBtn{" in theme
     assert "width:calc(100% - 16px)!important" in theme
     assert "width:calc(100% - 12px)!important" in theme
+
+
+def test_live_graph_is_a_separate_inset_window_with_ranges_below_title():
+    theme = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+    chart = Path("app/slack_dashboard_v2.py").read_text(encoding="utf-8")
+    wallet = Path("app/wallet_dashboard.py").read_text(encoding="utf-8")
+
+    assert ".wrap > .wallet-graph-slot" in theme
+    assert ".wallet-graph-slot .pnl-chart-card{" in theme
+    assert ".pnl-chart-duration-row{" in theme
+    assert "background:#c0c0c0!important" in theme
+    assert 'class="pnl-chart-head"><div class="label">Portfolio P/L · LIVE</div></div>' in chart
+    assert 'class="pnl-chart-duration-row"' in chart
+    assert chart.index('class="pnl-chart-duration-row"') > chart.index('class="pnl-chart-head"')
+    assert "moveLivePnlGraphToStandaloneWindow" in wallet

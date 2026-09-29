@@ -1,5 +1,13 @@
 # CHANGES
 
+## 2026-09-30 — Standalone live graph window
+
+- Separated the live Portfolio P/L graph from the top S01807/Wallet window so it renders as its own Win95-style window with teal desktop visible around it.
+- Kept Wallet inside the top application window, but moved the graph host outside the Wallet layout.
+- Moved the graph duration controls (`1D`, `1W`, `1M`, `1Y`, `YTD`, `ALL`) into a dedicated grey control row directly underneath the blue graph title bar.
+- Moved the range/sample text into that same row, leaving the graph title bar itself title-only.
+- Kept the existing graph data, range persistence, and refresh behavior unchanged.
+
 ## 2026-09-30 — Teal window spacing and top MODE control
 
 - Inset the major dashboard windows slightly from the page edges so the teal desktop wallpaper remains visible around each window on desktop and mobile.

@@ -1,3 +1,9 @@
+## 2026-09-30 — Live graph separation
+
+The Wallet layout now contains only Wallet content. `walletLiveGraphSlot` is emitted as a sibling after `.wallet-live-layout`, so when the Win95 installer moves Wallet into `.top.win95-app-chrome`, the graph remains outside the top window. The existing P/L chart node is re-parented into that standalone slot by `moveLivePnlGraphToStandaloneWindow()`.
+
+The P/L chart DOM now has a title-only `.pnl-chart-head`, followed by `.pnl-chart-duration-row` containing the timeframe buttons and `pnlChartRange` status. The chart body starts below that row. The standalone graph slot uses the same root-window horizontal inset as the other dashboard windows, preserving teal desktop separation.
+
 ## 2026-09-30 — Root-window inset and master MODE row
 
 The Win95 theme now gives the major root dashboard windows a small horizontal inset (`16px` total on larger layouts and `12px` total at the mobile breakpoint), leaving visible teal desktop between the viewport edge and each window. The transparent basketball wrapper is inset as a unit so WNBA/NBA remain aligned without double-insetting their nested windows.

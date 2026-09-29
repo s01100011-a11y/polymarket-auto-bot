@@ -152,6 +152,7 @@ a{color:#0000ee;text-decoration:underline}
  box-shadow:none;
 }
 .wrap > .top.win95-app-chrome,
+.wrap > .wallet-graph-slot,
 .wrap > .nfl-capper-panel,
 .wrap > #basketballMonitorStats,
 .wrap > .win95-stats-window,
@@ -478,8 +479,20 @@ a{color:#0000ee;text-decoration:underline}
  border-bottom:2px solid #808080!important;
 }
 .pnl-chart-head .label{color:#fff!important;text-shadow:1px 1px #000}
+.pnl-chart-duration-row{
+ margin:0!important;
+ padding:7px 7px 0!important;
+ background:#c0c0c0!important;
+ color:#000!important;
+ border-top:1px solid #fff!important;
+ box-sizing:border-box!important;
+}
+.pnl-chart-duration-row .pnl-chart-range{
+ color:#000!important;
+ font-family:"Lucida Console","Courier New",monospace!important;
+ font-weight:700!important;
+}
 .pnl-chart-value{font-family:"Courier New",monospace;color:#00ff66!important}
-.pnl-chart-range{color:#e0e0e0!important}
 .pnl-chart{background:#000!important;margin:0!important;padding:6px!important}
 .pnl-axis{fill:#a0a0a0!important}
 .pnl-zero{stroke:#808080!important}
@@ -710,7 +723,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 .pnl-chart-value.green{color:var(--retro-green)!important}
 .pnl-chart-value.red{color:var(--retro-red)!important}
 .pnl-chart-body .label{color:var(--retro-yellow)!important}
-.pnl-chart-range{color:var(--retro-gray)!important}
+.pnl-chart-duration-row .pnl-chart-range{color:#000!important}
 .pnl-axis{fill:var(--retro-gray)!important;font-family:"Lucida Console","Courier New",monospace!important}
 .more-stats-row{color:var(--retro-gray)!important}
 .nfl-capper-card{color:#000!important}
@@ -798,6 +811,16 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 .win95-stats-body .performance-strip{gap:7px!important;margin:0 0 7px!important}
 .more-stats-panel{padding:7px!important}
 .more-stats-grid{gap:7px!important}
+.wallet-graph-slot{
+ margin-top:8px!important;
+ margin-bottom:8px!important;
+ background:transparent!important;
+}
+.wallet-graph-slot .pnl-chart-card{
+ margin:0!important;
+ width:100%!important;
+ height:auto!important;
+}
 .pnl-chart-card{padding:0!important}
 .pnl-chart-body{
  margin:7px!important;
@@ -1140,6 +1163,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 @media(max-width:900px){
  .wrap{margin:0;padding:2px;box-shadow:none}
  .wrap > .top.win95-app-chrome,
+ .wrap > .wallet-graph-slot,
  .wrap > .nfl-capper-panel,
  .wrap > #basketballMonitorStats,
  .wrap > .win95-stats-window,
