@@ -58,9 +58,10 @@ def _install_wallet_ui() -> None:
   </div>
 
 '''
-    # Remove the old standalone summary row. The same live element IDs are moved
-    # into the Wallet window below, so the existing dashboard refresh code stays intact.
+    # Some earlier dashboard layers rename "Live trades" to "Current trades".
+    # Remove either spelling before recreating the same live IDs inside Wallet.
     html = html.replace(cards_html, "", 1)
+    html = html.replace(cards_html.replace("Live trades", "Current trades"), "", 1)
 
     wallet_html = '''
   <div class="wallet-live-layout">
