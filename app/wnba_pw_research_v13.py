@@ -83,14 +83,38 @@ def _install_s01807_win95_theme() -> None:
 
     html = html.replace(
         "<title>Polymarket Bot Dashboard</title>",
-        "<title>S01-807 · Polymarket</title>",
+        "<title>s01807.exe</title>",
         1,
     )
-    html = html.replace(
-        '<div class="eyebrow">Railway · Polymarket</div><div class="title">Trading Bot Dashboard</div>',
-        '<div class="eyebrow">S01-807 · POLYMARKET SPORTS DESK</div><div class="title">S01-807</div>',
-        1,
-    )
+    old_top = '''  <div class="top">
+    <div><div class="eyebrow">Railway · Polymarket</div><div class="title">Trading Bot Dashboard</div><div class="versionline"><span class="versionchip" id="versionLabel">v—</span><span class="versionchip" id="versionDateLabel">Version date —</span></div><div class="sub" id="updated">Loading status…</div></div>
+    <div class="badge"><span class="dot"></span><span id="serviceState">Connecting</span></div>
+  </div>'''
+    new_top = '''  <div class="top win95-app-chrome">
+    <div class="win95-titlebar">
+      <div class="win95-title-left">
+        <span class="win95-logo" aria-hidden="true"><i class="win95-logo-red"></i><i class="win95-logo-green"></i><i class="win95-logo-blue"></i><i class="win95-logo-yellow"></i></span>
+        <span class="win95-title-text">s01807.exe</span>
+      </div>
+      <div class="win95-window-controls" aria-hidden="true">
+        <span class="win95-window-control win95-minimize">_</span>
+        <span class="win95-window-control win95-maximize">□</span>
+        <span class="win95-window-control win95-close">×</span>
+      </div>
+    </div>
+    <div class="win95-info-strip">
+      <div class="win95-info-group">
+        <span class="win95-info-cell">S01-807 · POLYMARKET SPORTS DESK</span>
+        <span class="versionchip" id="versionLabel">v—</span>
+        <span class="versionchip" id="versionDateLabel">Version date —</span>
+      </div>
+      <div class="win95-info-group win95-info-right">
+        <span class="sub" id="updated">Loading status…</span>
+        <span class="badge"><span class="dot"></span><span id="serviceState">Connecting</span></span>
+      </div>
+    </div>
+  </div>'''
+    html = html.replace(old_top, new_top, 1)
 
     theme_css = r"""
 /* s01807-win95-theme */
@@ -127,33 +151,138 @@ a{color:#0000ee;text-decoration:underline}
  border-bottom:2px solid #404040;
  box-shadow:2px 2px 0 #000;
 }
-.top{
- margin:0 0 4px;
- padding:5px 6px;
- min-height:52px;
- background:linear-gradient(90deg,#000080 0%,#1084d0 72%,#000080 100%);
- color:#fff;
+.top.win95-app-chrome{
+ display:block!important;
+ margin:0 0 4px!important;
+ padding:2px!important;
+ min-height:0!important;
+ background:#c0c0c0!important;
+ color:#000!important;
+ border-top:2px solid #fff!important;
+ border-left:2px solid #fff!important;
+ border-right:2px solid #404040!important;
+ border-bottom:2px solid #404040!important;
+ box-sizing:border-box;
+}
+.win95-titlebar{
+ min-height:27px;
+ display:flex;
  align-items:center;
- border:0;
-}
-.eyebrow{
+ justify-content:space-between;
+ gap:8px;
+ padding:2px 3px 2px 4px;
+ background:linear-gradient(90deg,#000080 0%,#1084d0 76%,#000080 100%);
  color:#fff;
- font-size:11px;
- letter-spacing:.05em;
+ overflow:hidden;
+}
+.win95-title-left{
+ display:flex;
+ align-items:center;
+ gap:6px;
+ min-width:0;
+}
+.win95-title-text{
+ min-width:0;
+ overflow:hidden;
+ text-overflow:ellipsis;
+ white-space:nowrap;
+ font-family:"MS Sans Serif",Tahoma,Arial,sans-serif;
+ font-size:13px;
+ line-height:20px;
+ font-weight:800;
+ letter-spacing:0;
  text-shadow:1px 1px #000;
 }
-.title{
- color:#fff;
- font-family:"Courier New",monospace;
- font-size:27px;
- line-height:1;
+.win95-logo{
+ flex:0 0 18px;
+ width:18px;
+ height:18px;
+ display:grid;
+ grid-template-columns:1fr 1fr;
+ grid-template-rows:1fr 1fr;
+ gap:1px;
+ padding:1px;
+ background:#fff;
+ border:1px solid #000;
+ box-shadow:1px 1px 0 rgba(0,0,0,.45);
+ transform:skewY(-4deg);
+ box-sizing:border-box;
+}
+.win95-logo i{display:block;min-width:0;min-height:0}
+.win95-logo-red{background:#f22}
+.win95-logo-green{background:#0a5}
+.win95-logo-blue{background:#1683ff}
+.win95-logo-yellow{background:#ffd400}
+.win95-window-controls{
+ flex:0 0 auto;
+ display:flex;
+ align-items:center;
+ gap:2px;
+}
+.win95-window-control{
+ width:22px;
+ height:20px;
+ display:flex;
+ align-items:center;
+ justify-content:center;
+ box-sizing:border-box;
+ background:#c0c0c0;
+ color:#000;
+ border-top:2px solid #fff;
+ border-left:2px solid #fff;
+ border-right:2px solid #404040;
+ border-bottom:2px solid #404040;
+ box-shadow:1px 1px 0 #000;
+ font-family:Tahoma,Arial,sans-serif;
+ font-size:13px;
+ line-height:14px;
  font-weight:900;
- letter-spacing:.04em;
- margin:2px 0 3px;
- text-shadow:1px 1px #000;
+ user-select:none;
+ cursor:default;
 }
-.sub{color:#e9e9e9;font-size:11px}
-.versionline{margin-top:4px;gap:4px}
+.win95-minimize{align-items:flex-end;padding-bottom:2px}
+.win95-maximize{font-size:12px}
+.win95-close{font-size:15px}
+.win95-info-strip{
+ display:flex;
+ align-items:center;
+ justify-content:space-between;
+ gap:8px;
+ flex-wrap:wrap;
+ padding:4px 5px 3px;
+ background:#c0c0c0;
+ border-top:1px solid #dfdfdf;
+ color:#000;
+}
+.win95-info-group{
+ display:flex;
+ align-items:center;
+ gap:4px;
+ flex-wrap:wrap;
+ min-width:0;
+}
+.win95-info-right{margin-left:auto;justify-content:flex-end}
+.win95-info-cell{
+ display:inline-flex;
+ align-items:center;
+ min-height:20px;
+ padding:2px 6px;
+ box-sizing:border-box;
+ background:#d4d0c8;
+ color:#000;
+ border-top:1px solid #808080;
+ border-left:1px solid #808080;
+ border-right:1px solid #fff;
+ border-bottom:1px solid #fff;
+ font-size:10px;
+ font-weight:800;
+ letter-spacing:.02em;
+ white-space:nowrap;
+}
+.eyebrow{display:none!important}
+.title{display:none!important}
+.sub{color:#404040!important;font-size:10px}
+.versionline{margin:0;gap:4px}
 .versionchip,.badge{
  background:#c0c0c0;
  color:#000;
@@ -369,12 +498,17 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
 @media(max-width:900px){
  .wrap{margin:0;padding:2px;box-shadow:none}
  .wallet-live-layout{grid-template-columns:1fr!important}
- .top{align-items:flex-start}
+ .win95-info-strip{align-items:flex-start}
+ .win95-info-right{margin-left:0;justify-content:flex-start}
 }
 @media(max-width:520px){
  body{font-size:12px}
  .wrap{padding:2px}
- .title{font-size:23px}
+ .win95-titlebar{min-height:25px}
+ .win95-title-text{font-size:12px}
+ .win95-logo{width:16px;height:16px;flex-basis:16px}
+ .win95-window-control{width:20px;height:18px;font-size:12px}
+ .win95-info-cell{white-space:normal}
  .card,.performance-card{padding:7px!important}
  .cards,.performance-strip{gap:3px}
 }
