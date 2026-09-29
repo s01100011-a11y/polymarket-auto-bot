@@ -55,3 +55,17 @@ def test_major_dashboard_windows_show_teal_desktop_between_sections():
     assert ">STATS</span>" in source
     assert "s01807InstallSectionWindows" in source
     assert "s01807MiniControls" in source
+
+
+def test_dopewars_inspired_data_typography_and_palette():
+    source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+
+    assert "Dope Wars-inspired retro data typography + palette" in source
+    assert '"Lucida Console","Courier New",monospace' in source
+    assert "--retro-green:#00ff2a" in source
+    assert "--retro-red:#ff1616" in source
+    assert "--retro-yellow:#ffff2e" in source
+    assert "font-variant-numeric:tabular-nums" in source
+    assert ".nfl-position-row.win .nfl-position-title" in source
+    assert ".nfl-position-row.loss .nfl-position-title" in source
+    assert ".monitor-signal{" in source
