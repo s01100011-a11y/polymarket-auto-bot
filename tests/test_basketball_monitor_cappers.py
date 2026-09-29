@@ -1,0 +1,44 @@
+from pathlib import Path
+
+
+def test_pw_export_tags_wnba_and_nba_monitor_sources():
+    source = Path("app/pw_export_ingest.py").read_text(encoding="utf-8")
+
+    assert '"pw_export_sport": sport_key' in source
+    assert '"monitor_sport": sport_key' in source
+    assert '"monitor_source": monitor_source' in source
+    assert 'event_id = f"pwexport-{sport_key.lower()}-{rec_id}"' in source
+
+
+def test_monitor_trades_are_tagged_for_execution_stats():
+    paper = Path("app/slack_ingest.py").read_text(encoding="utf-8")
+    live = Path("app/dashboard_live_control_v4.py").read_text(encoding="utf-8")
+
+    assert '"strategy_source": f"{monitor_source} - {monitor_sport}" if monitor_sport else None' in paper
+    assert '"strategy_sport": monitor_sport or None' in paper
+    assert '"strategy_source": f"{monitor_source} - {monitor_sport}" if monitor_sport else None' in live
+    assert '"strategy_sport": monitor_sport or None' in live
+
+
+def test_dashboard_has_wnba_and_nba_monitor_panels_with_shared_24h_filter():
+    source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+    entry = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+
+    assert '"WNBA Monitor - WNBA"' in source
+    assert '"NBA Monitor - NBA"' in source
+    assert '"/api/basketball-monitor/status"' in source
+    assert "data-capper-last24h-toggle" in source
+    assert "capperLast24hOnly" in source
+    assert "capperWithin24h" in source
+    assert "Open positions" in source
+    assert "Settled positions" in source
+    assert "Signals" in source
+    assert "basketball_monitor_capper.install(" in entry
+
+
+def test_more_stats_infers_legacy_pw_export_monitor_trades():
+    source = Path("app/dashboard_metrics_v3.py").read_text(encoding="utf-8")
+
+    assert "def _legacy_monitor_identity" in source
+    assert 'event_id.startswith("pwexport-")' in source
+    assert 'f"{league} Monitor - {league}"' in source

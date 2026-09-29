@@ -406,6 +406,7 @@ def _synth_text(row: dict[str, Any], history: Any, *, sport: str = "WNBA") -> tu
     )
 
     meta = {
+        "sport": str(sport or "").upper() or "WNBA",
         "game_id": str(game_id) if game_id not in (None, "") else None,
         "predicted_winner": pick,
         "quarter": quarter,
@@ -553,11 +554,15 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
         if not text:
             return "INVALID", "missing game_id or recognized predicted_winner"
 
-        event_id = f"pwexport-{rec_id}"
+        sport_key = str(sport or "WNBA").upper()
+        monitor_source = f"{sport_key} Monitor"
+        event_id = f"pwexport-{sport_key.lower()}-{rec_id}"
         event = {
             "channel": "pw-export",
             "ts": str(_first(row, "ts", "timestamp", "event_ts") or ""),
             "source": "pw-export",
+            "monitor_sport": sport_key,
+            "monitor_source": monitor_source,
         }
         parsed = ingest._parse_alert(text)
         existing_signal = None
@@ -579,6 +584,8 @@ def install(*, app: Any, ingest: Any, core: Any, history: Any, dashboard: Any) -
             "parsed": parsed,
             "pw_export_meta": meta,
             "pw_export_record": row,
+            "pw_export_sport": sport_key,
+            "monitor_source": monitor_source,
             "paper_only": not bool(core.auto_trading_enabled()),
             "status": "RECEIVED",
         }
