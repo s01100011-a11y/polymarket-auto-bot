@@ -420,17 +420,24 @@ function renderPnlChart(points,meta){
 async function refreshPnlChartRange(){
  if(pnlChartLoading)return;
  pnlChartLoading=true;
+ const requestedRange=pnlChartRangeKey;
+ const requestedMode=(localStorage.getItem('dashboardStatsFilter')||'live').toLowerCase();
  try{
-  const mode=(localStorage.getItem('dashboardStatsFilter')||'live').toLowerCase();
-  const r=await fetch('/api/dashboard/pnl-history-mode?mode='+encodeURIComponent(mode)+'&range='+encodeURIComponent(pnlChartRangeKey),{cache:'no-store'});
+  const r=await fetch('/api/dashboard/pnl-history-mode?mode='+encodeURIComponent(requestedMode)+'&range='+encodeURIComponent(requestedRange),{cache:'no-store'});
   const d=await r.json();
   if(!r.ok)throw new Error(d.detail||'P/L history failed');
-  renderPnlChart(d.points||[],d);
+  const currentMode=(localStorage.getItem('dashboardStatsFilter')||'live').toLowerCase();
+  if(requestedRange===pnlChartRangeKey&&requestedMode===currentMode)renderPnlChart(d.points||[],d);
  }catch(e){
-  const range=document.getElementById('pnlChartRange');
-  if(range)range.textContent=pnlChartRangeLabel(pnlChartRangeKey)+' · history unavailable';
+  const currentMode=(localStorage.getItem('dashboardStatsFilter')||'live').toLowerCase();
+  if(requestedRange===pnlChartRangeKey&&requestedMode===currentMode){
+   const range=document.getElementById('pnlChartRange');
+   if(range)range.textContent=pnlChartRangeLabel(pnlChartRangeKey)+' · history unavailable';
+  }
  }finally{
   pnlChartLoading=false;
+  const currentMode=(localStorage.getItem('dashboardStatsFilter')||'live').toLowerCase();
+  if(requestedRange!==pnlChartRangeKey||requestedMode!==currentMode)setTimeout(refreshPnlChartRange,0);
  }
 }
 document.addEventListener('click',function(ev){
