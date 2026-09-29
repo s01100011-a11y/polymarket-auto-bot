@@ -456,7 +456,7 @@ button:disabled{color:#808080!important;text-shadow:1px 1px #fff!important}
  line-height:1.2!important;
  text-shadow:1px 1px #000;
 }
-.note,.muted,.performance-sub,.toggle-note,.foot{color:#fff!important}
+.note,.muted,.performance-sub,.toggle-note,.foot,.setting label,.exec-event .evtime,.mode-filter-label,.slack-mode-note,.slack-mode-controls label,.slack-mode-state{color:#fff!important}
 .table-wrap{
  background:#000!important;
  border-top:2px solid #404040!important;
@@ -551,7 +551,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
  padding:4px 6px!important;
 }
 .more-stats-head .label,.more-stats-head .performance-sub{color:#fff!important}
-.empty{color:#808080!important;background:#000!important}
+.empty{color:#fff!important;background:#000!important}
 .win95-stats-window .more-stats-panel{margin-top:8px!important}
 
 /* Dope Wars-inspired retro data typography + palette */
