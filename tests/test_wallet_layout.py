@@ -9,7 +9,7 @@ def test_wallet_contains_summary_metrics_and_live_graph_moves_right():
     assert 'class="wallet-dashboard-row wallet-row-balance"' in source
     assert 'class="wallet-dashboard-row wallet-row-activity"' in source
     assert 'id="walletAddress"' in source
-    assert 'id="mode"' in source
+    assert 'id="mode"' not in source
     assert 'id="walletBalance"' in source
     assert 'id="walletPortfolio"' in source
     assert 'id="pnl"' in source
@@ -24,3 +24,14 @@ def test_wallet_contains_summary_metrics_and_live_graph_moves_right():
     assert "slot.appendChild(chart)" in source
     assert "grid-template-columns:minmax(430px,1fr) minmax(0,1.35fr)" in source
     assert "@media(max-width:1050px){.wallet-live-layout{grid-template-columns:1fr}" in source
+
+
+def test_mode_is_rendered_in_top_app_status_row_not_wallet():
+    wallet = Path("app/wallet_dashboard.py").read_text(encoding="utf-8")
+    theme = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+
+    assert 'id="mode"' not in wallet
+    assert 'class="top-mode-status-row capper-panel-status-row"' in theme
+    assert '<div class="capper-status-label">MODE</div>' in theme
+    assert 'class="nfl-capper-state top-mode-state" id="mode"' in theme
+    assert 'class="badge capper-power-btn sport-power-btn" id="botPowerBtn"' in theme
