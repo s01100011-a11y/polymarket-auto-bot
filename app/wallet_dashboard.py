@@ -50,24 +50,34 @@ def _install_wallet_ui() -> None:
         return
 
     wallet_html = '''
-  <div class="wallet-strip">
-    <div>
-      <div class="label">Polymarket wallet</div>
-      <div class="wallet-address" id="walletAddress">Checking connection…</div>
-      <div class="wallet-state" id="walletState">Read-only balance check</div>
+  <div class="wallet-live-layout">
+    <div class="wallet-strip">
+      <div class="wallet-main">
+        <div class="label">Polymarket wallet</div>
+        <div class="wallet-address" id="walletAddress">Checking connection…</div>
+        <div class="wallet-state" id="walletState">Read-only balance check</div>
+        <div class="wallet-metrics-stack">
+          <div class="wallet-metric"><div class="label">Available USDC</div><div class="wallet-balance" id="walletBalance">—</div></div>
+          <div class="wallet-metric"><div class="label">Positions value</div><div class="wallet-secondary" id="walletPortfolio">—</div></div>
+        </div>
+      </div>
     </div>
-    <div class="wallet-metric"><div class="label">Available USDC</div><div class="wallet-balance" id="walletBalance">—</div></div>
-    <div class="wallet-metric"><div class="label">Positions value</div><div class="wallet-secondary" id="walletPortfolio">—</div></div>
+    <div class="wallet-graph-slot" id="walletLiveGraphSlot"></div>
   </div>
 '''
     html = html.replace('  <div class="tabs">', wallet_html + '  <div class="tabs">', 1)
 
     css = '''
-.wallet-strip{display:grid;grid-template-columns:1.5fr .75fr .75fr;gap:14px;align-items:center;background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:16px;padding:16px;margin:18px 0}.wallet-address{font-size:15px;font-weight:800;margin-top:6px;word-break:break-all}.wallet-state{font-size:11px;color:var(--muted);margin-top:4px}.wallet-metric{border-left:1px solid var(--border);padding-left:16px}.wallet-balance{font-size:26px;font-weight:900;color:var(--accent);margin-top:5px}.wallet-secondary{font-size:20px;font-weight:850;margin-top:5px}.wallet-error{color:var(--bad)}@media(max-width:700px){.wallet-strip{grid-template-columns:1fr 1fr}.wallet-strip>div:first-child{grid-column:1/-1}.wallet-metric{border-left:0;padding-left:0;border-top:1px solid var(--border);padding-top:12px}}
+.wallet-live-layout{display:grid;grid-template-columns:minmax(300px,.85fr) minmax(0,1.65fr);gap:14px;align-items:stretch;margin:18px 0}.wallet-strip{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:16px;padding:16px;margin:0;height:100%;box-sizing:border-box}.wallet-main{height:100%;display:flex;flex-direction:column}.wallet-address{font-size:15px;font-weight:800;margin-top:6px;word-break:break-all}.wallet-state{font-size:11px;color:var(--muted);margin-top:4px}.wallet-metrics-stack{display:grid;grid-template-columns:1fr;gap:0;margin-top:14px;border-top:1px solid var(--border)}.wallet-metric{padding:12px 0;border-bottom:1px solid var(--border)}.wallet-metric:last-child{border-bottom:0}.wallet-balance{font-size:26px;font-weight:900;color:var(--accent);margin-top:5px}.wallet-secondary{font-size:20px;font-weight:850;margin-top:5px}.wallet-error{color:var(--bad)}.wallet-graph-slot{min-width:0}.wallet-graph-slot .pnl-chart-card{height:100%;box-sizing:border-box;margin:0}.wallet-graph-slot .pnl-chart{height:210px}@media(max-width:900px){.wallet-live-layout{grid-template-columns:1fr}.wallet-graph-slot .pnl-chart-card{height:auto}}@media(max-width:700px){.wallet-metrics-stack{grid-template-columns:1fr 1fr}.wallet-metric{border-bottom:0}.wallet-metric+.wallet-metric{border-left:1px solid var(--border);padding-left:14px}}
 '''
     html = html.replace('</style>', css + '</style>', 1)
 
     wallet_js = r'''
+function moveLivePnlGraphIntoWallet(){
+ const slot=document.getElementById('walletLiveGraphSlot');
+ const chart=document.querySelector('.pnl-chart-card');
+ if(slot&&chart&&chart.parentElement!==slot)slot.appendChild(chart);
+}
 async function loadWallet(){
  try{
   const r=await fetch('/api/live/wallet',{cache:'no-store'});
@@ -84,7 +94,7 @@ async function loadWallet(){
  }
 }
 '''
-    html = html.replace('</script>', wallet_js + '\nloadWallet();setInterval(loadWallet,5000);\n</script>', 1)
+    html = html.replace('</script>', wallet_js + '\nmoveLivePnlGraphIntoWallet();loadWallet();setInterval(loadWallet,5000);\n</script>', 1)
     dashboard.DASHBOARD_HTML = html
 
 
