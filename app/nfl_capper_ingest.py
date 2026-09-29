@@ -1963,6 +1963,8 @@ def _nfl_signal_dashboard_item(
         "portfolio_value_usdc_at_call": record.get("portfolio_value_usdc_at_call"),
         "match_status": "MATCHED" if matched else record.get("match_status"),
         "market_type": record.get("market_type"),
+        "requested_total_line": record.get("requested_total_line"),
+        "executed_total_line": record.get("executed_total_line"),
         "market": record.get("market"),
         "market_url": record.get("market_url"),
         "event_title": record.get("event_title") or record.get("result_event_title"),
