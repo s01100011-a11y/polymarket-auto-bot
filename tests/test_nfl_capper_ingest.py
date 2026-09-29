@@ -1322,9 +1322,6 @@ class NflDashboardSignalItemTests(unittest.TestCase):
 
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 class NflRollingPnlStatsTests(unittest.TestCase):
     def test_stats_include_last_7_and_30_day_realized_pnl(self):
         now = datetime.now(timezone.utc)
@@ -1367,4 +1364,8 @@ class NflRollingPnlStatsTests(unittest.TestCase):
         self.assertEqual(stats["realized_pnl_usdc"], "4.00")
         self.assertEqual(stats["realized_pnl_7d_usdc"], "5.00")
         self.assertEqual(stats["realized_pnl_30d_usdc"], "8.00")
+
+
+if __name__ == "__main__":
+    unittest.main()
 
