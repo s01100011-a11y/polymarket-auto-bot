@@ -1,5 +1,11 @@
 # CHANGES
 
+## 2026-09-30 — Graph range typography and top MODE spacing
+
+- Changed the graph range/sample line beneath the `1D / 1W / 1M / 1Y / YTD / ALL` buttons from small monospace text to the same 12px sans-serif styling used by the sizing/meta text below each AUTO-TRADING status field.
+- Increased the left/right padding of the top MODE row so the MODE field and master Online/Offline button align with the spacing used inside the sport AUTO-TRADING windows.
+- Kept the master button on the right while preventing the MODE field from crowding the window border.
+
 ## 2026-09-30 — Standalone live graph window
 
 - Separated the live Portfolio P/L graph from the top S01807/Wallet window so it renders as its own Win95-style window with teal desktop visible around it.
