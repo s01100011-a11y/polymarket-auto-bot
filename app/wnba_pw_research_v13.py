@@ -108,7 +108,7 @@ def _install_s01807_win95_theme() -> None:
         <div class="capper-status-label">MODE</div>
         <div class="nfl-capper-state top-mode-state" id="mode">—</div>
       </div>
-      <button type="button" class="badge capper-power-btn sport-power-btn" id="botPowerBtn" data-enabled="1" aria-pressed="true" title="Dashboard master bot switch"><span class="dot"></span><span id="serviceState">Connecting</span></button>
+      <button type="button" class="badge capper-power-btn sport-power-btn" id="botPowerBtn" data-enabled="1" aria-pressed="true" title="Dashboard master bot switch"><span class="dot"></span><span class="capper-power-text" id="serviceState">Connecting</span></button>
     </div>
     <div class="win95-info-strip">
       <div class="win95-info-group win95-time-group">
