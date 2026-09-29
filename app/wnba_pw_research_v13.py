@@ -679,6 +679,181 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 .panel .exec-status-box .note{color:#fff!important}
 .empty{background:#000!important;color:#fff!important}
 
+/* Normalize legacy PW/research/control panels to the Win95 dashboard system */
+.slack-mode-box{
+ margin:10px 0!important;
+ padding:2px!important;
+ background:#c0c0c0!important;
+ color:#000!important;
+ border-top:2px solid #fff!important;
+ border-left:2px solid #fff!important;
+ border-right:2px solid #404040!important;
+ border-bottom:2px solid #404040!important;
+ box-shadow:1px 1px 0 #000!important;
+}
+.slack-mode-head{
+ margin:0!important;
+ padding:5px 6px!important;
+ background:linear-gradient(90deg,#000080,#1084d0)!important;
+ color:#fff!important;
+ border-bottom:2px solid #808080!important;
+}
+.slack-mode-head .label,
+.slack-mode-head .slack-mode-value,
+.slack-mode-head .slack-mode-state{
+ color:#fff!important;
+ text-shadow:1px 1px #000;
+}
+.slack-mode-value,.slack-mode-state,.slack-mode-note,
+.pw-strategy-name,.pw-strategy-rule,.pw-strategy-section-title,
+.pw-strategy-metric-label,.pw-strategy-metric-value,.pw-strategy-sub,
+.pw-strategy-loading,.pw-filter-final,.pw-filter-table,
+.live-test-lock,.live-test-result,.live-test-warning{
+ font-family:"Lucida Console","Courier New",monospace!important;
+ font-variant-numeric:tabular-nums;
+}
+.pw-strategy-total{margin:7px!important}
+.pw-strategy-cards{
+ gap:7px!important;
+ margin:7px!important;
+}
+.pw-strategy-card{
+ min-width:0!important;
+ padding:9px!important;
+ background:#000!important;
+ color:#fff!important;
+ border-top:2px solid #404040!important;
+ border-left:2px solid #404040!important;
+ border-right:2px solid #fff!important;
+ border-bottom:2px solid #fff!important;
+ box-shadow:none!important;
+}
+.pw-strategy-total .pw-strategy-card{
+ background:#000!important;
+ border-color:initial!important;
+}
+.pw-strategy-card-head{gap:8px!important;margin-bottom:7px!important}
+.pw-strategy-name{color:#fff!important;font-size:15px!important;font-weight:900!important}
+.pw-strategy-rule{color:#fff!important;font-size:10px!important;line-height:1.45!important}
+.pw-strategy-section{
+ border-top:1px solid #555!important;
+ margin-top:8px!important;
+ padding-top:8px!important;
+}
+.pw-strategy-section-title{
+ color:#fff!important;
+ font-size:10px!important;
+ letter-spacing:.04em!important;
+}
+.pw-strategy-metrics{gap:5px!important}
+.pw-strategy-metric{
+ min-width:0!important;
+ padding:7px!important;
+ background:#080808!important;
+ color:#fff!important;
+ border:1px solid #555!important;
+}
+.pw-strategy-metric-label{color:#fff!important}
+.pw-strategy-metric-value{color:#fff!important;font-weight:900!important}
+.pw-strategy-metric-value.green{color:var(--retro-green)!important}
+.pw-strategy-metric-value.red{color:var(--retro-red)!important}
+.pw-strategy-sub,.pw-strategy-loading{color:#fff!important}
+.pw-strategy-badge,
+.pw-filter-badge{
+ background:#c0c0c0!important;
+ color:#000!important;
+ border-top:2px solid #fff!important;
+ border-left:2px solid #fff!important;
+ border-right:2px solid #404040!important;
+ border-bottom:2px solid #404040!important;
+ box-shadow:1px 1px 0 #000!important;
+}
+.pw-strategy-badge.on,.pw-filter-badge.on{
+ color:#006000!important;
+ font-weight:900!important;
+}
+.pw-strategy-badge.off,.pw-filter-badge.off{
+ color:#a00000!important;
+ font-weight:900!important;
+}
+.pw-filter-table-wrap{
+ margin:7px!important;
+ background:#000!important;
+ border-top:2px solid #404040!important;
+ border-left:2px solid #404040!important;
+ border-right:2px solid #fff!important;
+ border-bottom:2px solid #fff!important;
+}
+.pw-filter-table{background:#000!important;color:#fff!important}
+.pw-filter-table th{
+ background:#000080!important;
+ color:#fff!important;
+ border-color:#808080!important;
+}
+.pw-filter-table td{
+ background:#000!important;
+ color:#fff!important;
+ border-color:#333!important;
+}
+.pw-filter-profit{font-weight:900!important}
+.pw-filter-final{
+ margin:7px!important;
+ padding:9px!important;
+ background:#000!important;
+ color:#fff!important;
+ border-top:2px solid #404040!important;
+ border-left:2px solid #404040!important;
+ border-right:2px solid #fff!important;
+ border-bottom:2px solid #fff!important;
+}
+.slack-mode-note{
+ margin:7px!important;
+ padding:8px!important;
+ background:#000!important;
+ color:#fff!important;
+ border-top:2px solid #404040!important;
+ border-left:2px solid #404040!important;
+ border-right:2px solid #fff!important;
+ border-bottom:2px solid #fff!important;
+}
+.slack-mode-controls,
+.slack-pending{margin:7px!important}
+.slack-pending-row{
+ background:#000!important;
+ color:#fff!important;
+ border:1px solid #555!important;
+ padding:8px!important;
+}
+.slack-pending-row .muted{color:#fff!important}
+.live-test-warning,.live-test-lock,.live-test-result{
+ margin:7px!important;
+ padding:9px!important;
+ background:#000!important;
+ color:#fff!important;
+ border-top:2px solid #404040!important;
+ border-left:2px solid #404040!important;
+ border-right:2px solid #fff!important;
+ border-bottom:2px solid #fff!important;
+}
+.live-test-warning{color:var(--retro-red)!important}
+.live-test-lock b{color:var(--retro-yellow)!important}
+.live-test-result{white-space:pre-wrap;word-break:break-word}
+.save-msg{color:#fff!important}
+#pwStrategyPanel>.slack-mode-note,
+#pwFilterPanel>.slack-mode-note{margin-top:7px!important}
+#pwStrategyPanel .green,#pwFilterPanel .green{color:var(--retro-green)!important}
+#pwStrategyPanel .red,#pwFilterPanel .red{color:var(--retro-red)!important}
+@media(max-width:900px){
+ .pw-strategy-cards{grid-template-columns:1fr!important}
+ .pw-strategy-metrics{grid-template-columns:repeat(2,minmax(0,1fr))!important;overflow:visible!important}
+}
+@media(max-width:520px){
+ .pw-strategy-metrics{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+ .pw-strategy-card{padding:8px!important}
+ .pw-strategy-name{font-size:14px!important}
+ .pw-strategy-rule,.pw-strategy-sub{font-size:10px!important}
+}
+
 /* Clean capper card information hierarchy */
 .capper-sizing{
  margin:8px 0 10px;
