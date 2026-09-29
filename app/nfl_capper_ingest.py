@@ -1963,12 +1963,26 @@ def _nfl_signal_dashboard_item(
         "portfolio_value_usdc_at_call": record.get("portfolio_value_usdc_at_call"),
         "match_status": "MATCHED" if matched else record.get("match_status"),
         "market_type": record.get("market_type"),
+        "requested_total_line": record.get("requested_total_line"),
+        "executed_total_line": record.get("executed_total_line"),
         "market": record.get("market"),
         "market_url": record.get("market_url"),
         "event_title": record.get("event_title") or record.get("result_event_title"),
         "event_start_at": record.get("event_start_at"),
         "event_phase": phase,
         "outcome": record.get("outcome"),
+        "exact_position": (
+            (
+                str(record.get("outcome") or "")
+                + (
+                    " " + str(record.get("executed_total_line"))
+                    if record.get("executed_total_line") is not None
+                    else ""
+                )
+            ).strip()
+            or record.get("selection")
+        ),
+        "matchup": record.get("event_title") or record.get("result_event_title"),
         "asset_id": record.get("asset_id"),
         "current_buy_price": record.get("current_buy_price"),
         "best_ask": record.get("best_ask") or record.get("max_price"),
@@ -2914,7 +2928,9 @@ function nflPickList(title,items,kind){
   if(item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!=='')meta.push('to win $'+Number(item.target_profit_usdc).toFixed(2));
   if(item.posted_at)meta.push('signal '+nflPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+nflAge(item.signal_age_seconds):''));
   if(item.updated_at)meta.push('last update '+nflPickTime(item.updated_at));
-  if(item.market)meta.push('Matched: '+nflEsc(item.market)+(item.outcome?' → '+nflEsc(item.outcome):''));
+  if(item.matchup)meta.push('Match: '+nflEsc(item.matchup));
+  if(item.exact_position)meta.push('POSITION HELD: '+nflEsc(item.exact_position));
+  if(item.market)meta.push('Market: '+nflEsc(item.market));
   if(item.result_event_title)meta.push('Game '+nflEsc(item.result_event_title));
   if(item.event_phase==='LIVE'){
    meta.push('GAME LIVE');
