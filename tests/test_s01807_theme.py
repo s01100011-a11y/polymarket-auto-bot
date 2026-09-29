@@ -22,3 +22,23 @@ def test_theme_keeps_dark_data_areas_and_mobile_layout():
     assert "background:#000!important" in source
     assert ".nfl-capper-card,.more-stats-row{" in source
     assert "@media(max-width:900px)" in source
+
+
+def test_win95_app_chrome_has_one_line_title_and_fake_window_controls():
+    source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+
+    assert "<title>s01807.exe</title>" in source
+    assert "win95-titlebar" in source
+    assert "win95-title-text\">s01807.exe" in source
+    assert "win95-logo-red" in source
+    assert "win95-logo-green" in source
+    assert "win95-logo-blue" in source
+    assert "win95-logo-yellow" in source
+    assert "win95-minimize" in source
+    assert "win95-maximize" in source
+    assert "win95-close" in source
+    assert "win95-info-strip" in source
+    assert 'id="versionLabel"' in source
+    assert 'id="versionDateLabel"' in source
+    assert 'id="updated"' in source
+    assert 'id="serviceState"' in source
