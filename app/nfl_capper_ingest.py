@@ -1250,6 +1250,97 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
     return best[1], best[2], best[3], best[4]
 
 
+
+def _find_better_total_fallback(
+    pick: dict[str, Any],
+    *,
+    max_distance: Decimal = Decimal("1.0"),
+) -> tuple[Any, Any, str, Any, Decimal]:
+    """Use only a strictly better nearby total when the exact NFL total is unavailable."""
+    teams = [str(x).upper() for x in (pick.get("teams") or [])]
+    side = str(pick.get("total_side") or "").upper()
+    try:
+        requested = Decimal(str(pick.get("total_line")))
+    except Exception as exc:
+        raise ValueError("NFL total fallback requires a numeric requested line") from exc
+    if side not in {"UNDER", "OVER"}:
+        raise ValueError("NFL total fallback requires OVER or UNDER")
+
+    ranked: list[tuple[int, Decimal, Any, Any, str, Any]] = []
+    search_queries: list[str] = []
+    for candidate in (_team_name(teams[0]), *_team_aliases(teams[0])):
+        text = str(candidate or "").strip()
+        if text and text.casefold() not in {q.casefold() for q in search_queries}:
+            search_queries.append(text)
+
+    with PublicClient() as client:
+        events_by_key: dict[str, Any] = {}
+        for query in search_queries:
+            result = client.list_events(title_search=query, closed=False, page_size=30).first_page()
+            for event in result.items:
+                key = str(getattr(event, "id", "") or getattr(event, "slug", "") or getattr(event, "title", ""))
+                if key:
+                    events_by_key[key] = event
+
+        for event in events_by_key.values():
+            event_slug = _norm(getattr(event, "slug", ""))
+            if event_slug and not event_slug.startswith("nfl-"):
+                continue
+            etext = _norm(" ".join([str(getattr(event, "title", "") or ""), str(getattr(event, "slug", "") or "")]))
+            if not all(_contains_alias(etext, team) for team in teams[:2]):
+                continue
+            for market in getattr(event, "markets", ()) or ():
+                if not _full_game_market_type_matches(_market_type(market), "total"):
+                    continue
+                if not getattr(getattr(market, "state", None), "accepting_orders", False):
+                    continue
+                sports = getattr(market, "sports", None)
+                try:
+                    candidate_line = Decimal(str(getattr(sports, "line", None)))
+                except Exception:
+                    continue
+                distance = abs(candidate_line - requested)
+                if distance <= 0 or distance > max_distance:
+                    continue
+                # A higher total is better for UNDER; a lower total is better for OVER.
+                if side == "UNDER" and candidate_line <= requested:
+                    continue
+                if side == "OVER" and candidate_line >= requested:
+                    continue
+                candidate_pick = dict(pick)
+                candidate_pick["total_line"] = str(candidate_line)
+                selected = _select_outcome(market, candidate_pick, "total")
+                if selected is None:
+                    continue
+                label, obj = selected
+                score = 20 - int(distance * 10)
+                ranked.append((score, distance, event, market, label, obj))
+
+    if not ranked:
+        raise ValueError(
+            f"No safer same-game NFL total within {max_distance} points of {side} {requested}"
+        )
+
+    if len(teams) == 1:
+        narrowed = _narrow_one_team_events_by_posted_date(
+            [(row[0], row[2], row[3], row[4], row[5]) for row in ranked],
+            pick,
+        )
+        allowed = {_event_key(row[1]) for row in narrowed}
+        ranked = [row for row in ranked if _event_key(row[2]) in allowed]
+        if not ranked:
+            raise ValueError("No unique nearby NFL event matched the one-team total fallback")
+
+    event_keys = {_event_key(row[2]) for row in ranked}
+    event_keys.discard("")
+    if len(event_keys) != 1:
+        raise ValueError("NFL total fallback did not resolve to exactly one event")
+
+    ranked.sort(key=lambda row: (row[1], -row[0]))
+    best = ranked[0]
+    return best[2], best[3], best[4], best[5], Decimal(str(getattr(getattr(best[3], "sports", None), "line")))
+
+
 def _matched_event_phase(event: Any, market: Any, now: datetime | None = None) -> str:
     """Fail closed when deciding whether an outage-recovered NFL pick is still pregame."""
     current = now or datetime.now(timezone.utc)
@@ -1365,22 +1456,37 @@ def _prepare_pick(
     requested_spread_line: str | None = None
     executed_spread_line: str | None = None
     alternate_spread_fallback = False
+    requested_total_line: str | None = None
+    executed_total_line: str | None = None
+    alternate_total_fallback = False
     try:
         event, market, outcome_label, outcome_obj = _find_market(pick, kind)
     except ValueError as exact_exc:
-        if kind != "spread" or not better_spread_fallback_enabled:
+        if kind == "spread" and better_spread_fallback_enabled:
+            try:
+                event, market, outcome_label, outcome_obj, fallback_line = _find_better_spread_fallback(
+                    pick,
+                    max_distance=max_alt_spread_points,
+                )
+            except Exception as fallback_exc:
+                raise ValueError(f"{exact_exc}; safer spread fallback failed: {fallback_exc}") from fallback_exc
+            requested = Decimal(str(list(pick.get("spread_lines") or [None])[0]))
+            requested_spread_line = _format_signed_spread_line(requested)
+            executed_spread_line = _format_signed_spread_line(fallback_line)
+            alternate_spread_fallback = True
+        elif kind == "total":
+            try:
+                event, market, outcome_label, outcome_obj, fallback_line = _find_better_total_fallback(
+                    pick,
+                    max_distance=Decimal("1.0"),
+                )
+            except Exception as fallback_exc:
+                raise ValueError(f"{exact_exc}; safer total fallback failed: {fallback_exc}") from fallback_exc
+            requested_total_line = str(Decimal(str(pick.get("total_line"))).normalize())
+            executed_total_line = str(fallback_line.normalize())
+            alternate_total_fallback = True
+        else:
             raise
-        try:
-            event, market, outcome_label, outcome_obj, fallback_line = _find_better_spread_fallback(
-                pick,
-                max_distance=max_alt_spread_points,
-            )
-        except Exception as fallback_exc:
-            raise ValueError(f"{exact_exc}; safer spread fallback failed: {fallback_exc}") from fallback_exc
-        requested = Decimal(str(list(pick.get("spread_lines") or [None])[0]))
-        requested_spread_line = _format_signed_spread_line(requested)
-        executed_spread_line = _format_signed_spread_line(fallback_line)
-        alternate_spread_fallback = True
 
     if kind == "spread" and requested_spread_line is None:
         requested = Decimal(str(list(pick.get("spread_lines") or [None])[0]))
@@ -1468,6 +1574,9 @@ def _prepare_pick(
         "strategy_requested_spread_line": requested_spread_line,
         "strategy_executed_spread_line": executed_spread_line,
         "strategy_alternate_spread_fallback": alternate_spread_fallback,
+        "strategy_requested_total_line": requested_total_line,
+        "strategy_executed_total_line": executed_total_line,
+        "strategy_alternate_total_fallback": alternate_total_fallback,
     }
     queued = remote._enqueue("BUY", payload)
     return {
@@ -2803,7 +2912,8 @@ function nflPickList(title,items,kind){
   if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(nflEsc(item.units)+'u');
   if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('risk $'+Number(item.stake_usdc).toFixed(2));
   if(item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!=='')meta.push('to win $'+Number(item.target_profit_usdc).toFixed(2));
-  if(item.posted_at)meta.push('posted '+nflPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+nflAge(item.signal_age_seconds):''));
+  if(item.posted_at)meta.push('signal '+nflPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+nflAge(item.signal_age_seconds):''));
+  if(item.updated_at)meta.push('last update '+nflPickTime(item.updated_at));
   if(item.market)meta.push('Matched: '+nflEsc(item.market)+(item.outcome?' → '+nflEsc(item.outcome):''));
   if(item.result_event_title)meta.push('Game '+nflEsc(item.result_event_title));
   if(item.event_phase==='LIVE'){

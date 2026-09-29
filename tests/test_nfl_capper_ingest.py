@@ -1164,6 +1164,81 @@ class NflStructuredSpreadAndDateResolutionTests(unittest.TestCase):
         self.assertEqual(label, "Minnesota Vikings")
 
 
+
+class NflBetterTotalFallbackTests(unittest.TestCase):
+    def test_under_42_automatically_uses_under_42_5(self):
+        over = SimpleNamespace(label="Over", token_id="over-42-5")
+        under = SimpleNamespace(label="Under", token_id="under-42-5")
+        market = SimpleNamespace(
+            id="chi-phi-total-42-5",
+            question="Bears vs Eagles total 42.5",
+            slug="nfl-chi-phi-2026-09-29-total-42pt5",
+            sports=SimpleNamespace(sports_market_type="total", line=42.5),
+            outcomes=SimpleNamespace(yes=over, no=under),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        event = SimpleNamespace(
+            id="chi-phi-2026-09-29",
+            slug="nfl-chi-phi-2026-09-29",
+            title="Chicago Bears vs Philadelphia Eagles",
+            markets=[market],
+        )
+        pick = _pick(
+            posted_at="2026-09-29T00:00:00+00:00",
+            selection="UNDER 42",
+            teams=["CHI", "PHI"],
+            bet_types=["total"],
+            total_side="UNDER",
+            total_line="42",
+        )
+
+        with patch.object(
+            capper,
+            "PublicClient",
+            return_value=NflCapperMarketResolutionTests._client([event]),
+        ):
+            matched_event, matched_market, label, outcome, line = capper._find_better_total_fallback(pick)
+
+        self.assertEqual(matched_event.slug, "nfl-chi-phi-2026-09-29")
+        self.assertEqual(matched_market.id, "chi-phi-total-42-5")
+        self.assertEqual(label, "Under")
+        self.assertEqual(outcome.token_id, "under-42-5")
+        self.assertEqual(line, Decimal("42.5"))
+
+    def test_under_does_not_fallback_to_worse_lower_total(self):
+        over = SimpleNamespace(label="Over", token_id="over-41-5")
+        under = SimpleNamespace(label="Under", token_id="under-41-5")
+        market = SimpleNamespace(
+            id="chi-phi-total-41-5",
+            question="Bears vs Eagles total 41.5",
+            slug="nfl-chi-phi-2026-09-29-total-41pt5",
+            sports=SimpleNamespace(sports_market_type="total", line=41.5),
+            outcomes=SimpleNamespace(yes=over, no=under),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        event = SimpleNamespace(
+            id="chi-phi-2026-09-29",
+            slug="nfl-chi-phi-2026-09-29",
+            title="Chicago Bears vs Philadelphia Eagles",
+            markets=[market],
+        )
+        pick = _pick(
+            selection="UNDER 42",
+            teams=["CHI", "PHI"],
+            bet_types=["total"],
+            total_side="UNDER",
+            total_line="42",
+        )
+        with patch.object(
+            capper,
+            "PublicClient",
+            return_value=NflCapperMarketResolutionTests._client([event]),
+        ):
+            with self.assertRaisesRegex(ValueError, "No safer same-game NFL total"):
+                capper._find_better_total_fallback(pick)
+
+
+
 class NflNoFillRetryTests(unittest.TestCase):
     def test_zero_fill_queue_result_is_retryable(self):
         self.assertTrue(
