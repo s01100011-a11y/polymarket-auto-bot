@@ -397,8 +397,8 @@ async function load(){
   if(serviceState)serviceState.textContent=s.bot_enabled===false?'Offline':'Online';
   if(versionLabel)versionLabel.textContent='v'+(s.version||'—');
   if(versionDateLabel)versionDateLabel.textContent='Version date '+(s.version_date||'—');
-  if(win95Title)win95Title.textContent='s01807 '+(s.version||'—');
-  document.title='s01807 '+(s.version||'—');
+  if(win95Title)win95Title.textContent='S01807 v'+(s.version||'—');
+  document.title='S01807 v'+(s.version||'—');
   if(powerBtn){powerBtn.dataset.enabled=s.bot_enabled===false?'0':'1';powerBtn.classList.toggle('active',s.bot_enabled!==false);powerBtn.classList.toggle('offline',s.bot_enabled===false);powerBtn.setAttribute('aria-pressed',s.bot_enabled!==false?'true':'false')}
   document.getElementById('updated').textContent='Updated '+new Date(d.generated_at).toLocaleTimeString()+' · uptime '+Math.floor(s.uptime_seconds/60)+'m';
   document.getElementById('mode').textContent=(s.bot_enabled===false?'OFFLINE':(s.live_trading?'LIVE':'DRY RUN'))+' · Auto '+(s.auto_trading?'ON':'OFF'); document.getElementById('watches').textContent=s.active_watches; document.getElementById('liveTrades').textContent=s.submitted_live_trades; setPnl(document.getElementById('pnl'),s.estimated_total_pnl); document.getElementById('budget').textContent=money(s.daily_budget_used)+' / '+money(s.max_daily_budget_usdc); document.getElementById('pnlNote').textContent=s.pnl_note;
