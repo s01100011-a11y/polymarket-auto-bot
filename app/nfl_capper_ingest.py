@@ -1759,10 +1759,15 @@ def _stats_from_executions(
 ) -> dict[str, dict[str, Any]]:
     marks = live_marks or {}
     out: dict[str, dict[str, Any]] = {}
+    now = datetime.now(timezone.utc)
+    cutoff_7d = now - timedelta(days=7)
+    cutoff_30d = now - timedelta(days=30)
     for label in labels:
         wins = losses = pushes = open_trades = total = live_marked = 0
         stake = Decimal("0")
         realized = Decimal("0")
+        realized_7d = Decimal("0")
+        realized_30d = Decimal("0")
         units = Decimal("0")
         live_pnl = Decimal("0")
         open_cost_basis = Decimal("0")
@@ -1819,6 +1824,17 @@ def _stats_from_executions(
             except Exception:
                 continue
             realized += pnl
+            realized_at = _parse_iso(
+                rec.get("closed_at")
+                or rec.get("updated_at")
+                or rec.get("submitted_at")
+                or rec.get("created_at")
+            )
+            if realized_at is not None:
+                if realized_at >= cutoff_30d:
+                    realized_30d += pnl
+                if realized_at >= cutoff_7d:
+                    realized_7d += pnl
             try:
                 stake += Decimal(str(rec.get("actual_cost_usdc") or rec.get("budget_usdc") or "0"))
             except Exception:
@@ -1849,6 +1865,8 @@ def _stats_from_executions(
             "units_staked": str(units.quantize(Decimal("0.01"))),
             "graded_stake_usdc": str(stake.quantize(Decimal("0.01"))),
             "realized_pnl_usdc": str(realized.quantize(Decimal("0.01"))),
+            "realized_pnl_7d_usdc": str(realized_7d.quantize(Decimal("0.01"))),
+            "realized_pnl_30d_usdc": str(realized_30d.quantize(Decimal("0.01"))),
             "roi_pct": str(roi.quantize(Decimal("0.1"))) if roi is not None else None,
             "live_marked": live_marked,
             "live_pnl_usdc": str(live_pnl.quantize(Decimal("0.01"))) if live_marked else None,
@@ -3029,7 +3047,13 @@ function nflCapperLine(x,sourceKey){
  const livePnl=liveRaw===null?'—':(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
  const liveClass=liveRaw===null||liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
  const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
- const metrics='<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">Realized P/L '+pnl+'</span> · ROI '+roi+'</div><div><span class="capper-pnl '+liveClass+'">Live P/L '+livePnl+'</span> · Open value '+openValue+'</div><div>Missed '+Number(x.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div>';
+ const pnl7Raw=Number(x.realized_pnl_7d_usdc||0);
+ const pnl30Raw=Number(x.realized_pnl_30d_usdc||0);
+ const pnl7=(pnl7Raw>0?'+':'')+'$'+pnl7Raw.toFixed(2);
+ const pnl30=(pnl30Raw>0?'+':'')+'$'+pnl30Raw.toFixed(2);
+ const pnl7Class=pnl7Raw===0?'flat':(pnl7Raw>0?'positive':'negative');
+ const pnl30Class=pnl30Raw===0?'flat':(pnl30Raw>0?'positive':'negative');
+ const metrics='<div>Bets '+(x.bets||0)+' · Open '+(x.open||0)+' · W-L-P '+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(x.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">Realized P/L '+pnl+'</span> · ROI '+roi+'</div><div><span class="capper-pnl '+pnl7Class+'">7D P/L '+pnl7+'</span> · <span class="capper-pnl '+pnl30Class+'">30D P/L '+pnl30+'</span></div><div><span class="capper-pnl '+liveClass+'">Live P/L '+livePnl+'</span> · Open value '+openValue+'</div><div>Missed '+Number(x.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div>';
  const active=nflActiveTabs[sourceKey]||'signals';
  const specs=nflTabSpec(x);
  const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>'<button type="button" style="padding:5px 8px;min-height:34px;'+(s[0]===active?'font-weight:700;opacity:1':'opacity:.72')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')">'+nflEsc(s[1])+' '+s[2]+'</button>').join('')+'</div>';

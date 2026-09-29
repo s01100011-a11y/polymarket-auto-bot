@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -118,7 +119,12 @@ def _performance(mode: str) -> dict[str, Any]:
     wins = losses = pushes = graded = 0
     open_trades = 0
     realized_total = Decimal("0")
+    realized_7d = Decimal("0")
+    realized_30d = Decimal("0")
     stake_total = Decimal("0")
+    now = datetime.now(timezone.utc)
+    cutoff_7d = now - timedelta(days=7)
+    cutoff_30d = now - timedelta(days=30)
 
     for rec in executions.values():
         bucket = _trade_bucket(rec)
@@ -136,6 +142,30 @@ def _performance(mode: str) -> dict[str, Any]:
 
         stake = _d(rec.get("budget_usdc"))
         realized_total += realized
+
+        realized_at = None
+        for raw_time in (
+            rec.get("closed_at"),
+            rec.get("updated_at"),
+            rec.get("submitted_at"),
+            rec.get("created_at"),
+        ):
+            if not raw_time:
+                continue
+            try:
+                parsed = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            realized_at = parsed.astimezone(timezone.utc)
+            break
+        if realized_at is not None:
+            if realized_at >= cutoff_30d:
+                realized_30d += realized
+            if realized_at >= cutoff_7d:
+                realized_7d += realized
+
         if stake > 0:
             stake_total += stake
         graded += 1
@@ -161,6 +191,8 @@ def _performance(mode: str) -> dict[str, Any]:
         "open_trades": open_trades,
         "graded_stake_usdc": str(stake_total.quantize(Decimal("0.01"))),
         "realized_pnl": str(realized_total.quantize(Decimal("0.01"))),
+        "realized_pnl_7d_usdc": str(realized_7d.quantize(Decimal("0.01"))),
+        "realized_pnl_30d_usdc": str(realized_30d.quantize(Decimal("0.01"))),
         "accuracy_pct": str(accuracy.quantize(Decimal("0.1"))) if accuracy is not None else None,
         "roi_pct": str(roi.quantize(Decimal("0.1"))) if roi is not None else None,
         "portfolio_value_usdc": _portfolio_value(),
@@ -185,7 +217,9 @@ def _install_filters() -> None:
     # refresh. Remove that block here so it cannot race/overwrite the selected
     # BOTH/PAPER/LIVE view. Filtered stats are rendered only by
     # refreshFilteredStats() below.
-    metric_overwrite = """  const roi=document.getElementById('performanceRoi'),wl=document.getElementById('performanceWL'),acc=document.getElementById('performanceAccuracy'),push=document.getElementById('performancePushes'),graded=document.getElementById('performanceGraded');
+    metric_overwrite = """  const roi=document.getElementById('performanceRoi'),wl=document.getElementById('performanceWL'),acc=document.getElementById('performanceAccuracy'),push=document.getElementById('performancePushes'),graded=document.getElementById('performanceGraded'),p7=document.getElementById('performancePnl7d'),p30=document.getElementById('performancePnl30d');
+  if(p7){const n=Number(s.realized_pnl_7d_usdc||0);p7.textContent=(n>0?'+':'')+'$'+n.toFixed(2);p7.className='performance-value '+(n>0?'green':n<0?'red':'')}
+  if(p30){const n=Number(s.realized_pnl_30d_usdc||0);p30.textContent=(n>0?'+':'')+'$'+n.toFixed(2);p30.className='performance-value '+(n>0?'green':n<0?'red':'')}
   if(roi){const n=Number(s.roi_pct);roi.textContent=s.roi_pct===null||s.roi_pct===undefined?'—':n.toFixed(1)+'%';roi.className='performance-value '+(n>0?'green':n<0?'red':'')}
   if(wl)wl.textContent=String(s.wins||0)+' / '+String(s.losses||0);
   if(push)push.textContent=(s.pushes||0)+' push'+((s.pushes||0)===1?'':'es');
@@ -258,6 +292,8 @@ async function refreshFilteredStats(){
   const portfolio=document.getElementById('performancePortfolio');
   const missed=document.getElementById('performanceMissedPnl');
   const missedCount=document.getElementById('performanceMissedCount');
+  const p7=document.getElementById('performancePnl7d');
+  const p30=document.getElementById('performancePnl30d');
   const roi=document.getElementById('performanceRoi');
   const wl=document.getElementById('performanceWL');
   const acc=document.getElementById('performanceAccuracy');
@@ -273,6 +309,16 @@ async function refreshFilteredStats(){
    missed.className='performance-value '+(m>0?'green':m<0?'red':'');
   }
   if(missedCount)missedCount.textContent=String(s.missed_graded_total||0)+' graded missed calls · NFL + CFB';
+  if(p7){
+   const n=Number(s.realized_pnl_7d_usdc||0);
+   p7.textContent=(n>0?'+':'')+'$'+n.toFixed(2);
+   p7.className='performance-value '+(n>0?'green':n<0?'red':'');
+  }
+  if(p30){
+   const n=Number(s.realized_pnl_30d_usdc||0);
+   p30.textContent=(n>0?'+':'')+'$'+n.toFixed(2);
+   p30.className='performance-value '+(n>0?'green':n<0?'red':'');
+  }
   if(roi){
    const n=Number(s.roi_pct);
    roi.textContent=s.roi_pct===null||s.roi_pct===undefined?'—':n.toFixed(1)+'%';

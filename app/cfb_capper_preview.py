@@ -2873,7 +2873,13 @@ function cfbCapperLine(x,sourceKey){
  const livePnl=liveRaw===null?'—':(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
  const liveClass=liveRaw===null||liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
  const openValue=p.open_value_usdc===null||p.open_value_usdc===undefined?'—':'$'+Number(p.open_value_usdc).toFixed(2);
- const performance='<div class="cfb-capper-performance"><div>Bets '+(p.bets||0)+' · Open '+(p.open||0)+' · W-L-P '+(p.wins||0)+'-'+(p.losses||0)+'-'+(p.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(p.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">Realized P/L '+pnl+'</span> · ROI '+roi+'</div><div><span class="capper-pnl '+liveClass+'">Live P/L '+livePnl+'</span> · Open value '+openValue+'</div><div>Missed '+Number(p.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div></div>';
+ const pnl7Raw=Number(p.realized_pnl_7d_usdc||0);
+ const pnl30Raw=Number(p.realized_pnl_30d_usdc||0);
+ const pnl7=(pnl7Raw>0?'+':'')+'$'+pnl7Raw.toFixed(2);
+ const pnl30=(pnl30Raw>0?'+':'')+'$'+pnl30Raw.toFixed(2);
+ const pnl7Class=pnl7Raw===0?'flat':(pnl7Raw>0?'positive':'negative');
+ const pnl30Class=pnl30Raw===0?'flat':(pnl30Raw>0?'positive':'negative');
+ const performance='<div class="cfb-capper-performance"><div>Bets '+(p.bets||0)+' · Open '+(p.open||0)+' · W-L-P '+(p.wins||0)+'-'+(p.losses||0)+'-'+(p.pushes||0)+' · Win '+winPct+'</div><div>Stake $'+Number(p.graded_stake_usdc||0).toFixed(2)+' · <span class="capper-pnl '+pnlClass+'">Realized P/L '+pnl+'</span> · ROI '+roi+'</div><div><span class="capper-pnl '+pnl7Class+'">7D P/L '+pnl7+'</span> · <span class="capper-pnl '+pnl30Class+'">30D P/L '+pnl30+'</span></div><div><span class="capper-pnl '+liveClass+'">Live P/L '+livePnl+'</span> · Open value '+openValue+'</div><div>Missed '+Number(p.missed_graded||0)+' · <span class="capper-pnl '+missedClass+'">Missed P/L '+missedPnl+'</span></div></div>';
  const active=cfbActiveTabs[sourceKey]||'signals';
  const specs=cfbTabSpec(x);
  const tabs='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+specs.map(s=>{

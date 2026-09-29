@@ -1779,6 +1779,8 @@ class CfbFinishedResultsAndPerformanceTests(unittest.TestCase):
         self.assertIn("ENABLED · AUTO OFF", rendered)
         self.assertIn("Trade P/L", rendered)
         self.assertIn("Realized P/L", rendered)
+        self.assertIn("7D P/L", rendered)
+        self.assertIn("30D P/L", rendered)
         self.assertIn("Live P/L", rendered)
         self.assertIn("Open positions", rendered)
         self.assertIn("cfb-open-position", rendered)
