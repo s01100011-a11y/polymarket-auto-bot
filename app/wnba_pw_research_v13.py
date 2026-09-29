@@ -370,8 +370,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
  .cards,.performance-strip{gap:3px}
 }
 """
-    html = html.replace("</style>", theme_css + "
-</style>", 1)
+    html = html.replace("</style>", theme_css + "\n</style>", 1)
     dashboard.DASHBOARD_HTML = html
 
 
