@@ -2869,9 +2869,9 @@ function cfbCapperLine(x,sourceKey){
  const missedRaw=Number(p.missed_pnl_usdc||0);
  const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
  const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
- const liveRaw=p.live_pnl_usdc===null||p.live_pnl_usdc===undefined?null:Number(p.live_pnl_usdc);
- const livePnl=liveRaw===null?'—':(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
- const liveClass=liveRaw===null||liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
+ const liveRaw=Number(p.total_live_pnl_usdc||0);
+ const livePnl=(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
+ const liveClass=liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
  const openValue=p.open_value_usdc===null||p.open_value_usdc===undefined?'—':'$'+Number(p.open_value_usdc).toFixed(2);
  const pnl7Raw=Number(p.realized_pnl_7d_usdc||0);
  const pnl30Raw=Number(p.realized_pnl_30d_usdc||0);

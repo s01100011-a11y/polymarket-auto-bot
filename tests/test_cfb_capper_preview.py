@@ -1782,6 +1782,7 @@ class CfbFinishedResultsAndPerformanceTests(unittest.TestCase):
         self.assertIn("7D P/L", rendered)
         self.assertIn("30D P/L", rendered)
         self.assertIn("Live P/L", rendered)
+        self.assertIn("total_live_pnl_usdc", rendered)
         self.assertIn("Open positions", rendered)
         self.assertIn("cfb-open-position", rendered)
         self.assertIn("#f59e0b", rendered)

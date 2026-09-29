@@ -643,6 +643,7 @@ class NflCapperStatsTests(unittest.TestCase):
         self.assertEqual(slam["losses"], 0)
         self.assertEqual(slam["realized_pnl_usdc"], "15.00")
         self.assertEqual(slam["live_pnl_usdc"], "2.50")
+        self.assertEqual(slam["total_live_pnl_usdc"], "17.50")
         self.assertEqual(slam["open_cost_basis_usdc"], "10.00")
         self.assertEqual(slam["open_value_usdc"], "12.50")
         self.assertEqual(slam["roi_pct"], "75.0")
@@ -653,6 +654,7 @@ class NflCapperStatsTests(unittest.TestCase):
         self.assertEqual(syndicate["pushes"], 1)
         self.assertEqual(syndicate["units_staked"], "2.25")
         self.assertEqual(syndicate["realized_pnl_usdc"], "-12.25")
+        self.assertEqual(syndicate["total_live_pnl_usdc"], "-12.25")
         self.assertEqual(syndicate["roi_pct"], "-54.4")
 
     def test_stats_helper_supports_cfb_labels_and_filters_other_sports(self):

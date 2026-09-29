@@ -1853,6 +1853,7 @@ def _stats_from_executions(
         decided = wins + losses
         win_pct = (Decimal(wins) / Decimal(decided) * Decimal("100")) if decided else None
         roi = (realized / stake * Decimal("100")) if stake > 0 else None
+        total_live_pnl = realized + live_pnl
         out[label] = {
             "label": label,
             "bets": total,
@@ -1870,6 +1871,7 @@ def _stats_from_executions(
             "roi_pct": str(roi.quantize(Decimal("0.1"))) if roi is not None else None,
             "live_marked": live_marked,
             "live_pnl_usdc": str(live_pnl.quantize(Decimal("0.01"))) if live_marked else None,
+            "total_live_pnl_usdc": str(total_live_pnl.quantize(Decimal("0.01"))),
             "open_cost_basis_usdc": str(open_cost_basis.quantize(Decimal("0.01"))) if open_trades else "0.00",
             "open_value_usdc": str(open_value.quantize(Decimal("0.01"))) if live_marked else None,
         }
@@ -3043,9 +3045,9 @@ function nflCapperLine(x,sourceKey){
  const missedRaw=Number(x.missed_pnl_usdc||0);
  const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
  const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
- const liveRaw=x.live_pnl_usdc===null||x.live_pnl_usdc===undefined?null:Number(x.live_pnl_usdc);
- const livePnl=liveRaw===null?'—':(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
- const liveClass=liveRaw===null||liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
+ const liveRaw=Number(x.total_live_pnl_usdc||0);
+ const livePnl=(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
+ const liveClass=liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
  const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
  const pnl7Raw=Number(x.realized_pnl_7d_usdc||0);
  const pnl30Raw=Number(x.realized_pnl_30d_usdc||0);
