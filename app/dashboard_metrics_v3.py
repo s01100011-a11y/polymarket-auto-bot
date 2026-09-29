@@ -417,74 +417,8 @@ def _install_performance_and_paper_ui() -> None:
     metric_anchor = "document.getElementById('budget').textContent=money(s.daily_budget_used)+' / '+money(s.max_daily_budget_usdc);"
     metric_js = """document.getElementById('budget').textContent=money(s.daily_budget_used)+' / '+money(s.max_daily_budget_usdc);
   const roi=document.getElementById('performanceRoi'),wl=document.getElementById('performanceWL'),acc=document.getElementById('performanceAccuracy'),push=document.getElementById('performancePushes'),graded=document.getElementById('performanceGraded'),p7=document.getElementById('performancePnl7d'),p30=document.getElementById('performancePnl30d');
-  if(p7){const n=Number(s.realized_pnl_7d_usdc||0);p7.textContent=(n>0?'+':'')+'
-  if(wl)wl.textContent=String(s.wins||0)+' / '+String(s.losses||0);
-  if(push)push.textContent=(s.pushes||0)+' push'+((s.pushes||0)===1?'':'es');
-  if(acc){const a=Number(s.accuracy_pct);acc.textContent=s.accuracy_pct===null||s.accuracy_pct===undefined?'—':a.toFixed(1)+'%'}
-  if(graded)graded.textContent=(s.graded_trades||0)+' graded closed trades';"""
-    html = html.replace(metric_anchor, metric_js)
-
-    paper_js = r'''
-document.addEventListener('click',async function(ev){
- const btn=ev.target.closest('[data-paper-close]');
- if(!btn)return;
- const tradeId=btn.getAttribute('data-paper-close');
- if(!tradeId)return;
- if(!confirm('Close this PAPER position at the current Polymarket SELL price? No real order will be sent.'))return;
- const original=btn.textContent;
- try{
-  btn.disabled=true;btn.textContent='CLOSING…';
-  const r=await fetch('/api/paper/close/'+encodeURIComponent(tradeId),{method:'POST'});
-  const d=await r.json();
-  if(!r.ok)throw new Error(d.detail||'Paper close failed');
-  btn.textContent='CLOSED';
-  setTimeout(()=>load(),350);
- }catch(e){
-  btn.disabled=false;btn.textContent=original;
-  alert('Paper close failed: '+String(e));
- }
-});
-'''
-    html = html.replace("</script>", paper_js + "\n</script>", 1)
-    dashboard.DASHBOARD_HTML = html
-
-
-_install_performance_and_paper_ui()
-+n.toFixed(2);p7.className='performance-value '+(n>0?'green':n<0?'red':'')}
-  if(p30){const n=Number(s.realized_pnl_30d_usdc||0);p30.textContent=(n>0?'+':'')+'
-  if(wl)wl.textContent=String(s.wins||0)+' / '+String(s.losses||0);
-  if(push)push.textContent=(s.pushes||0)+' push'+((s.pushes||0)===1?'':'es');
-  if(acc){const a=Number(s.accuracy_pct);acc.textContent=s.accuracy_pct===null||s.accuracy_pct===undefined?'—':a.toFixed(1)+'%'}
-  if(graded)graded.textContent=(s.graded_trades||0)+' graded closed trades';"""
-    html = html.replace(metric_anchor, metric_js)
-
-    paper_js = r'''
-document.addEventListener('click',async function(ev){
- const btn=ev.target.closest('[data-paper-close]');
- if(!btn)return;
- const tradeId=btn.getAttribute('data-paper-close');
- if(!tradeId)return;
- if(!confirm('Close this PAPER position at the current Polymarket SELL price? No real order will be sent.'))return;
- const original=btn.textContent;
- try{
-  btn.disabled=true;btn.textContent='CLOSING…';
-  const r=await fetch('/api/paper/close/'+encodeURIComponent(tradeId),{method:'POST'});
-  const d=await r.json();
-  if(!r.ok)throw new Error(d.detail||'Paper close failed');
-  btn.textContent='CLOSED';
-  setTimeout(()=>load(),350);
- }catch(e){
-  btn.disabled=false;btn.textContent=original;
-  alert('Paper close failed: '+String(e));
- }
-});
-'''
-    html = html.replace("</script>", paper_js + "\n</script>", 1)
-    dashboard.DASHBOARD_HTML = html
-
-
-_install_performance_and_paper_ui()
-+n.toFixed(2);p30.className='performance-value '+(n>0?'green':n<0?'red':'')}
+  if(p7){const n=Number(s.realized_pnl_7d_usdc||0);p7.textContent=(n>0?'+':'')+'$'+n.toFixed(2);p7.className='performance-value '+(n>0?'green':n<0?'red':'')}
+  if(p30){const n=Number(s.realized_pnl_30d_usdc||0);p30.textContent=(n>0?'+':'')+'$'+n.toFixed(2);p30.className='performance-value '+(n>0?'green':n<0?'red':'')}
   if(roi){const n=Number(s.roi_pct);roi.textContent=s.roi_pct===null||s.roi_pct===undefined?'—':n.toFixed(1)+'%';roi.className='performance-value '+(n>0?'green':n<0?'red':'')}
   if(wl)wl.textContent=String(s.wins||0)+' / '+String(s.losses||0);
   if(push)push.textContent=(s.pushes||0)+' push'+((s.pushes||0)===1?'':'es');
