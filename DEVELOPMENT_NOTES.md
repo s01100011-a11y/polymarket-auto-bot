@@ -1,3 +1,9 @@
+## 2026-09-30 — Root-window inset and master MODE row
+
+The Win95 theme now gives the major root dashboard windows a small horizontal inset (`16px` total on larger layouts and `12px` total at the mobile breakpoint), leaving visible teal desktop between the viewport edge and each window. The transparent basketball wrapper is inset as a unit so WNBA/NBA remain aligned without double-insetting their nested windows.
+
+The main dashboard MODE control has moved from the Wallet address row into the S01807 app chrome. It reuses the same `capper-panel-status-row`, `capper-status-field`, `nfl-capper-state`, and `capper-power-btn sport-power-btn` classes used by sport auto-trading controls. This keeps the white mode text field and Online/Offline badge identical in size and palette to the capper status controls. The Wallet no longer renders a second Mode box. `versionDateLabel` now displays the raw version date only, without the `Version date` prefix.
+
 ## 2026-09-30 — Unified event/result badge component
 
 `capper-event-badge` now uses the same Win95 raised-grey component treatment as the capper section/tab badges: 34px minimum height, 13px MS Sans Serif label, raised white/dark border, and 1px black shadow. NFL/CFB phase helpers no longer emit translucent `background` or `border` styles inline; they provide only a semantic text colour. This prevents inline styles from visually overriding the shared badge component while retaining WIN/LOSS/LIVE/PREGAME colour cues.

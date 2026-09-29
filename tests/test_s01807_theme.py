@@ -223,3 +223,22 @@ def test_event_badges_keep_only_status_colour_inline():
     assert "badge:'color:#b00000;'" in nfl
     assert "badge:'color:#008000;'" in cfb
     assert "badge:'color:#b00000;'" in cfb
+
+
+def test_top_mode_row_and_window_insets_match_capper_controls():
+    theme = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+    dashboard = Path("app/dashboard.py").read_text(encoding="utf-8")
+    top = theme.split("new_top = '''", 1)[1].split("'''", 1)[0]
+
+    assert '<span class="win95-title-date" id="versionDateLabel">—</span>' in top
+    assert "versionDateLabel.textContent=s.version_date||'—'" in dashboard
+    assert "Version date '+(s.version_date" not in dashboard
+    assert 'class="top-mode-status-row capper-panel-status-row"' in top
+    assert '<div class="capper-status-label">MODE</div>' in top
+    assert 'class="nfl-capper-state top-mode-state" id="mode"' in top
+    assert 'class="badge capper-power-btn sport-power-btn" id="botPowerBtn"' in top
+    assert 'class="capper-power-text" id="serviceState"' in top
+    assert ".top-mode-status-row{" in theme
+    assert ".top-mode-status-row #botPowerBtn{" in theme
+    assert "width:calc(100% - 16px)!important" in theme
+    assert "width:calc(100% - 12px)!important" in theme

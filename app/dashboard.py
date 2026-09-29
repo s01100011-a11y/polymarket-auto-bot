@@ -396,7 +396,7 @@ async function load(){
   const serviceState=document.getElementById('serviceState'),versionLabel=document.getElementById('versionLabel'),versionDateLabel=document.getElementById('versionDateLabel'),win95Title=document.getElementById('win95Title'),powerBtn=document.getElementById('botPowerBtn'),updatedEl=document.getElementById('updated'),uptimeEl=document.getElementById('uptime');
   if(serviceState)serviceState.textContent=s.bot_enabled===false?'Offline':'Online';
   if(versionLabel)versionLabel.textContent='v'+(s.version||'—');
-  if(versionDateLabel)versionDateLabel.textContent='Version date '+(s.version_date||'—');
+  if(versionDateLabel)versionDateLabel.textContent=s.version_date||'—';
   if(win95Title)win95Title.textContent='S01807 v'+(s.version||'—');
   document.title='S01807 v'+(s.version||'—');
   if(powerBtn){powerBtn.dataset.enabled=s.bot_enabled===false?'0':'1';powerBtn.classList.toggle('active',s.bot_enabled!==false);powerBtn.classList.toggle('offline',s.bot_enabled===false);powerBtn.setAttribute('aria-pressed',s.bot_enabled!==false?'true':'false')}
