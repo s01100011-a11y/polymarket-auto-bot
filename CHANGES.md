@@ -1,5 +1,14 @@
 # CHANGES
 
+## 2026-09-29 — Sport AUTO-TRADING title bars and sport-level power buttons
+
+- Renamed the sport windows to the shorter consistent titles: **NFL AUTO-TRADING**, **CFB AUTO-TRADING**, **WNBA AUTO-TRADING**, and **NBA AUTO-TRADING**.
+- Moved each sport's `ENABLED · AUTO LIVE/OFF` status out of the blue title bar into a dedicated status row immediately underneath it.
+- Added a dedicated Online/Offline button on that status row. NFL and CFB now have a sport-level master gate in addition to the existing Slam/Syndicate capper-level switches.
+- WNBA and NBA are now rendered as separate sport windows instead of a combined basketball auto-trading window; each uses its existing persistent monitor switch as the sport-level Online/Offline control.
+- Turning the NFL/CFB sport switch offline records new calls as paused and blocks new automatic order preparation while preserving queued/open positions and the individual capper settings.
+- Added/updated regression coverage for the renamed title bars, status-row controls, sport-level endpoints, and execution gates.
+
 ## 2026-09-29 — Per-capper online controls and left-aligned sport headers
 
 - NFL, CFB, WNBA, and NBA capper/monitor cards now have their own persistent **Online / Offline** control, using the same green/red status-button language as the dashboard master switch.
