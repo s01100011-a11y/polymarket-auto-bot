@@ -8,6 +8,7 @@ from app import pw_spread_backtest
 from app import nfl_capper_ingest
 from app import cfb_capper_preview
 from app import basketball_monitor_capper
+from app import combo_trading
 
 app = base.app
 history = base.history
@@ -74,6 +75,12 @@ basketball_monitor_capper.install(
     core=core,
     ingest=ingest,
     nfl=nfl_capper_ingest,
+)
+
+combo_trading.install(
+    app=app,
+    dashboard=dashboard,
+    core=core,
 )
 
 def _install_s01807_win95_theme() -> None:
