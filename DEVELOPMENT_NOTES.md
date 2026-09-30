@@ -1,3 +1,13 @@
+## 2026-09-30 — Termux timeout root cause and supervisor repair
+
+A direct Termux launch reproduced a startup exit with the literal message `timed out`. Railway showed a successful authenticated heartbeat at the same instant but no queue polling. The cause was the initial public Polymarket geoblock request timing out: the exception path intentionally posted a final heartbeat and then exited, making the phone appear connected while the worker was already dead.
+
+The startup policy now distinguishes an explicit blocked-region response from a transient endpoint/network failure. Explicit blocks still terminate immediately. A transient failure leaves the queue worker running, while every live BUY/SELL/COMBO_BUY still performs its own mandatory fresh geoblock check and therefore remains fail-closed.
+
+COMBO_PREVIEW is quote-only and now tolerates a transient geoblock endpoint timeout; it still fails on an explicit blocked response. No order is accepted by preview.
+
+The Termux supervisor file was also found corrupted/duplicated from an earlier edit. It has been replaced with a clean launcher that preserves wake lock, safe clean-main auto-update, conditional dependency refresh, stale-worker cleanup, v2 wrapper launch, and restart/error handling.
+
 ## 2026-09-30 — Queue-poll telemetry after Combo preview stayed pending
 
 The preview-only Steelers ML + Under 38.5 smoke request resolved both real Polymarket legs and entered the Railway executor queue, but remained PENDING for 90 seconds while Termux heartbeats continued. Railway logs showed no `GET /api/executor/next` or result POST during that window, isolating the blocker to the phone queue-poll loop before Combo RFQ execution.
