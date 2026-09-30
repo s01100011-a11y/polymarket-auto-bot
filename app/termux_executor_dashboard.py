@@ -84,6 +84,8 @@ class ExecutorResult(BaseModel):
 
 class Heartbeat(BaseModel):
     name: str = Field(default="termux", min_length=1, max_length=80)
+    worker_revision: str | None = Field(default=None, max_length=80)
+    capabilities: list[str] = Field(default_factory=list, max_length=32)
     wallet: str | None = Field(default=None, max_length=120)
     wallet_type: str | None = Field(default=None, max_length=80)
     usdc_balance: str | None = Field(default=None, max_length=80)
@@ -148,6 +150,9 @@ def executor_status():
         "pair_code": code,
         "pair_expires_unix": state.get("pair_expires_unix"),
         "worker_name": state.get("worker_name"),
+        "worker_revision": state.get("worker_revision"),
+        "capabilities": state.get("capabilities") or [],
+        "combo_capable": "COMBO_PREVIEW" in (state.get("capabilities") or []),
         "last_seen_at": state.get("last_seen_at"),
         "wallet": state.get("wallet"),
         "wallet_type": state.get("wallet_type"),
@@ -167,6 +172,8 @@ def executor_heartbeat(req: Heartbeat, _: dict[str, Any] = Depends(_executor_aut
     state = _state()
     state.update({
         "worker_name": req.name,
+        "worker_revision": req.worker_revision,
+        "capabilities": req.capabilities,
         "last_seen_unix": time.time(),
         "last_seen_at": _now_iso(),
         "wallet": req.wallet,
