@@ -1,5 +1,14 @@
 # CHANGES
 
+## 2026-09-30 — Consistent sizing-control layout across all sports
+
+- Renamed the fixed sizing label to `FIXED 1U WIN $` and moved the currency symbol into the label instead of displaying a standalone `$` beside the input.
+- Moved the `SET 1U` button to the left of the fixed-unit input.
+- Renamed the dynamic sizing label to `PORTFOLIO %` and removed the standalone `%` beside the input.
+- Moved the `AUTO %` button to the left of the portfolio-percentage input.
+- Applied the same layout to NFL, CFB, WNBA, and NBA capper/monitor cards.
+- Updated the mobile sizing row from three columns to two columns so the button/input pair fills the row cleanly after removing the standalone symbol column.
+
 ## 2026-09-30 — NFL/CFB signal cards now match WNBA
 
 - Reworked NFL and CFB signal rows to use the same `monitor-signal` card structure as the WNBA monitor feed.
