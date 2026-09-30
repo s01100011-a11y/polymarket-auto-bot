@@ -22,6 +22,7 @@ class ComboLeg(BaseModel):
 class ComboRequest(BaseModel):
     legs: list[ComboLeg] = Field(min_length=2, max_length=12)
     budget_usdc: Decimal = Field(gt=0)
+    max_price: Decimal = Field(default=Decimal("0.95"), gt=0, lt=1)
     label: str = Field(default="", max_length=240)
     note: str = Field(default="", max_length=500)
 
@@ -133,6 +134,7 @@ def _payload(req: ComboRequest, resolved: list[dict[str, str]], trade_id: str | 
     return {
         "trade_id": trade_id,
         "budget_usdc": str(req.budget_usdc),
+        "max_price": str(req.max_price),
         "label": req.label.strip() or " + ".join(leg["resolved_outcome"] for leg in resolved),
         "note": req.note,
         "legs": resolved,
@@ -160,6 +162,8 @@ def install(*, app, dashboard, core) -> None:
     def combo_preview(req: ComboRequest):
         resolved = resolve_combo_legs(core, req.legs)
         _validate_budget(core, req.budget_usdc)
+        if req.max_price > core.MAX_PRICE:
+            raise HTTPException(status_code=400, detail=f"Combo maximum price exceeds MAX_PRICE={core.MAX_PRICE}.")
         rec = executor._enqueue("COMBO_PREVIEW", _payload(req, resolved))
         return {
             "ok": True,
@@ -179,6 +183,8 @@ def install(*, app, dashboard, core) -> None:
             raise HTTPException(status_code=409, detail="Combo BUY requires LIVE_TRADING=true and AUTO_TRADING=true.")
 
         _validate_budget(core, req.budget_usdc)
+        if req.max_price > core.MAX_PRICE:
+            raise HTTPException(status_code=400, detail=f"Combo maximum price exceeds MAX_PRICE={core.MAX_PRICE}.")
         resolved = resolve_combo_legs(core, req.legs)
         trade_id = f"combo-{uuid.uuid4().hex[:12]}"
         rec = executor._enqueue("COMBO_BUY", _payload(req, resolved, trade_id=trade_id))
