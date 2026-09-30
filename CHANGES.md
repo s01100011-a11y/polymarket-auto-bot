@@ -1,5 +1,11 @@
 # CHANGES
 
+## 2026-09-30 — Fix top-window MODE inset override
+
+- Fixed a CSS cascade bug where the shared `.capper-panel-status-row` rule was overriding the top MODE row's horizontal padding back to zero.
+- The MODE field and master Online/Offline button now keep the same effective left/right inset as the sport AUTO-TRADING windows.
+- Updated/Uptime now use the same 8px horizontal body inset so the first window aligns consistently as one section.
+
 ## 2026-09-30 — Graph range typography and top MODE spacing
 
 - Changed the graph range/sample line beneath the `1D / 1W / 1M / 1Y / YTD / ALL` buttons from small monospace text to the same 12px sans-serif styling used by the sizing/meta text below each AUTO-TRADING status field.
