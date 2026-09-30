@@ -174,7 +174,7 @@ def _canonical_market_type(value: str) -> str:
     return raw
 
 
-_SELECTION_LINE_RE = re.compile(r"(?<!\\d)([+-]?\\d+(?:\\.\\d+)?)\\s*$")
+_SELECTION_LINE_RE = re.compile(r"(?<!\d)([+-]?\d+(?:\.\d+)?)\s*$")
 
 
 def _selection_base_and_line(value: str) -> tuple[str, Decimal | None]:
