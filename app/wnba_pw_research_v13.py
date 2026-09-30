@@ -1227,7 +1227,7 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
  .capper-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}
  .capper-section-badge{width:calc((100% - 10px)/3)!important;min-width:0!important}
  .capper-sizing-row{grid-template-columns:1fr;gap:4px}
- .capper-sizing-controls{display:grid;grid-template-columns:auto minmax(72px,1fr) auto;gap:5px}
+ .capper-sizing-controls{display:grid;grid-template-columns:auto minmax(72px,1fr);gap:5px}
  .capper-sizing-controls input{width:100%!important;min-width:0}
  .capper-sizing-controls button{white-space:nowrap}
  .nfl-capper-card{padding:10px!important}

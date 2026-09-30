@@ -83,3 +83,18 @@ def test_basketball_sections_use_the_same_badge_format():
     assert '<span class="capper-section-badge">Settled positions' in source
     assert '<span class="capper-section-badge">Signals' in source
     assert "Signals signals" not in source
+
+
+def test_basketball_sizing_controls_match_nfl_cfb_layout():
+    source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+
+    assert '<span class="capper-sizing-label">Fixed 1u win $</span>' in source
+    assert '<span class="capper-sizing-label">Portfolio %</span>' in source
+    fixed = source.index('onclick="monitorSetUnitSize')
+    fixed_input = source.index('id="monitorUnitSize-')
+    auto = source.index('onclick="monitorSetPortfolioPct')
+    auto_input = source.index('id="monitorPortfolioPct-')
+    assert fixed < fixed_input
+    assert auto < auto_input
+    assert '<span>$</span>' not in source
+    assert '<span>%</span>' not in source
