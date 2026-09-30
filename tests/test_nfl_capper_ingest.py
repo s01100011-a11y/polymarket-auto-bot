@@ -1410,3 +1410,18 @@ def test_nfl_signals_use_wnba_monitor_card_structure():
     assert 'class="monitor-signal-actions"' in source
     assert "border-radius:8px;'+visual.row" not in source
     assert 'class="nfl-result-line' not in source
+
+
+def test_nfl_sizing_controls_put_mode_buttons_left_of_inputs():
+    source = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
+
+    assert '<span class="capper-sizing-label">Fixed 1u win $</span>' in source
+    assert '<span class="capper-sizing-label">Portfolio %</span>' in source
+    fixed = source.index('onclick="nflSetUnitSize')
+    fixed_input = source.index('id="nflUnitSize-')
+    auto = source.index('onclick="nflSetPortfolioPct')
+    auto_input = source.index('id="nflPortfolioPct-')
+    assert fixed < fixed_input
+    assert auto < auto_input
+    assert '<span>$</span>' not in source
+    assert '<span>%</span>' not in source
