@@ -461,11 +461,39 @@ def _combo_buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[s
             reason = getattr(acceptance, "reason", None)
             error = getattr(acceptance, "error", None)
             raise RuntimeError(f"Combo RFQ acceptance failed ({reason or error or 'unknown reason'})")
-        fill = client.wait_for_combo_fill(
-            rfq_id=str(getattr(acceptance, "rfq_id", summary["rfq_id"])),
-            timeout=float(COMBO_FILL_WAIT_SECONDS),
-            polling_interval=1.0,
-        )
+        rfq_id = str(getattr(acceptance, "rfq_id", summary["rfq_id"]))
+        try:
+            fill = client.wait_for_combo_fill(
+                rfq_id=rfq_id,
+                timeout=float(COMBO_FILL_WAIT_SECONDS),
+                polling_interval=1.0,
+            )
+        except TimeoutError:
+            status = client.fetch_rfq_status(rfq_id=rfq_id)
+            current = str(getattr(status, "status", "")).upper()
+            if current in {"FAILED", "EXPIRED", "CANCELED"}:
+                error = getattr(status, "error", None)
+                raise RuntimeError(
+                    f"Combo RFQ terminated after acceptance: {current} {error or ''}".strip()
+                )
+            summary.update(
+                {
+                    "ok": True,
+                    "status": "COMBO_EXECUTION_PENDING",
+                    "accepted": True,
+                    "filled_shares": "0",
+                    "entry_price": summary["blended_price"],
+                    "taker_order_hash": str(
+                        getattr(acceptance, "taker_order_hash", "")
+                        or getattr(status, "taker_order_hash", "")
+                        or ""
+                    ),
+                    "tx_hash": str(getattr(status, "tx_hash", "") or ""),
+                    "rfq_status": current or "EXECUTING",
+                    "execution_type": "COMBO_RFQ",
+                }
+            )
+            return summary
 
     fill_status = str(getattr(fill, "status", "")).upper()
     if fill_status != "FILLED":
@@ -480,6 +508,7 @@ def _combo_buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[s
         {
             "ok": True,
             "status": "ORDER_SUBMITTED",
+            "accepted": True,
             "filled_shares": str(filled_shares),
             "entry_price": summary["blended_price"],
             "taker_order_hash": str(getattr(acceptance, "taker_order_hash", "") or ""),
