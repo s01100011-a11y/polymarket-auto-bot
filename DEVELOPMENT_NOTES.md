@@ -13,10 +13,13 @@ Implementation:
 - Added `tests/test_combo_trading.py` covering input constraints, duplicate-leg rejection, stale queue expiry, handoff gates/cap authorization, positive-fill requirements, executor payload checks and incomplete builder credentials.
 - Updated `.env.example`, README and CHANGES.
 
-Verification:
-- PR #187 was reviewed against the full patch and is mergeable.
-- The repository has no GitHub Actions workflow, so branch deployment/import validation is used before merge.
-- Live Combo execution remains disabled during validation; no RFQ is accepted and no trade is placed.
+Verification and deployment:
+- PR #187 was reviewed against the full patch and merged to main as commit `5397c89d4bf0c876d9d7142a11b8aed79da683d5`.
+- Railway pre-deploy ran `python -m unittest tests.test_combo_trading tests.test_executor_queue_safety tests.test_termux_executor_caps`: **27 tests passed**.
+- Production deployment `cab35c0e-1128-4538-a036-0a06388ae0b5` reached **SUCCESS** and `GET /health` returned 200.
+- Startup logged `POLYMARKET_COMBOS installed enabled=False max_legs=8`; live Combo execution remained disabled and no Combo RFQ was accepted or trade placed during validation.
+- Railway now explicitly pins `COMBO_TRADING_ENABLED=false`, `COMBO_MAX_LEGS=8`, and `COMBO_FILL_WAIT_SECONDS=45`.
+- Outstanding: the Termux phone must pull/restart onto the new executor code before Combo execution can be enabled. Existing NFL/CFB single-market ingestion is unchanged; automatic soccer Telegram-to-Combo routing and Combo early-exit/Sell are not part of this change.
 
 Files changed: `app/combo_trading.py`, `app/termux_executor_dashboard.py`, `app/wnba_pw_research_v13.py`, `scripts/termux_executor.py`, `tests/test_combo_trading.py`, `.env.example`, `README.md`, `CHANGES.md`, and `DEVELOPMENT_NOTES.md`.
 
