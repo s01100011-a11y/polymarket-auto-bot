@@ -86,6 +86,20 @@ class ComboTradingTests(unittest.TestCase):
             )
         )
 
+    def test_combo_accepted_pending_is_not_treated_as_unfilled_failure(self):
+        self.assertTrue(
+            remote._effective_executor_result_ok(
+                "COMBO_BUY",
+                True,
+                {
+                    "ok": True,
+                    "accepted": True,
+                    "status": "COMBO_EXECUTION_PENDING",
+                    "filled_shares": "0",
+                },
+            )
+        )
+
     def test_combo_buy_expires_like_single_buy(self):
         data = {
             "exec-combo": {
