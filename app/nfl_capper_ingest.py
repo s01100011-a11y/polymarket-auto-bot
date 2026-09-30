@@ -3128,7 +3128,7 @@ function nflPickList(title,items,kind){
     const raw=item.trade_pnl_usdc===null||item.trade_pnl_usdc===undefined?null:Number(item.trade_pnl_usdc);
     const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
     const text=raw===null?'pending':(raw>0?'+':'')+'$'+raw.toFixed(2);
-    pnlLine='<div class="nfl-result-line '+cls+'">Trade P/L '+text+'</div>';
+    pnlLine='<div class="monitor-action '+cls+'">Trade P/L '+text+'</div>';
    }else{
     pnlLine='<div class="nfl-result-line flat">Trade P/L — · NOT TRADED</div>';
    }
