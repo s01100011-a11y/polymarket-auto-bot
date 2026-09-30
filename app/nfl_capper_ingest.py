@@ -3136,7 +3136,7 @@ function nflPickList(title,items,kind){
    pnlLine='<div class="monitor-action flat">NOT TRADED</div>';
   }
   const action=sellAction+marketAction;
-  return '<div style="margin-top:7px;padding:9px 10px;border-radius:8px;'+visual.row+'"><b style="font-size:15px">'+nflEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+pnlLine+(action?'<br>'+action:'')+'</div>';
+  return '<div class="monitor-signal"><b>'+nflEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<div class="monitor-meta">'+meta.join(' · ')+'</div>':'')+pnlLine+(action?'<div class="monitor-signal-actions">'+action+'</div>':'')+'</div>';
  }).join('');
  return '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(title)+'</span>'+rows+'</div>';
 }
