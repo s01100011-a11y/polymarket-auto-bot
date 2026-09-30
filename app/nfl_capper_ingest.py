@@ -1991,6 +1991,15 @@ def _nfl_signal_dashboard_item(
         "market_url": record.get("market_url"),
         "event_title": record.get("event_title") or record.get("result_event_title"),
         "event_start_at": record.get("event_start_at"),
+        "event_finished_at": record.get("event_finished_at"),
+        "event_completed_at": (
+            record.get("event_finished_at")
+            or record.get("event_completed_at")
+            or record.get("result_checked_at")
+            or (execution or {}).get("closed_at")
+            or (record.get("updated_at") if phase == "CLOSED" else None)
+        ),
+        "result_checked_at": record.get("result_checked_at"),
         "event_phase": phase,
         "outcome": record.get("outcome"),
         "exact_position": (
@@ -2894,18 +2903,45 @@ function nflAge(seconds){
  if(s<3600)return Math.floor(s/60)+'m';
  return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
 }
+function nflEventDelta(ms){
+ const s=Math.max(0,Math.floor(Number(ms||0)/1000));
+ if(s<60)return s+'s';
+ if(s<3600)return Math.floor(s/60)+'m';
+ if(s<86400)return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
+ return Math.floor(s/86400)+'d '+Math.floor((s%86400)/3600)+'h';
+}
+function nflEventBadgeLabel(item){
+ const phase=String(item.event_phase||'').toUpperCase();
+ const now=Date.now();
+ if(phase==='LIVE')return 'LIVE';
+ if(phase==='CLOSED'){
+  const raw=item.event_completed_at||item.event_finished_at||item.result_checked_at||item.closed_at||item.updated_at;
+  const done=raw?new Date(raw):null;
+  if(done&&!Number.isNaN(done.getTime())&&now>=done.getTime())return 'COMPLETED · '+nflEventDelta(now-done.getTime())+' ago';
+  return 'COMPLETED';
+ }
+ const start=item.event_start_at?new Date(item.event_start_at):null;
+ if(start&&!Number.isNaN(start.getTime())){
+  const remaining=start.getTime()-now;
+  if(remaining>0)return 'T-'+nflEventDelta(remaining);
+  if(phase==='PREGAME')return 'STARTING';
+ }
+ if(phase==='PREGAME')return 'UPCOMING';
+ return '';
+}
 function nflPhaseVisual(item){
  const phase=String(item.event_phase||'').toUpperCase();
  const status=String(item.status||'').toUpperCase();
  const result=String(item.trade_result||item.pick_result||'').toUpperCase();
- if(phase==='CLOSED'&&result==='WIN')return {label:'WIN',row:'background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.42);border-left:4px solid #22c55e;',badge:'color:#008000;'};
- if(phase==='CLOSED'&&result==='LOSS')return {label:'LOSS',row:'background:rgba(239,68,68,.11);border:1px solid rgba(239,68,68,.42);border-left:4px solid #ef4444;',badge:'color:#b00000;'};
- if(phase==='CLOSED'&&result==='PUSH')return {label:'PUSH',row:'background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.38);border-left:4px solid #f59e0b;',badge:'color:#8a5b00;'};
+ const label=nflEventBadgeLabel(item);
+ if(phase==='CLOSED'&&result==='WIN')return {label,row:'background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.42);border-left:4px solid #22c55e;',badge:'color:#008000;'};
+ if(phase==='CLOSED'&&result==='LOSS')return {label,row:'background:rgba(239,68,68,.11);border:1px solid rgba(239,68,68,.42);border-left:4px solid #ef4444;',badge:'color:#b00000;'};
+ if(phase==='CLOSED'&&result==='PUSH')return {label,row:'background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.38);border-left:4px solid #f59e0b;',badge:'color:#8a5b00;'};
  if(phase==='LIVE')return {label:'LIVE',row:'background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.38);border-left:4px solid #22c55e;',badge:'color:#008000;'};
- if(phase==='CLOSED')return {label:'FINISHED',row:'background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.24);border-left:4px solid #94a3b8;opacity:.82;',badge:'color:#404040;'};
- if(phase==='PREGAME')return {label:'PREGAME',row:'background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.35);border-left:4px solid #3b82f6;',badge:'color:#000080;'};
- const label=status==='RETRYING'?'RETRYING':status==='EXECUTOR_FAILED'?'FAILED':status==='EXECUTOR_DONE'?'DONE':status==='QUEUED'?'QUEUED':'';
- return {label,row:'border:1px solid rgba(255,255,255,.07);',badge:'color:#404040;'};
+ if(phase==='CLOSED')return {label,row:'background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.24);border-left:4px solid #94a3b8;opacity:.82;',badge:'color:#404040;'};
+ if(phase==='PREGAME')return {label,row:'background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.35);border-left:4px solid #3b82f6;',badge:'color:#000080;'};
+ const fallback=status==='RETRYING'?'RETRYING':status==='EXECUTOR_FAILED'?'FAILED':status==='EXECUTOR_DONE'?'DONE':status==='QUEUED'?'QUEUED':'';
+ return {label:label||fallback,row:'border:1px solid rgba(255,255,255,.07);',badge:'color:#404040;'};
 }
 let nflHideFinished=localStorage.getItem('nflHideFinished')==='1';
 const nflActiveTabs={slam:'signals',syndicate:'signals'};
