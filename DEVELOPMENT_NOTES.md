@@ -1,3 +1,9 @@
+## 2026-09-30 — Shared capper sizing control order
+
+All capper sizing renderers now use the same two-control order: label, then action button, then numeric input. Fixed sizing renders `FIXED 1U WIN $` with `SET 1U` before the dollar-value input. Dynamic sizing renders `PORTFOLIO %` with `AUTO %` before the percentage input. The old standalone `$` and `%` span elements were removed.
+
+The shared mobile `.capper-sizing-controls` grid is now two columns (`auto` + flexible input) rather than three, matching the new DOM structure and keeping NFL, CFB, WNBA, and NBA aligned identically.
+
 ## 2026-09-30 — Shared signal card renderer styling
 
 NFL and CFB signal list renderers now emit the same structural classes used by the basketball monitor cards: `.monitor-signal`, `.monitor-meta`, `.monitor-action`, and `.monitor-signal-actions`. Their previous inline `visual.row` background/border styling has been removed from the outer row, so the global Win95 monitor-card theme is authoritative.
