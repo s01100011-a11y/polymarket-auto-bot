@@ -1,3 +1,11 @@
+## 2026-09-30 — More Stats bet-type breakdowns (#198)
+
+- Added ML, Spread, and Total performance breakdowns to every BY CAPPER row.
+- Added the same ML, Spread, and Total breakdowns to every BY SPORT row.
+- Added a third BET TYPES tab showing aggregate ML, Spread, and Total bets, W-L-P, win rate, stake, ROI, realized P/L, 7-day/30-day P/L, open count, and live P/L.
+- Bet type is derived from the existing execution market type (moneyline/h2h, spread, total) so this is reporting-only and does not alter execution, matching, or sizing.
+- Categories with no trades still render as zero rows so ML / Spread / Total are always visible.
+
 ## 2026-09-30 — Termux startup geoblock timeout recovery
 
 - The Termux queue worker no longer exits when the public Polymarket geoblock endpoint temporarily times out during startup.
