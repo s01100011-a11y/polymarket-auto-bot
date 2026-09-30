@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -29,6 +30,14 @@ class ComboRequest(BaseModel):
 
 def combo_trading_enabled() -> bool:
     return os.getenv("COMBO_TRADING_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _require_smoke_token(token: str) -> None:
+    expected = os.getenv("COMBO_SMOKE_TOKEN", "").strip()
+    if not expected or not secrets.compare_digest(token.strip(), expected):
+        raise HTTPException(status_code=404, detail="Not found")
+    if combo_trading_enabled():
+        raise HTTPException(status_code=409, detail="Combo smoke preview is disabled while live Combo trading is enabled.")
 
 
 def _resolve_position_id(core, market: Any, outcome: str) -> tuple[str, str]:
@@ -156,6 +165,56 @@ def install(*, app, dashboard, core) -> None:
             "auto_trading": core.auto_trading_enabled(),
             "max_auto_trade_usdc": str(core.MAX_AUTO_TRADE_USDC),
             "daily_budget_usdc": str(core.MAX_DAILY_BUDGET_USDC),
+        }
+
+    @app.get("/api/combo/smoke/preview")
+    def combo_smoke_preview(
+        token: str,
+        market_url: HttpUrl,
+        outcome1: str,
+        market_type1: str,
+        outcome2: str,
+        market_type2: str,
+        max_price: Decimal = Decimal("0.95"),
+    ):
+        _require_smoke_token(token)
+        req = ComboRequest(
+            legs=[
+                ComboLeg(market_url=market_url, outcome=outcome1, market_type=market_type1),
+                ComboLeg(market_url=market_url, outcome=outcome2, market_type=market_type2),
+            ],
+            budget_usdc=Decimal("1"),
+            max_price=max_price,
+            label=f"Combo smoke test — {outcome1} + {outcome2}",
+            note="QUOTE ONLY — diagnostic smoke test",
+        )
+        resolved = resolve_combo_legs(core, req.legs)
+        _validate_budget(core, req.budget_usdc)
+        if req.max_price > core.MAX_PRICE:
+            raise HTTPException(status_code=400, detail=f"Combo maximum price exceeds MAX_PRICE={core.MAX_PRICE}.")
+        rec = executor._enqueue("COMBO_PREVIEW", _payload(req, resolved))
+        return {
+            "ok": True,
+            "queued": True,
+            "request_id": rec["id"],
+            "legs": resolved,
+            "budget_usdc": str(req.budget_usdc),
+        }
+
+    @app.get("/api/combo/smoke/result/{request_id}")
+    def combo_smoke_result(request_id: str, token: str):
+        _require_smoke_token(token)
+        rec = executor._queue_load().get(request_id)
+        if not rec or rec.get("action") != "COMBO_PREVIEW":
+            raise HTTPException(status_code=404, detail="Combo preview request not found")
+        return {
+            "id": rec.get("id"),
+            "action": rec.get("action"),
+            "status": rec.get("status"),
+            "created_at": rec.get("created_at"),
+            "updated_at": rec.get("updated_at"),
+            "result": rec.get("result"),
+            "error": rec.get("error"),
         }
 
     @app.post("/api/combo/preview", dependencies=[Depends(dashboard._auth)])

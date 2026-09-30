@@ -181,6 +181,24 @@ class ComboTradingTests(unittest.TestCase):
         ):
             executor._builder_key_from_env()
 
+    def test_smoke_token_requires_configured_match_and_live_combo_off(self):
+        with (
+            patch.dict(combo_trading.os.environ, {"COMBO_SMOKE_TOKEN": "abc123", "COMBO_TRADING_ENABLED": "false"}, clear=False),
+        ):
+            combo_trading._require_smoke_token("abc123")
+
+        with (
+            patch.dict(combo_trading.os.environ, {"COMBO_SMOKE_TOKEN": "abc123", "COMBO_TRADING_ENABLED": "false"}, clear=False),
+            self.assertRaises(HTTPException),
+        ):
+            combo_trading._require_smoke_token("wrong")
+
+        with (
+            patch.dict(combo_trading.os.environ, {"COMBO_SMOKE_TOKEN": "abc123", "COMBO_TRADING_ENABLED": "true"}, clear=False),
+            self.assertRaisesRegex(HTTPException, "disabled while live Combo trading is enabled"),
+        ):
+            combo_trading._require_smoke_token("abc123")
+
 
 if __name__ == "__main__":
     unittest.main()
