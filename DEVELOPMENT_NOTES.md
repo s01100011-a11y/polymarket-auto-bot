@@ -1,3 +1,9 @@
+## 2026-09-30 — Shared signal card renderer styling
+
+NFL and CFB signal list renderers now emit the same structural classes used by the basketball monitor cards: `.monitor-signal`, `.monitor-meta`, `.monitor-action`, and `.monitor-signal-actions`. Their previous inline `visual.row` background/border styling has been removed from the outer row, so the global Win95 monitor-card theme is authoritative.
+
+The shared theme explicitly normalizes `.monitor-signal` to the WNBA appearance: black inset body, square corners, 8px padding, 14px white title, 11px metadata, and 12px action/result line. Existing semantic event badges and action buttons remain functional inside the card.
+
 ## 2026-09-30 — Top MODE row CSS cascade fix
 
 The top MODE row deliberately reuses `capper-panel-status-row`, but that shared class is defined later in the theme and was winning the cascade with `padding: 7px 0 5px !important`. As a result, the master MODE field and Online button still rendered flush to the inner frame despite the earlier top-specific rule. A later, more specific `.top-mode-status-row.capper-panel-status-row` override now restores `7px 8px 5px` padding. The first-window Updated/Uptime strip was also moved to 8px horizontal padding for alignment.
