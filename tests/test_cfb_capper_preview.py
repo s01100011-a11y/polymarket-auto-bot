@@ -2319,3 +2319,18 @@ def test_cfb_signals_use_wnba_monitor_card_structure():
     assert 'class="monitor-signal-actions"' in source
     assert "border-radius:8px;'+visual.row" not in source
     assert 'class="cfb-result-line' not in source
+
+
+def test_cfb_sizing_controls_put_mode_buttons_left_of_inputs():
+    source = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
+
+    assert '<span class="capper-sizing-label">Fixed 1u win $</span>' in source
+    assert '<span class="capper-sizing-label">Portfolio %</span>' in source
+    fixed = source.index('onclick="cfbSetUnitSize')
+    fixed_input = source.index('id="cfbUnitSize-')
+    auto = source.index('onclick="cfbSetPortfolioPct')
+    auto_input = source.index('id="cfbPortfolioPct-')
+    assert fixed < fixed_input
+    assert auto < auto_input
+    assert '<span>$</span>' not in source
+    assert '<span>%</span>' not in source
