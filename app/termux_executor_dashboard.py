@@ -649,6 +649,7 @@ def _record_buy_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> Non
         "slack_event_id": payload.get("slack_event_id"),
         "auto": bool(payload.get("auto", False)),
         "filled_shares": str(filled),
+        "execution_pending": pending,
         "pre_position_size": str(result.get("position_before") or "0"),
         "quote": {
             "market": result.get("market"),
@@ -684,7 +685,8 @@ def _record_combo_buy_result(queue_rec: dict[str, Any], result: dict[str, Any]) 
         filled = Decimal(str(result.get("filled_shares") or "0"))
     except Exception:
         filled = Decimal("0")
-    if filled <= 0:
+    pending = str(result.get("status") or "") == "COMBO_EXECUTION_PENDING"
+    if filled <= 0 and not pending:
         return
 
     now = _now_iso()
@@ -692,7 +694,7 @@ def _record_combo_buy_result(queue_rec: dict[str, Any], result: dict[str, Any]) 
     blended_price = str(result.get("blended_price") or "0")
     record = {
         "id": trade_id,
-        "status": "ORDER_SUBMITTED",
+        "status": "EXECUTION_PENDING" if pending else "ORDER_SUBMITTED",
         "created_at": now,
         "submitted_at": now,
         "side": "BUY",
@@ -723,6 +725,7 @@ def _record_combo_buy_result(queue_rec: dict[str, Any], result: dict[str, Any]) 
             "quote_id": result.get("quote_id"),
             "tx_hash": result.get("tx_hash"),
             "taker_order_hash": result.get("taker_order_hash"),
+            "rfq_status": result.get("rfq_status"),
         },
     }
     executions = core._load(core.EXECUTIONS_FILE)
@@ -822,6 +825,12 @@ def _effective_executor_result_ok(action: str, body_ok: bool, result: dict[str, 
         return True
     if result.get("ok") is False:
         return False
+    if (
+        normalized == "COMBO_BUY"
+        and bool(result.get("accepted"))
+        and str(result.get("status") or "") == "COMBO_EXECUTION_PENDING"
+    ):
+        return True
     try:
         return Decimal(str(result.get("filled_shares") or "0")) > 0
     except Exception:
