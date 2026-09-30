@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 import uuid
 from contextlib import asynccontextmanager
@@ -162,13 +163,137 @@ def _market_type(market) -> str:
     return str(getattr(sports, "sports_market_type", "") or "")
 
 
-def _outcome_matches_market(market, outcome: str) -> bool:
+def _canonical_market_type(value: str) -> str:
+    raw = _norm(str(value or ""))
+    if raw in {"moneyline", "money line"}:
+        return "moneyline"
+    if raw in {"spread", "spreads"}:
+        return "spread"
+    if raw in {"total", "totals"}:
+        return "total"
+    return raw
+
+
+_SELECTION_LINE_RE = re.compile(r"(?<!\\d)([+-]?\\d+(?:\\.\\d+)?)\\s*$")
+
+
+def _selection_base_and_line(value: str) -> tuple[str, Decimal | None]:
+    text = str(value or "").strip()
+    match = _SELECTION_LINE_RE.search(text)
+    if not match:
+        return _norm(text), None
+    try:
+        line = Decimal(match.group(1))
+    except Exception:
+        return _norm(text), None
+    base = text[: match.start()].strip(" @:,-")
+    return _norm(base), line
+
+
+def _same_line(left: Decimal | None, right: object) -> bool:
+    if left is None or right is None:
+        return left is None
+    try:
+        return abs(left - Decimal(str(right))) <= Decimal("0.0001")
+    except Exception:
+        return False
+
+
+def _resolve_market_outcome(market, outcome: str):
+    """Resolve a user-facing sports selection to one side of a binary condition.
+
+    Polymarket represents grouped sports choices (for example soccer home/draw/away)
+    as separate binary conditions. The visible team/draw name can therefore live in
+    group_item_title while the condition outcomes themselves are simply Yes/No.
+    """
     target = _norm(outcome)
-    if target in {"yes", "no"}:
-        return True
-    yes_label = _norm(str(getattr(market.outcomes.yes, "label", "")))
-    no_label = _norm(str(getattr(market.outcomes.no, "label", "")))
-    return target in {yes_label, no_label}
+    yes = market.outcomes.yes
+    no = market.outcomes.no
+    yes_label_raw = str(getattr(yes, "label", "Yes") or "Yes")
+    no_label_raw = str(getattr(no, "label", "No") or "No")
+    yes_label = _norm(yes_label_raw)
+    no_label = _norm(no_label_raw)
+
+    if target == "yes":
+        return yes, yes_label_raw
+    if target == "no":
+        return no, no_label_raw
+    if target == yes_label:
+        return yes, yes_label_raw
+    if target == no_label:
+        return no, no_label_raw
+
+    market_type = _canonical_market_type(_market_type(market))
+    group_raw = str(getattr(market, "group_item_title", "") or "")
+    group = _norm(group_raw)
+    question = _norm(str(getattr(market, "question", "") or ""))
+    base, requested_line = _selection_base_and_line(outcome)
+    market_line = getattr(getattr(market, "sports", None), "line", None)
+
+    # Grouped moneylines such as soccer 1X2 are separate Yes/No conditions.
+    # groupItemTitle is the authoritative visible selection when present.
+    if market_type == "moneyline":
+        if group and target == group:
+            return yes, group_raw
+        # Older/variant Gamma responses can omit groupItemTitle. Only use the
+        # question fallback when the condition is truly Yes/No and contains the
+        # complete requested selection phrase.
+        if not group and yes_label == "yes" and no_label == "no" and target and target in question:
+            return yes, str(getattr(market, "question", "") or outcome)
+
+    if market_type == "total":
+        # A total condition normally has Over/Under outcomes and a separate line.
+        side = base
+        selected = None
+        label = None
+        if side == yes_label:
+            selected, label = yes, yes_label_raw
+        elif side == no_label:
+            selected, label = no, no_label_raw
+        elif group and target == group:
+            selected, label = yes, group_raw
+        if selected is not None:
+            if requested_line is not None and not _same_line(requested_line, market_line):
+                return None
+            rendered = f"{label} {requested_line}" if requested_line is not None and _norm(label) in {"over", "under"} else label
+            return selected, rendered
+
+    if market_type == "spread":
+        # In a two-sided spread condition, sports.line is the YES-labelled side's
+        # line; the NO-labelled side receives the sign-inverted complementary line.
+        selected = None
+        label = None
+        effective_line = None
+        if base == yes_label:
+            selected, label = yes, yes_label_raw
+            try:
+                effective_line = Decimal(str(market_line)) if market_line is not None else None
+            except Exception:
+                effective_line = None
+        elif base == no_label:
+            selected, label = no, no_label_raw
+            try:
+                effective_line = -Decimal(str(market_line)) if market_line is not None else None
+            except Exception:
+                effective_line = None
+        elif group and target == group:
+            selected, label = yes, group_raw
+
+        if selected is not None:
+            if requested_line is not None and not _same_line(requested_line, effective_line):
+                return None
+            if requested_line is None and market_line is not None and base in {yes_label, no_label}:
+                # Event URLs often contain many alternate spreads. Require the
+                # requested line rather than arbitrarily choosing one.
+                return None
+            rendered = f"{label} {requested_line:+g}" if requested_line is not None else label
+            return selected, rendered
+
+    return None
+
+
+def _outcome_matches_market(market, outcome: str) -> bool:
+    return _resolve_market_outcome(market, outcome) is not None
 
 
 def _select_market(client: PublicClient, intent: TradeIntent):
@@ -186,11 +311,12 @@ def _select_market(client: PublicClient, intent: TradeIntent):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Sports event lookup failed: {exc}") from exc
 
-    wanted_type = _norm(intent.market_type)
+    wanted_type = _canonical_market_type(intent.market_type)
     candidates = [
         market
         for market in event.markets
-        if _norm(_market_type(market)) == wanted_type and _outcome_matches_market(market, intent.outcome)
+        if _canonical_market_type(_market_type(market)) == wanted_type
+        and _outcome_matches_market(market, intent.outcome)
     ]
 
     if not candidates:
@@ -222,22 +348,22 @@ def _select_market(client: PublicClient, intent: TradeIntent):
 
 
 def _resolve_asset(market, outcome: str) -> tuple[str, str, str]:
-    target = _norm(outcome)
-    yes = market.outcomes.yes
-    no = market.outcomes.no
-    yes_label = str(getattr(yes, "label", "Yes"))
-    no_label = str(getattr(no, "label", "No"))
-
-    if target in {"yes", _norm(yes_label)}:
-        selected, side, label = yes, "YES", yes_label
-    elif target in {"no", _norm(no_label)}:
-        selected, side, label = no, "NO", no_label
-    else:
+    resolved = _resolve_market_outcome(market, outcome)
+    if resolved is None:
+        yes_label = str(getattr(market.outcomes.yes, "label", "Yes"))
+        no_label = str(getattr(market.outcomes.no, "label", "No"))
         raise HTTPException(
             status_code=400,
-            detail=f"Outcome '{outcome}' does not match this market. Valid outcomes: '{yes_label}' or '{no_label}'.",
+            detail=(
+                f"Outcome '{outcome}' does not match this market. "
+                f"Binary outcomes are '{yes_label}' / '{no_label}', "
+                f"group='{getattr(market, 'group_item_title', None)}', "
+                f"line='{getattr(getattr(market, 'sports', None), 'line', None)}'."
+            ),
         )
 
+    selected, label = resolved
+    side = "YES" if selected is market.outcomes.yes else "NO"
     asset_id = getattr(selected, "token_id", None) or getattr(selected, "position_id", None)
     if not asset_id:
         raise HTTPException(status_code=400, detail=f"No tradable asset found for outcome '{label}'.")

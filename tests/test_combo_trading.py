@@ -24,13 +24,25 @@ class _Client:
         return False
 
 
-def _market(position_id: str, market_type: str = "moneyline"):
-    yes = SimpleNamespace(label="Yes", position_id=position_id)
-    no = SimpleNamespace(label="No", position_id=position_id + "-no")
+def _market(
+    position_id: str,
+    market_type: str = "moneyline",
+    *,
+    yes_label: str = "Yes",
+    no_label: str = "No",
+    group_item_title: str | None = None,
+    line=None,
+    question: str = "Test market",
+):
+    yes = SimpleNamespace(label=yes_label, position_id=position_id, token_id=position_id + "-token")
+    no = SimpleNamespace(label=no_label, position_id=position_id + "-no", token_id=position_id + "-no-token")
     return SimpleNamespace(
-        question="Test market",
+        question=question,
+        slug=position_id + "-market",
+        group_item_title=group_item_title,
         outcomes=SimpleNamespace(yes=yes, no=no),
-        sports=SimpleNamespace(sports_market_type=market_type),
+        sports=SimpleNamespace(sports_market_type=market_type, line=line),
+        state=SimpleNamespace(accepting_orders=True, active=True),
     )
 
 
@@ -69,6 +81,118 @@ class ComboTradingTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(HTTPException, "duplicate"):
                 combo_trading.resolve_combo_legs(core, legs)
+
+    def test_grouped_soccer_moneyline_selects_named_binary_condition(self):
+        seychelles = _market(
+            "sey",
+            "moneyline",
+            group_item_title="Seychelles",
+            question="Will Seychelles win?",
+        )
+        draw = _market(
+            "draw",
+            "moneyline",
+            group_item_title="Draw",
+            question="Will Seychelles vs. Sri Lanka end in a draw?",
+        )
+        sri_lanka = _market(
+            "sri",
+            "moneyline",
+            group_item_title="Sri Lanka",
+            question="Will Sri Lanka win?",
+        )
+        event = SimpleNamespace(
+            title="Seychelles vs. Sri Lanka",
+            markets=[seychelles, draw, sri_lanka],
+        )
+
+        class _EventClient:
+            def get_event(self, **kwargs):
+                return event
+
+        intent = core.TradeIntent(
+            market_url="https://polymarket.com/sports/fifa-friendlies/fif-sey-sri-2026-09-30",
+            outcome="Sri Lanka",
+            market_type="moneyline",
+            max_price=Decimal("0.95"),
+            budget_usdc=Decimal("1"),
+        )
+        selected = core._select_market(_EventClient(), intent)
+        self.assertIs(selected, sri_lanka)
+        position_id, label = combo_trading._resolve_position_id(core, selected, "Sri Lanka")
+        self.assertEqual(position_id, "sri")
+        self.assertEqual(label, "Sri Lanka")
+
+    def test_total_plural_type_and_line_select_under(self):
+        total_25 = _market(
+            "tot25-over",
+            "totals",
+            yes_label="Over",
+            no_label="Under",
+            line=2.5,
+            question="Seychelles vs. Sri Lanka: O/U 2.5",
+        )
+        total_35 = _market(
+            "tot35-over",
+            "totals",
+            yes_label="Over",
+            no_label="Under",
+            line=3.5,
+            question="Seychelles vs. Sri Lanka: O/U 3.5",
+        )
+        event = SimpleNamespace(
+            title="Seychelles vs. Sri Lanka",
+            markets=[total_35, total_25],
+        )
+
+        class _EventClient:
+            def get_event(self, **kwargs):
+                return event
+
+        intent = core.TradeIntent(
+            market_url="https://polymarket.com/sports/fifa-friendlies/fif-sey-sri-2026-09-30",
+            outcome="Under 2.5",
+            market_type="total",
+            max_price=Decimal("0.95"),
+            budget_usdc=Decimal("1"),
+        )
+        selected = core._select_market(_EventClient(), intent)
+        self.assertIs(selected, total_25)
+        position_id, label = combo_trading._resolve_position_id(core, selected, "Under 2.5")
+        self.assertEqual(position_id, "tot25-over-no")
+        self.assertEqual(label, "Under 2.5")
+
+    def test_spread_plural_type_uses_complementary_line_for_no_side(self):
+        spread = _market(
+            "ind-215",
+            "spreads",
+            yes_label="Indiana",
+            no_label="Northwestern",
+            line=-21.5,
+            question="Spread: Indiana (-21.5)",
+        )
+        event = SimpleNamespace(title="Northwestern vs. Indiana", markets=[spread])
+
+        class _EventClient:
+            def get_event(self, **kwargs):
+                return event
+
+        intent = core.TradeIntent(
+            market_url="https://polymarket.com/sports/cfb/cfb-nw-ind-2026-09-25",
+            outcome="Northwestern +21.5",
+            market_type="spread",
+            max_price=Decimal("0.95"),
+            budget_usdc=Decimal("1"),
+        )
+        selected = core._select_market(_EventClient(), intent)
+        self.assertIs(selected, spread)
+        position_id, label = combo_trading._resolve_position_id(core, selected, "Northwestern +21.5")
+        self.assertEqual(position_id, "ind-215-no")
+        self.assertIn("Northwestern", label)
+
+        bad = intent.model_copy(update={"outcome": "Northwestern +20.5"})
+        with self.assertRaises(HTTPException):
+            core._select_market(_EventClient(), bad)
 
     def test_combo_buy_is_subject_to_executor_fill_rule(self):
         self.assertFalse(
