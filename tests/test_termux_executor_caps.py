@@ -91,6 +91,54 @@ class TermuxExecutorCapTests(unittest.TestCase):
             executor.QUEUE_POLL_HEALTH.clear()
             executor.QUEUE_POLL_HEALTH.update(original)
 
+
+    def test_initial_geo_timeout_keeps_queue_worker_available(self):
+        with patch.object(executor, "_geo", side_effect=executor.httpx.ConnectTimeout("timed out")):
+            geo, status = executor._initial_geo_check()
+        self.assertIsNone(geo)
+        self.assertIn("Geoblock check unavailable", status)
+        self.assertIn("timed out", status)
+
+    def test_initial_explicit_geoblock_still_fails_closed(self):
+        with (
+            patch.object(executor, "_geo", side_effect=RuntimeError("Polymarket geoblock reports this phone network is blocked")),
+            self.assertRaises(RuntimeError),
+        ):
+            executor._initial_geo_check()
+
+    def test_combo_preview_is_quote_only_geo_tolerant(self):
+        payload = {
+            "budget_usdc": "1",
+            "authorized_max_auto_trade_usdc": "25",
+            "max_price": "0.65",
+            "leg_position_ids": ["1", "2"],
+        }
+        summary = {"ok": True, "blended_price": "0.40"}
+        with patch.object(executor, "_combo_quote", return_value=(object(), summary)) as quote:
+            result = executor._combo_preview(payload, "private", "wallet")
+        quote.assert_called_once_with(payload, "private", "wallet", require_geo=False)
+        self.assertTrue(result["no_order_placed"])
+        self.assertEqual(result["status"], "QUOTE_ONLY")
+
+    def test_combo_buy_requires_strict_geo_quote_path(self):
+        payload = {
+            "budget_usdc": "1",
+            "authorized_max_auto_trade_usdc": "25",
+            "max_price": "0.65",
+            "leg_position_ids": ["1", "2"],
+        }
+        fake_quote = object()
+        summary = {"ok": True, "rfq_id": "rfq"}
+        with (
+            patch.object(executor, "_combo_quote", return_value=(fake_quote, summary)) as quote,
+            patch.object(executor, "_secure_combo") as secure_combo,
+        ):
+            client = secure_combo.return_value.__enter__.return_value
+            client.accept_combo_quote.return_value = type("Accept", (), {"status": "failed", "reason": "stop"})()
+            with self.assertRaises(RuntimeError):
+                executor._combo_buy(payload, "private", "wallet")
+        quote.assert_called_once_with(payload, "private", "wallet", require_geo=True)
+
     def test_heartbeat_accepts_revision_and_combo_capabilities(self):
         hb = remote.Heartbeat(
             name="termux-phone",
