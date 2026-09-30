@@ -1,3 +1,25 @@
+## 2026-09-30 — Polymarket Combo RFQ execution (#186)
+
+Objective: add native Polymarket sports Combo execution without disturbing the existing single-market CLOB order path.
+
+Implementation:
+- Added `app/combo_trading.py` with authenticated Combo status/preview/buy routes and exact sports-leg resolution to Polymarket V2 position IDs.
+- Added `COMBO_BUY` and `COMBO_PREVIEW` executor actions. Combo live requests reuse queue expiry, executor connectivity/geoblock checks, server-stamped current dashboard auto-trade cap, and daily-budget enforcement.
+- Added a fourth live gate, `COMBO_TRADING_ENABLED=false` by default. The gate is checked when the request is created and again immediately before Termux handoff alongside the dashboard master switch, LIVE_TRADING and AUTO_TRADING.
+- Termux requests requester-side RFQ quotes with `request_combo_quote`, enforces the requested blended-price ceiling, accepts with `accept_combo_quote`, and waits for terminal confirmation with `wait_for_combo_fill`.
+- Builder credentials may be supplied explicitly. Otherwise Termux creates a Builder API key on first Combo use and stores it in the protected local config directory.
+- Successful Combo fills are persisted as one execution with all component legs, leg position IDs, Combo position ID, blended entry, RFQ/quote identifiers, taker-order hash and transaction hash.
+- Ordinary BUY/SELL behavior remains on the existing CLOB path. Combo SELL/early exit is not introduced in this change.
+- Added `tests/test_combo_trading.py` covering input constraints, duplicate-leg rejection, stale queue expiry, handoff gates/cap authorization, positive-fill requirements, executor payload checks and incomplete builder credentials.
+- Updated `.env.example`, README and CHANGES.
+
+Verification:
+- PR #187 was reviewed against the full patch and is mergeable.
+- The repository has no GitHub Actions workflow, so branch deployment/import validation is used before merge.
+- Live Combo execution remains disabled during validation; no RFQ is accepted and no trade is placed.
+
+Files changed: `app/combo_trading.py`, `app/termux_executor_dashboard.py`, `app/wnba_pw_research_v13.py`, `scripts/termux_executor.py`, `tests/test_combo_trading.py`, `.env.example`, `README.md`, `CHANGES.md`, and `DEVELOPMENT_NOTES.md`.
+
 ## 2026-09-30 — Shared capper sizing control order
 
 All capper sizing renderers now use the same two-control order: label, then action button, then numeric input. Fixed sizing renders `FIXED 1U WIN $` with `SET 1U` before the dollar-value input. Dynamic sizing renders `PORTFOLIO %` with `AUTO %` before the percentage input. The old standalone `$` and `%` span elements were removed.
