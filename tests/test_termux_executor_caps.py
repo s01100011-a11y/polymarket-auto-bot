@@ -62,15 +62,52 @@ class TermuxExecutorCapTests(unittest.TestCase):
         with patch.object(executor.subprocess, "check_output", side_effect=OSError("git unavailable")):
             self.assertEqual(executor._worker_revision(), "unknown")
 
+    def test_wallet_heartbeat_reports_queue_poll_telemetry(self):
+        original = dict(executor.QUEUE_POLL_HEALTH)
+        try:
+            executor.QUEUE_POLL_HEALTH.update(
+                {
+                    "phase": "error",
+                    "last_started_unix": 123.0,
+                    "last_ok_unix": 120.0,
+                    "last_http_status": None,
+                    "last_error": "ConnectTimeout: timed out",
+                    "consecutive_errors": 2,
+                }
+            )
+            with patch.object(executor, "_secure", side_effect=RuntimeError("wallet test unavailable")):
+                body = executor._wallet_heartbeat(
+                    "private",
+                    "0x12345678901234567890",
+                    {"country": "MY", "region": "14", "blocked": False},
+                    "Queue poll error",
+                )
+            self.assertEqual(body["queue_poll_phase"], "error")
+            self.assertEqual(body["queue_poll_last_started_unix"], 123.0)
+            self.assertEqual(body["queue_poll_last_ok_unix"], 120.0)
+            self.assertEqual(body["queue_poll_last_error"], "ConnectTimeout: timed out")
+            self.assertEqual(body["queue_poll_consecutive_errors"], 2)
+        finally:
+            executor.QUEUE_POLL_HEALTH.clear()
+            executor.QUEUE_POLL_HEALTH.update(original)
+
     def test_heartbeat_accepts_revision_and_combo_capabilities(self):
         hb = remote.Heartbeat(
             name="termux-phone",
             worker_revision="abcdef123456",
             capabilities=["PREVIEW", "BUY", "SELL", "COMBO_PREVIEW", "COMBO_BUY"],
+            queue_poll_phase="idle",
+            queue_poll_last_started_unix=100.0,
+            queue_poll_last_ok_unix=101.0,
+            queue_poll_last_http_status=200,
+            queue_poll_last_error=None,
+            queue_poll_consecutive_errors=0,
         )
         self.assertEqual(hb.worker_revision, "abcdef123456")
         self.assertIn("COMBO_PREVIEW", hb.capabilities)
         self.assertIn("COMBO_BUY", hb.capabilities)
+        self.assertEqual(hb.queue_poll_phase, "idle")
+        self.assertEqual(hb.queue_poll_last_http_status, 200)
 
 
 if __name__ == "__main__":
