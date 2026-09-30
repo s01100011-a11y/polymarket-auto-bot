@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import threading
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -255,6 +256,45 @@ def install(*, app, dashboard, core) -> None:
             "legs": resolved,
             "budget_usdc": str(req.budget_usdc),
         }
+
+    if os.getenv("COMBO_SMOKE_AUTORUN", "false").strip().lower() in {"1", "true", "yes", "on"}:
+        def _autorun_combo_preview() -> None:
+            if combo_trading_enabled():
+                print("COMBO_SMOKE_SKIPPED reason=live_combo_enabled", flush=True)
+                return
+            try:
+                market_url = os.getenv(
+                    "COMBO_SMOKE_MARKET_URL",
+                    "https://polymarket.com/sports/fifa-friendlies/fif-sey-sri-2026-09-30",
+                ).strip()
+                outcome1 = os.getenv("COMBO_SMOKE_OUTCOME1", "Sri Lanka").strip()
+                market_type1 = os.getenv("COMBO_SMOKE_MARKET_TYPE1", "moneyline").strip()
+                outcome2 = os.getenv("COMBO_SMOKE_OUTCOME2", "Under 2.5").strip()
+                market_type2 = os.getenv("COMBO_SMOKE_MARKET_TYPE2", "total").strip()
+                req = ComboRequest(
+                    legs=[
+                        ComboLeg(market_url=market_url, outcome=outcome1, market_type=market_type1),
+                        ComboLeg(market_url=market_url, outcome=outcome2, market_type=market_type2),
+                    ],
+                    budget_usdc=Decimal("1"),
+                    max_price=Decimal(os.getenv("COMBO_SMOKE_MAX_PRICE", "0.95")),
+                    label=f"Combo smoke test — {outcome1} + {outcome2}",
+                    note="QUOTE ONLY — automatic deployment smoke test",
+                )
+                resolved = resolve_combo_legs(core, req.legs)
+                _validate_budget(core, req.budget_usdc)
+                if req.max_price > core.MAX_PRICE:
+                    raise RuntimeError(f"Combo smoke max price exceeds MAX_PRICE={core.MAX_PRICE}")
+                rec = executor._enqueue("COMBO_PREVIEW", _payload(req, resolved))
+                print(
+                    f"COMBO_SMOKE_QUEUED request={rec['id']} "
+                    f"leg1={resolved[0]['resolved_outcome']} leg2={resolved[1]['resolved_outcome']}",
+                    flush=True,
+                )
+            except Exception as exc:
+                print(f"COMBO_SMOKE_FAILED {type(exc).__name__}:{exc}", flush=True)
+
+        threading.Timer(3.0, _autorun_combo_preview).start()
 
     print(
         "POLYMARKET_COMBOS installed "
