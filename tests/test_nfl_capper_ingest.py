@@ -1390,6 +1390,16 @@ def test_nfl_capper_dashboard_has_persistent_online_controls():
     assert 'id="nflCapperPower-syndicate"' in source
 
 
+def test_nfl_event_badges_show_event_timing():
+    source = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
+
+    assert "function nflEventBadgeLabel" in source
+    assert "return 'LIVE'" in source
+    assert "'T-'+nflEventDelta" in source
+    assert "'COMPLETED · '+nflEventDelta" in source
+    assert '"event_completed_at": (' in source
+
+
 def test_nfl_section_labels_are_not_duplicated_and_use_shared_badges():
     source = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
 
