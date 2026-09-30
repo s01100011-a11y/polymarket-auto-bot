@@ -204,6 +204,16 @@ def executor_heartbeat(req: Heartbeat, _: dict[str, Any] = Depends(_executor_aut
         "queue_poll_consecutive_errors": req.queue_poll_consecutive_errors,
     })
     _save_state(state)
+    print(
+        "EXECUTOR_HEARTBEAT "
+        f"name={req.name} revision={req.worker_revision} "
+        f"combo_capable={('COMBO_PREVIEW' in req.capabilities)} "
+        f"poll_phase={req.queue_poll_phase} "
+        f"poll_http={req.queue_poll_last_http_status} "
+        f"poll_errors={req.queue_poll_consecutive_errors} "
+        f"poll_error={req.queue_poll_last_error}",
+        flush=True,
+    )
     return {"ok": True}
 
 
