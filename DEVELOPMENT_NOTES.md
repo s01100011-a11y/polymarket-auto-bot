@@ -1,3 +1,7 @@
+## 2026-09-30 — Top MODE row CSS cascade fix
+
+The top MODE row deliberately reuses `capper-panel-status-row`, but that shared class is defined later in the theme and was winning the cascade with `padding: 7px 0 5px !important`. As a result, the master MODE field and Online button still rendered flush to the inner frame despite the earlier top-specific rule. A later, more specific `.top-mode-status-row.capper-panel-status-row` override now restores `7px 8px 5px` padding. The first-window Updated/Uptime strip was also moved to 8px horizontal padding for alignment.
+
 ## 2026-09-30 — Typography/spacing parity for graph and master MODE row
 
 The graph's `pnlChartRange` status now uses the same visual language as `.nfl-capper-meta`: MS Sans Serif/Tahoma/Arial, 12px, 1.45 line-height, normal weight, and no letter spacing. This removes the small Courier-style appearance under the range buttons.

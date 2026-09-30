@@ -270,3 +270,13 @@ def test_graph_range_text_matches_capper_meta_and_top_mode_spacing():
     assert 'line-height:1.45!important' in source
     assert 'font-weight:400!important' in source
     assert 'letter-spacing:0!important' in source
+
+
+def test_top_mode_row_keeps_horizontal_inset_after_shared_status_rule():
+    source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+
+    shared = source.index(".capper-panel-status-row{")
+    override = source.index(".top-mode-status-row.capper-panel-status-row{")
+    assert override > shared
+    assert "padding:7px 8px 5px!important" in source[override:override+180]
+    assert "padding:4px 8px 5px;" in source
