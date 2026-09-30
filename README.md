@@ -1006,3 +1006,14 @@ Health check: `GET /health` (30s timeout, restart on failure, max 10 retries).
 Full implementation notes, deployment history, safeguards, incidents/fixes, and the complete commit index are maintained in [DEVELOPMENT_NOTES.md](DEVELOPMENT_NOTES.md).
 
 Future code changes should update that file with the objective, files changed, behavior/data/configuration impact, verification performed, deployment result, and any outstanding work.
+
+## Polymarket Combos
+
+The bot supports requester-side Polymarket Combo RFQs without changing the existing single-market CLOB path.
+
+- `POST /api/combo/preview` resolves each sports leg to an exact Polymarket position ID and requests a Combo quote without accepting it.
+- `POST /api/combo/buy` sends the same resolved legs to the Termux executor, requests an RFQ, checks the blended price ceiling, accepts the quote, and waits for fill confirmation.
+- Live Combo execution requires the dashboard master switch plus `LIVE_TRADING=true`, `AUTO_TRADING=true`, and `COMBO_TRADING_ENABLED=true`.
+- Builder API credentials may be supplied with `POLYMARKET_BUILDER_API_KEY`, `POLYMARKET_BUILDER_SECRET`, and `POLYMARKET_BUILDER_PASSPHRASE`. If omitted, Termux creates and stores a builder key on first Combo use.
+- Combo execution records remain one trade and retain all underlying legs and RFQ metadata.
+
