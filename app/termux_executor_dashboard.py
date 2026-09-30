@@ -235,7 +235,7 @@ def _expire_stale_buys(
     expired_ids: list[str] = []
 
     for rec in data.values():
-        if rec.get("action") != "BUY":
+        if rec.get("action") not in {"BUY", "COMBO_BUY"}:
             continue
 
         status = str(rec.get("status") or "")
@@ -292,8 +292,25 @@ def _expire_stale_buys_persisted() -> list[str]:
 
 def _authorize_order_for_handoff(rec: dict[str, Any]) -> bool:
     """Apply the current dashboard auto-trade cap immediately before Termux pickup."""
-    if rec.get("action") not in {"BUY", "PREVIEW"}:
+    if rec.get("action") not in {"BUY", "PREVIEW", "COMBO_BUY", "COMBO_PREVIEW"}:
         return True
+
+    if rec.get("action") == "COMBO_BUY":
+        combo_enabled = os.getenv("COMBO_TRADING_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+        if (
+            not core.bot_enabled()
+            or not core.live_trading_enabled()
+            or not core.auto_trading_enabled()
+            or not combo_enabled
+        ):
+            stamp = _now_iso()
+            rec["status"] = "FAILED"
+            rec["updated_at"] = stamp
+            rec["error"] = (
+                "COMBO_BUY blocked before executor pickup: dashboard/LIVE/AUTO/COMBO gate is OFF"
+            )
+            rec.pop("lease_until_unix", None)
+            return False
 
     payload = rec.get("payload") or {}
     try:
@@ -325,7 +342,7 @@ def _authorize_order_for_handoff(rec: dict[str, Any]) -> bool:
 def _enqueue(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not REMOTE_EXECUTION_ENABLED:
         raise HTTPException(status_code=409, detail="Remote execution is disabled")
-    if action == "BUY":
+    if action in {"BUY", "COMBO_BUY"}:
         state = _state()
         last_seen = float(state.get("last_seen_unix") or 0)
 
@@ -406,6 +423,12 @@ def _executor_event(rec: dict[str, Any]) -> dict[str, Any]:
             message = (
                 f"BUY confirmed: {result.get('filled_shares')} shares"
                 + (f" @ {result.get('entry_price')}" if result.get("entry_price") else "")
+            )
+        elif action == "COMBO_BUY":
+            message = (
+                f"COMBO confirmed: {result.get('filled_shares')} shares"
+                + (f" @ {result.get('blended_price')}" if result.get("blended_price") else "")
+                + (f" · RFQ {result.get('rfq_id')}" if result.get("rfq_id") else "")
             )
         else:
             message = str(result.get("message") or f"{action} completed")
@@ -579,7 +602,7 @@ def executor_next(_: dict[str, Any] = Depends(_executor_auth)):
                 if not _authorize_order_for_handoff(rec):
                     handoff_changed = True
                     continue
-                if rec.get("action") in {"BUY", "PREVIEW"}:
+                if rec.get("action") in {"BUY", "PREVIEW", "COMBO_BUY", "COMBO_PREVIEW"}:
                     handoff_changed = True
                 candidates.append(rec)
         if handoff_changed:
@@ -626,6 +649,7 @@ def _record_buy_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> Non
         "slack_event_id": payload.get("slack_event_id"),
         "auto": bool(payload.get("auto", False)),
         "filled_shares": str(filled),
+        "execution_pending": pending,
         "pre_position_size": str(result.get("position_before") or "0"),
         "quote": {
             "market": result.get("market"),
@@ -645,6 +669,63 @@ def _record_buy_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> Non
             "order_id": result.get("order_id"),
             "canceled_remainder": bool(result.get("canceled_remainder", True)),
             "executor": "termux",
+        },
+    }
+    executions = core._load(core.EXECUTIONS_FILE)
+    executions[trade_id] = record
+    core._save(core.EXECUTIONS_FILE, executions)
+
+
+def _record_combo_buy_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> None:
+    payload = queue_rec.get("payload") or {}
+    trade_id = str(payload.get("trade_id") or "")
+    if not trade_id or not result.get("ok"):
+        return
+    try:
+        filled = Decimal(str(result.get("filled_shares") or "0"))
+    except Exception:
+        filled = Decimal("0")
+    pending = str(result.get("status") or "") == "COMBO_EXECUTION_PENDING"
+    if filled <= 0 and not pending:
+        return
+
+    now = _now_iso()
+    budget = Decimal(str(payload.get("budget_usdc") or "0"))
+    blended_price = str(result.get("blended_price") or "0")
+    record = {
+        "id": trade_id,
+        "status": "EXECUTION_PENDING" if pending else "ORDER_SUBMITTED",
+        "created_at": now,
+        "submitted_at": now,
+        "side": "BUY",
+        "paper": False,
+        "source": str(payload.get("source") or "combo_api"),
+        "auto": bool(payload.get("auto", True)),
+        "budget_usdc": str(budget.quantize(Decimal("0.01"))),
+        "filled_shares": str(filled),
+        "quote": {
+            "market": payload.get("label") or "Polymarket Combo",
+            "market_url": None,
+            "market_type": "combo",
+            "requested_outcome": payload.get("label") or "Combo YES",
+            "resolved_outcome": "YES",
+            "asset_id": str(result.get("combo_position_id") or ""),
+            "combo_position_id": str(result.get("combo_position_id") or ""),
+            "limit_price": blended_price,
+            "entry_price": blended_price,
+            "shares": str(filled),
+            "legs": payload.get("legs") or [],
+            "leg_position_ids": payload.get("leg_position_ids") or [],
+        },
+        "execution": {
+            "placed": True,
+            "executor": "termux",
+            "execution_type": "COMBO_RFQ",
+            "rfq_id": result.get("rfq_id"),
+            "quote_id": result.get("quote_id"),
+            "tx_hash": result.get("tx_hash"),
+            "taker_order_hash": result.get("taker_order_hash"),
+            "rfq_status": result.get("rfq_status"),
         },
     }
     executions = core._load(core.EXECUTIONS_FILE)
@@ -736,13 +817,20 @@ def _record_already_closed_sell(queue_rec: dict[str, Any], error: str) -> bool:
 
 
 def _effective_executor_result_ok(action: str, body_ok: bool, result: dict[str, Any]) -> bool:
-    """A BUY is successful only when the wallet actually gained shares."""
+    """BUY actions are successful only when the wallet actually gained shares."""
     if not body_ok:
         return False
-    if str(action or "").upper() != "BUY":
+    normalized = str(action or "").upper()
+    if normalized not in {"BUY", "COMBO_BUY"}:
         return True
     if result.get("ok") is False:
         return False
+    if (
+        normalized == "COMBO_BUY"
+        and bool(result.get("accepted"))
+        and str(result.get("status") or "") == "COMBO_EXECUTION_PENDING"
+    ):
+        return True
     try:
         return Decimal(str(result.get("filled_shares") or "0")) > 0
     except Exception:
@@ -764,10 +852,9 @@ def executor_result(request_id: str, body: ExecutorResult, _: dict[str, Any] = D
         result = body.result or {}
         effective_ok = _effective_executor_result_ok(str(rec.get("action") or ""), body.ok, result)
         effective_error = body.error
-        if body.ok and not effective_ok and rec.get("action") == "BUY":
+        if body.ok and not effective_ok and rec.get("action") in {"BUY", "COMBO_BUY"}:
             effective_error = (
-                "BUY_UNFILLED_RETRYABLE: executor completed without any filled shares; "
-                "the remainder was canceled"
+                f"{rec.get('action')}_UNFILLED_RETRYABLE: executor completed without any filled shares"
             )
         already_closed = bool(
             not body.ok
@@ -795,6 +882,8 @@ def executor_result(request_id: str, body: ExecutorResult, _: dict[str, Any] = D
         _queue_save(data)
     if effective_ok and rec.get("action") == "BUY":
         _record_buy_result(rec, result)
+    elif effective_ok and rec.get("action") == "COMBO_BUY":
+        _record_combo_buy_result(rec, result)
     elif effective_ok and rec.get("action") == "SELL":
         _record_sell_result(rec, result)
     elif already_closed:
