@@ -42,22 +42,13 @@ def _require_smoke_token(token: str) -> None:
 
 
 def _resolve_position_id(core, market: Any, outcome: str) -> tuple[str, str]:
-    target = core._norm(outcome)
-    yes = market.outcomes.yes
-    no = market.outcomes.no
-    yes_label = str(getattr(yes, "label", "Yes"))
-    no_label = str(getattr(no, "label", "No"))
-
-    if target in {"yes", core._norm(yes_label)}:
-        selected, label = yes, yes_label
-    elif target in {"no", core._norm(no_label)}:
-        selected, label = no, no_label
-    else:
+    resolved = core._resolve_market_outcome(market, outcome)
+    if resolved is None:
         raise HTTPException(
             status_code=400,
-            detail=f"Outcome '{outcome}' does not match this market. Valid outcomes: '{yes_label}' or '{no_label}'.",
+            detail=f"Outcome '{outcome}' does not match the resolved Polymarket sports condition.",
         )
-
+    selected, label = resolved
     position_id = getattr(selected, "position_id", None)
     if not position_id:
         raise HTTPException(
@@ -80,7 +71,7 @@ def resolve_combo_legs(core, legs: list[ComboLeg]) -> list[dict[str, str]]:
             if core._sports_event_slug(market_url) is None:
                 raise HTTPException(status_code=400, detail=f"Combo leg {index} must use a Polymarket /sports/ event URL.")
 
-            requested_type = core._norm(leg.market_type)
+            requested_type = core._canonical_market_type(leg.market_type)
             if requested_type not in {"moneyline", "spread", "total"}:
                 raise HTTPException(
                     status_code=400,
@@ -96,7 +87,7 @@ def resolve_combo_legs(core, legs: list[ComboLeg]) -> list[dict[str, str]]:
                 note="Combo leg resolution",
             )
             market = core._select_market(client, intent)
-            actual_type = core._norm(core._market_type(market))
+            actual_type = core._canonical_market_type(core._market_type(market))
             if actual_type != requested_type:
                 raise HTTPException(
                     status_code=400,
