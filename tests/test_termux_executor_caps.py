@@ -4,6 +4,8 @@ import unittest
 from decimal import Decimal
 from unittest.mock import patch
 
+from app import termux_executor_dashboard as remote
+
 from scripts import termux_executor as executor
 
 
@@ -50,6 +52,25 @@ class TermuxExecutorCapTests(unittest.TestCase):
         budget = executor._validate_budget_caps(payload)
 
         self.assertEqual(budget, Decimal("600"))
+
+    def test_worker_revision_uses_git_head(self):
+        with patch.object(executor.subprocess, "check_output", return_value="abcdef123456\n") as check:
+            self.assertEqual(executor._worker_revision(), "abcdef123456")
+        check.assert_called_once()
+
+    def test_worker_revision_fails_closed_to_unknown(self):
+        with patch.object(executor.subprocess, "check_output", side_effect=OSError("git unavailable")):
+            self.assertEqual(executor._worker_revision(), "unknown")
+
+    def test_heartbeat_accepts_revision_and_combo_capabilities(self):
+        hb = remote.Heartbeat(
+            name="termux-phone",
+            worker_revision="abcdef123456",
+            capabilities=["PREVIEW", "BUY", "SELL", "COMBO_PREVIEW", "COMBO_BUY"],
+        )
+        self.assertEqual(hb.worker_revision, "abcdef123456")
+        self.assertIn("COMBO_PREVIEW", hb.capabilities)
+        self.assertIn("COMBO_BUY", hb.capabilities)
 
 
 if __name__ == "__main__":
