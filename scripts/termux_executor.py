@@ -4,6 +4,7 @@ from __future__ import annotations
 import getpass
 import json
 import os
+import subprocess
 import sys
 import time
 from decimal import Decimal, ROUND_DOWN
@@ -23,6 +24,7 @@ from app import main as core  # noqa: E402
 
 BRIDGE_URL = os.getenv("EXECUTOR_BRIDGE_URL", "https://polymarket-auto-bot-production.up.railway.app").rstrip("/")
 WORKER_NAME = os.getenv("EXECUTOR_NAME", "termux-phone")
+WORKER_CAPABILITIES = ("PREVIEW", "BUY", "SELL", "COMBO_PREVIEW", "COMBO_BUY")
 FILL_WAIT_SECONDS = max(3, min(15, int(os.getenv("EXECUTOR_FILL_WAIT_SECONDS", "8"))))
 TOKEN_FILE = Path(os.getenv("EXECUTOR_TOKEN_FILE", str(Path.home() / ".config/polymarket-termux/executor_token"))).expanduser()
 JOURNAL_FILE = Path(os.getenv("EXECUTOR_JOURNAL_FILE", str(Path.home() / ".config/polymarket-termux/executor_journal.json"))).expanduser()
@@ -49,6 +51,18 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
     tmp.write_text(json.dumps(value, indent=2, default=str))
     os.chmod(tmp, 0o600)
     tmp.replace(path)
+
+
+def _worker_revision() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(ROOT), "rev-parse", "--short=12", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+        ).strip() or "unknown"
+    except Exception:
+        return "unknown"
 
 
 def _mask(value: str) -> str:
@@ -625,6 +639,8 @@ def _wallet_heartbeat(private_key: str, wallet: str, geo: dict[str, Any] | None,
         status = f"Wallet heartbeat error: {type(exc).__name__}: {exc}"
     return {
         "name": WORKER_NAME,
+        "worker_revision": _worker_revision(),
+        "capabilities": list(WORKER_CAPABILITIES),
         "wallet": masked_wallet,
         "wallet_type": wallet_type,
         "usdc_balance": balance,
