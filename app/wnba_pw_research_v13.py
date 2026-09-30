@@ -768,11 +768,43 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 .more-stats-row .positive{color:var(--retro-green)!important}
 .more-stats-row .negative{color:var(--retro-red)!important}
 .monitor-signal{
+ margin-top:7px!important;
+ padding:8px!important;
  background:#000!important;
  color:var(--retro-gray)!important;
+ border-top:2px solid #404040!important;
+ border-left:2px solid #404040!important;
+ border-right:2px solid #fff!important;
+ border-bottom:2px solid #fff!important;
+ border-radius:0!important;
+ box-sizing:border-box!important;
  font-family:"Lucida Console","Courier New",monospace!important;
 }
-.monitor-signal b{color:var(--retro-white)!important}
+.monitor-signal b{
+ color:var(--retro-white)!important;
+ font-size:14px!important;
+ line-height:1.3!important;
+}
+.monitor-meta{
+ color:var(--retro-gray)!important;
+ font-size:11px!important;
+ line-height:1.5!important;
+ margin-top:3px!important;
+}
+.monitor-action{
+ font-size:12px!important;
+ font-weight:850!important;
+ line-height:1.4!important;
+ margin-top:4px!important;
+}
+.monitor-signal-actions{
+ display:flex!important;
+ gap:6px!important;
+ flex-wrap:wrap!important;
+ align-items:center!important;
+ margin-top:5px!important;
+}
+.monitor-signal-actions button,.monitor-signal-actions a{margin-top:0!important}
 .monitor-action.positive{color:var(--retro-green)!important}
 .monitor-action.negative{color:var(--retro-red)!important}
 .monitor-action.flat{color:var(--retro-yellow)!important}
