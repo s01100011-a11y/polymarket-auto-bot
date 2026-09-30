@@ -277,11 +277,45 @@ def install(*, app, dashboard, core) -> None:
                 if req.max_price > core.MAX_PRICE:
                     raise RuntimeError(f"Combo smoke max price exceeds MAX_PRICE={core.MAX_PRICE}")
                 rec = executor._enqueue("COMBO_PREVIEW", _payload(req, resolved))
+                request_id = str(rec["id"])
                 print(
-                    f"COMBO_SMOKE_QUEUED request={rec['id']} "
+                    f"COMBO_SMOKE_QUEUED request={request_id} "
                     f"leg1={resolved[0]['resolved_outcome']} leg2={resolved[1]['resolved_outcome']}",
                     flush=True,
                 )
+
+                def _watch_combo_preview() -> None:
+                    import time
+                    last_status = None
+                    deadline = time.time() + 90
+                    while time.time() < deadline:
+                        current = executor._queue_load().get(request_id) or {}
+                        status = str(current.get("status") or "MISSING")
+                        if status != last_status:
+                            print(
+                                f"COMBO_SMOKE_STATE request={request_id} status={status} "
+                                f"error={current.get('error')}",
+                                flush=True,
+                            )
+                            last_status = status
+                        if status in {"DONE", "FAILED"}:
+                            result = current.get("result") or {}
+                            print(
+                                f"COMBO_SMOKE_RESULT request={request_id} status={status} "
+                                f"rfq={result.get('rfq_id')} quote={result.get('quote_id')} "
+                                f"combo_position={result.get('combo_position_id')} "
+                                f"blended={result.get('blended_price')} "
+                                f"reason={result.get('reason')} error={current.get('error')}",
+                                flush=True,
+                            )
+                            return
+                        time.sleep(2)
+                    print(
+                        f"COMBO_SMOKE_RESULT request={request_id} status=TIMEOUT",
+                        flush=True,
+                    )
+
+                threading.Thread(target=_watch_combo_preview, daemon=True).start()
             except Exception as exc:
                 print(f"COMBO_SMOKE_FAILED {type(exc).__name__}:{exc}", flush=True)
 
