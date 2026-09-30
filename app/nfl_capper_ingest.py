@@ -3128,15 +3128,15 @@ function nflPickList(title,items,kind){
     const raw=item.trade_pnl_usdc===null||item.trade_pnl_usdc===undefined?null:Number(item.trade_pnl_usdc);
     const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
     const text=raw===null?'pending':(raw>0?'+':'')+'$'+raw.toFixed(2);
-    pnlLine='<div class="nfl-result-line '+cls+'">Trade P/L '+text+'</div>';
+    pnlLine='<div class="monitor-action '+cls+'">Trade P/L '+text+'</div>';
    }else{
-    pnlLine='<div class="nfl-result-line flat">Trade P/L — · NOT TRADED</div>';
+    pnlLine='<div class="monitor-action flat">Trade P/L — · NOT TRADED</div>';
    }
   }else if(!item.trade_executed&&String(item.status||'').toUpperCase()!=='QUEUED'){
-   pnlLine='<div class="nfl-result-line flat">NOT TRADED</div>';
+   pnlLine='<div class="monitor-action flat">NOT TRADED</div>';
   }
   const action=sellAction+marketAction;
-  return '<div style="margin-top:7px;padding:9px 10px;border-radius:8px;'+visual.row+'"><b style="font-size:15px">'+nflEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<br><span>'+meta.join(' · ')+'</span>':'')+pnlLine+(action?'<br>'+action:'')+'</div>';
+  return '<div class="monitor-signal"><b>'+nflEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<div class="monitor-meta">'+meta.join(' · ')+'</div>':'')+pnlLine+(action?'<div class="monitor-signal-actions">'+action+'</div>':'')+'</div>';
  }).join('');
  return '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(title)+'</span>'+rows+'</div>';
 }
