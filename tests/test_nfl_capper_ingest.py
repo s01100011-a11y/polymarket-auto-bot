@@ -1399,3 +1399,14 @@ def test_nfl_section_labels_are_not_duplicated_and_use_shared_badges():
     assert '<span class="capper-section-badge">Settled positions' in source
     assert 'class="capper-event-badge"' in source
     assert "nflPickList(spec[1],spec[3],spec[4])" in source
+
+
+def test_nfl_signals_use_wnba_monitor_card_structure():
+    source = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
+
+    assert 'return \'<div class="monitor-signal"><b>\'' in source
+    assert 'class="monitor-meta"' in source
+    assert 'class="monitor-action ' in source
+    assert 'class="monitor-signal-actions"' in source
+    assert "border-radius:8px;'+visual.row" not in source
+    assert 'class="nfl-result-line' not in source
