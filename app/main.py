@@ -238,7 +238,7 @@ def _resolve_market_outcome(market, outcome: str):
         # Older/variant Gamma responses can omit groupItemTitle. Only use the
         # question fallback when the condition is truly Yes/No and contains the
         # complete requested selection phrase.
-        if yes_label == "yes" and no_label == "no" and target and target in question:
+        if not group and yes_label == "yes" and no_label == "no" and target and target in question:
             return yes, str(getattr(market, "question", "") or outcome)
 
     if market_type == "total":
