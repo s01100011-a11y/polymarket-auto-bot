@@ -3130,7 +3130,7 @@ function nflPickList(title,items,kind){
     const text=raw===null?'pending':(raw>0?'+':'')+'$'+raw.toFixed(2);
     pnlLine='<div class="monitor-action '+cls+'">Trade P/L '+text+'</div>';
    }else{
-    pnlLine='<div class="nfl-result-line flat">Trade P/L — · NOT TRADED</div>';
+    pnlLine='<div class="monitor-action flat">Trade P/L — · NOT TRADED</div>';
    }
   }else if(!item.trade_executed&&String(item.status||'').toUpperCase()!=='QUEUED'){
    pnlLine='<div class="nfl-result-line flat">NOT TRADED</div>';
