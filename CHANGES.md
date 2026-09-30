@@ -1,5 +1,12 @@
 # CHANGES
 
+## 2026-09-30 — NFL/CFB signal cards now match WNBA
+
+- Reworked NFL and CFB signal rows to use the same `monitor-signal` card structure as the WNBA monitor feed.
+- NFL/CFB signals now render as compact black inset cards with the same white title, smaller metadata text, spacing, borders, and NOT TRADED / P&L action line placement as WNBA.
+- Removed the legacy grey/tinted inline signal-row backgrounds that were making NFL/CFB look different from WNBA.
+- Preserved existing event badges and manual BUY/SELL/market actions, but they now sit inside the shared signal-card layout.
+
 ## 2026-09-30 — Fix top-window MODE inset override
 
 - Fixed a CSS cascade bug where the shared `.capper-panel-status-row` rule was overriding the top MODE row's horizontal padding back to zero.
