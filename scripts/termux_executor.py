@@ -732,6 +732,17 @@ def _existing_journal(request_id: str) -> dict[str, Any] | None:
     return _read_json(JOURNAL_FILE).get(request_id)
 
 
+def _initial_geo_check() -> tuple[dict[str, Any] | None, str]:
+    try:
+        geo = _geo()
+        return geo, "Ready"
+    except RuntimeError:
+        # Explicit geoblock response: caller must stop.
+        raise
+    except Exception as exc:
+        return None, f"Geoblock check unavailable: {type(exc).__name__}: {exc}"
+
+
 def main() -> None:
     private_key, wallet = _credentials()
     token = _load_token() or _pair()
@@ -739,8 +750,14 @@ def main() -> None:
     geo: dict[str, Any] | None = None
     startup_status = "Ready"
     try:
-        geo = _geo()
-        print(f"Polymarket geoblock check passed: {geo.get('country')}/{geo.get('region')}")
+        geo, startup_status = _initial_geo_check()
+        if geo is not None:
+            print(f"Polymarket geoblock check passed: {geo.get('country')}/{geo.get('region')}")
+        else:
+            print(
+                f"{startup_status}; starting queue worker with live execution still fail-closed",
+                flush=True,
+            )
     except RuntimeError as exc:
         # _geo raises RuntimeError only for an explicit blocked response.
         # Preserve the hard stop for blocked jurisdictions.
@@ -752,16 +769,6 @@ def main() -> None:
         _post_heartbeat(token, private_key, wallet, geo, str(exc))
         print(str(exc))
         raise SystemExit(2)
-    except Exception as exc:
-        # A transient failure of the public geoblock endpoint must not kill
-        # queue polling. Live BUY/SELL/COMBO_BUY paths still call _geo()
-        # themselves and therefore remain fail-closed.
-        startup_status = f"Geoblock check unavailable: {type(exc).__name__}: {exc}"
-        print(
-            f"{startup_status}; starting queue worker with live execution still fail-closed",
-            flush=True,
-        )
-
     _post_heartbeat(token, private_key, wallet, geo, startup_status)
     print(f"Termux executor online as {WORKER_NAME}. Ctrl+C to stop.")
     # The startup path already posted a full wallet heartbeat above. Mark it as
