@@ -33,6 +33,39 @@ class ExecutorQueueSafetyTests(unittest.TestCase):
         )
         self.assertTrue(remote._effective_executor_result_ok("PREVIEW", True, {}))
 
+    def test_successful_single_buy_recording_does_not_reference_combo_pending_state(self):
+        queue_rec = {
+            "id": "exec-buy",
+            "action": "BUY",
+            "payload": {
+                "trade_id": "trade-buy",
+                "budget_usdc": "10",
+                "max_price": "0.50",
+                "market_url": "https://polymarket.com/sports/nfl/test-event",
+                "market_type": "moneyline",
+                "outcome": "Test Team",
+            },
+        }
+        result = {
+            "ok": True,
+            "filled_shares": "20",
+            "entry_price": "0.50",
+            "position_before": "0",
+            "market": "Test market",
+            "outcome": "Test Team",
+            "asset_id": "asset-1",
+        }
+        with (
+            patch.object(remote.core, "_load", return_value={}),
+            patch.object(remote.core, "_save") as save,
+        ):
+            remote._record_buy_result(queue_rec, result)
+
+        saved = save.call_args.args[1]
+        self.assertIn("trade-buy", saved)
+        self.assertEqual(saved["trade-buy"]["status"], "ORDER_SUBMITTED")
+        self.assertNotIn("execution_pending", saved["trade-buy"])
+
     def test_pending_buy_expires(self):
         data = {
             "exec-test": {

@@ -94,6 +94,12 @@ class Heartbeat(BaseModel):
     geo_region: str | None = Field(default=None, max_length=40)
     geo_blocked: bool | None = None
     status: str | None = Field(default=None, max_length=300)
+    queue_poll_phase: str | None = Field(default=None, max_length=40)
+    queue_poll_last_started_unix: float | None = None
+    queue_poll_last_ok_unix: float | None = None
+    queue_poll_last_http_status: int | None = None
+    queue_poll_last_error: str | None = Field(default=None, max_length=500)
+    queue_poll_consecutive_errors: int = Field(default=0, ge=0, le=1000000)
 
 
 def _executor_auth(authorization: str = Header(default="")) -> dict[str, Any]:
@@ -162,6 +168,12 @@ def executor_status():
         "geo_region": state.get("geo_region"),
         "geo_blocked": state.get("geo_blocked"),
         "worker_status": state.get("status"),
+        "queue_poll_phase": state.get("queue_poll_phase"),
+        "queue_poll_last_started_unix": state.get("queue_poll_last_started_unix"),
+        "queue_poll_last_ok_unix": state.get("queue_poll_last_ok_unix"),
+        "queue_poll_last_http_status": state.get("queue_poll_last_http_status"),
+        "queue_poll_last_error": state.get("queue_poll_last_error"),
+        "queue_poll_consecutive_errors": int(state.get("queue_poll_consecutive_errors") or 0),
         "remote_max_usdc": str(core.MAX_AUTO_TRADE_USDC),
         "railway_live_trading": core.live_trading_enabled(),
     }
@@ -184,6 +196,12 @@ def executor_heartbeat(req: Heartbeat, _: dict[str, Any] = Depends(_executor_aut
         "geo_region": req.geo_region,
         "geo_blocked": req.geo_blocked,
         "status": req.status,
+        "queue_poll_phase": req.queue_poll_phase,
+        "queue_poll_last_started_unix": req.queue_poll_last_started_unix,
+        "queue_poll_last_ok_unix": req.queue_poll_last_ok_unix,
+        "queue_poll_last_http_status": req.queue_poll_last_http_status,
+        "queue_poll_last_error": req.queue_poll_last_error,
+        "queue_poll_consecutive_errors": req.queue_poll_consecutive_errors,
     })
     _save_state(state)
     return {"ok": True}
@@ -656,7 +674,6 @@ def _record_buy_result(queue_rec: dict[str, Any], result: dict[str, Any]) -> Non
         "slack_event_id": payload.get("slack_event_id"),
         "auto": bool(payload.get("auto", False)),
         "filled_shares": str(filled),
-        "execution_pending": pending,
         "pre_position_size": str(result.get("position_before") or "0"),
         "quote": {
             "market": result.get("market"),

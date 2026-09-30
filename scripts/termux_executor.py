@@ -36,6 +36,15 @@ BUILDER_KEY_FILE = Path(
 ).expanduser()
 COMBO_MAX_LEGS = max(2, min(12, int(os.getenv("COMBO_MAX_LEGS", "8"))))
 COMBO_FILL_WAIT_SECONDS = max(10, min(120, int(os.getenv("COMBO_FILL_WAIT_SECONDS", "45"))))
+QUEUE_POLL_TIMEOUT_SECONDS = max(3, min(20, int(os.getenv("EXECUTOR_QUEUE_POLL_TIMEOUT_SECONDS", "8"))))
+QUEUE_POLL_HEALTH: dict[str, Any] = {
+    "phase": "startup",
+    "last_started_unix": None,
+    "last_ok_unix": None,
+    "last_http_status": None,
+    "last_error": None,
+    "consecutive_errors": 0,
+}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -649,6 +658,12 @@ def _wallet_heartbeat(private_key: str, wallet: str, geo: dict[str, Any] | None,
         "geo_region": (geo or {}).get("region"),
         "geo_blocked": (geo or {}).get("blocked"),
         "status": status,
+        "queue_poll_phase": QUEUE_POLL_HEALTH.get("phase"),
+        "queue_poll_last_started_unix": QUEUE_POLL_HEALTH.get("last_started_unix"),
+        "queue_poll_last_ok_unix": QUEUE_POLL_HEALTH.get("last_ok_unix"),
+        "queue_poll_last_http_status": QUEUE_POLL_HEALTH.get("last_http_status"),
+        "queue_poll_last_error": QUEUE_POLL_HEALTH.get("last_error"),
+        "queue_poll_consecutive_errors": int(QUEUE_POLL_HEALTH.get("consecutive_errors") or 0),
     }
 
 
@@ -735,13 +750,45 @@ def main() -> None:
                 _post_heartbeat(token, private_key, wallet, geo, heartbeat_status)
                 last_heartbeat = time.time()
 
-            with _bridge_client(timeout=20) as h:
-                r = h.get(f"{BRIDGE_URL}/api/executor/next", headers=_headers(token))
-            if r.status_code == 401:
-                print("Executor token was rejected. Delete the local token file and pair again:")
-                print(TOKEN_FILE)
-                raise SystemExit(3)
-            r.raise_for_status()
+            QUEUE_POLL_HEALTH["phase"] = "requesting"
+            QUEUE_POLL_HEALTH["last_started_unix"] = time.time()
+            try:
+                with _bridge_client(timeout=QUEUE_POLL_TIMEOUT_SECONDS) as h:
+                    r = h.get(f"{BRIDGE_URL}/api/executor/next", headers=_headers(token))
+                QUEUE_POLL_HEALTH["last_http_status"] = int(r.status_code)
+                if r.status_code == 401:
+                    print("Executor token was rejected. Delete the local token file and pair again:")
+                    print(TOKEN_FILE)
+                    raise SystemExit(3)
+                r.raise_for_status()
+                QUEUE_POLL_HEALTH["phase"] = "idle"
+                QUEUE_POLL_HEALTH["last_ok_unix"] = time.time()
+                QUEUE_POLL_HEALTH["last_error"] = None
+                QUEUE_POLL_HEALTH["consecutive_errors"] = 0
+            except SystemExit:
+                raise
+            except Exception as poll_exc:
+                error = f"{type(poll_exc).__name__}: {poll_exc}"
+                QUEUE_POLL_HEALTH["phase"] = "error"
+                QUEUE_POLL_HEALTH["last_error"] = error[:500]
+                QUEUE_POLL_HEALTH["consecutive_errors"] = int(
+                    QUEUE_POLL_HEALTH.get("consecutive_errors") or 0
+                ) + 1
+                print(f"Executor queue poll error: {error}")
+                # Heartbeat succeeds over the same authenticated bridge and gives
+                # Railway visibility into failures that would otherwise exist only
+                # on the phone console.
+                _post_heartbeat(
+                    token,
+                    private_key,
+                    wallet,
+                    geo,
+                    f"Queue poll error: {error}"[:300],
+                )
+                last_heartbeat = time.time()
+                time.sleep(3)
+                continue
+
             request = r.json().get("request")
             if not request:
                 time.sleep(1.0)

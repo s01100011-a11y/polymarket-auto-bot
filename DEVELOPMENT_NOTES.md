@@ -1,3 +1,13 @@
+## 2026-09-30 — Queue-poll telemetry after Combo preview stayed pending
+
+The preview-only Steelers ML + Under 38.5 smoke request resolved both real Polymarket legs and entered the Railway executor queue, but remained PENDING for 90 seconds while Termux heartbeats continued. Railway logs showed no `GET /api/executor/next` or result POST during that window, isolating the blocker to the phone queue-poll loop before Combo RFQ execution.
+
+Added explicit queue-poll telemetry to Termux heartbeats: phase, last poll start, last successful poll, last HTTP status, last error, and consecutive failures. Poll requests now use an 8-second bounded timeout by default and immediately report failures through the heartbeat. No Combo live gate was enabled.
+
+During review, fixed an independent live single-BUY persistence regression in `app/termux_executor_dashboard.py`: `_record_buy_result` referenced the Combo-only variable `pending`, which could raise after an otherwise successful single BUY. A regression test now exercises that recording path.
+
+Files changed: `scripts/termux_executor.py`, `app/termux_executor_dashboard.py`, `tests/test_termux_executor_caps.py`, `tests/test_executor_queue_safety.py`, `CHANGES.md`, and `DEVELOPMENT_NOTES.md`.
+
 ## 2026-09-30 — Termux self-update + executable capability handshake
 
 To remove the repeated manual-update ambiguity on the Android executor, the supervisor now performs a conservative update check before each launch. It updates only a clean `main` working tree using `git fetch origin main` + `git merge --ff-only origin/main`. Dirty checkouts and non-main branches are logged and left untouched. Dependency installation only runs when `requirements.txt` actually changed.
