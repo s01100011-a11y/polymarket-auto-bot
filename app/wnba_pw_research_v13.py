@@ -285,7 +285,7 @@ a{color:#0000ee;text-decoration:underline}
  justify-content:flex-start;
  gap:8px;
  flex-wrap:wrap;
- padding:4px 5px 5px;
+ padding:4px 8px 5px;
  background:#c0c0c0;
  border-top:0;
  color:#000;
@@ -622,6 +622,11 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{color:#ff6060!importa
  gap:8px!important;
  padding:7px 0 5px!important;
  text-align:left!important;
+}
+/* The top MODE row shares capper-panel-status-row for sizing, but unlike sport
+   panels it has no 8px parent body padding. Restore the same effective inset. */
+.top-mode-status-row.capper-panel-status-row{
+ padding:7px 8px 5px!important;
 }
 .capper-status-field{flex:1 1 auto;min-width:0}
 .capper-status-label{
