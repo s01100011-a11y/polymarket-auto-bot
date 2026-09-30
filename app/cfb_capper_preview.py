@@ -2462,6 +2462,16 @@ def _status_pick_item(
         "market_url": record.get("market_url"),
         "event_title": record.get("event_title"),
         "event_start_at": record.get("event_start_at"),
+        "event_finished_at": record.get("event_finished_at"),
+        "event_completed_at": (
+            record.get("event_finished_at")
+            or record.get("event_completed_at")
+            or record.get("result_checked_at")
+            or record.get("espn_score_updated_at")
+            or (execution or {}).get("closed_at")
+            or (record.get("updated_at") if phase == "CLOSED" else None)
+        ),
+        "result_checked_at": record.get("result_checked_at"),
         "event_phase": phase,
         "outcome": record.get("outcome"),
         "asset_id": record.get("asset_id"),
@@ -2594,27 +2604,55 @@ function cfbAge(seconds){
  if(s<3600)return Math.floor(s/60)+'m';
  return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
 }
+function cfbEventDelta(ms){
+ const s=Math.max(0,Math.floor(Number(ms||0)/1000));
+ if(s<60)return s+'s';
+ if(s<3600)return Math.floor(s/60)+'m';
+ if(s<86400)return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
+ return Math.floor(s/86400)+'d '+Math.floor((s%86400)/3600)+'h';
+}
+function cfbEventBadgeLabel(item){
+ const phase=String(item.event_phase||'').toUpperCase();
+ const status=String(item.status||'').toUpperCase();
+ const now=Date.now();
+ if(phase==='LIVE'||status==='MATCHED_LIVE'||status==='MATCHED_LIVE_ALTERNATE')return 'LIVE';
+ if(phase==='CLOSED'||status==='EVENT_CLOSED'){
+  const raw=item.event_completed_at||item.event_finished_at||item.result_checked_at||item.closed_at||item.updated_at;
+  const done=raw?new Date(raw):null;
+  if(done&&!Number.isNaN(done.getTime())&&now>=done.getTime())return 'COMPLETED · '+cfbEventDelta(now-done.getTime())+' ago';
+  return 'COMPLETED';
+ }
+ const start=item.event_start_at?new Date(item.event_start_at):null;
+ if(start&&!Number.isNaN(start.getTime())){
+  const remaining=start.getTime()-now;
+  if(remaining>0)return 'T-'+cfbEventDelta(remaining);
+  if(phase==='PREGAME')return 'STARTING';
+ }
+ if(phase==='PREGAME'||status==='MATCHED_PREGAME'||status==='MATCHED_PREGAME_ALTERNATE')return 'UPCOMING';
+ return '';
+}
 function cfbPhaseVisual(item){
  const phase=String(item.event_phase||'').toUpperCase();
  const status=String(item.status||'').toUpperCase();
  const result=String(item.trade_result||item.pick_result||'').toUpperCase();
+ const label=cfbEventBadgeLabel(item);
  if(phase==='CLOSED'&&result==='WIN'){
   return {
-   label:'WIN',
+   label,
    row:'background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.42);border-left:4px solid #22c55e;',
    badge:'color:#008000;'
   };
  }
  if(phase==='CLOSED'&&result==='LOSS'){
   return {
-   label:'LOSS',
+   label,
    row:'background:rgba(239,68,68,.11);border:1px solid rgba(239,68,68,.42);border-left:4px solid #ef4444;',
    badge:'color:#b00000;'
   };
  }
  if(phase==='CLOSED'&&result==='PUSH'){
   return {
-   label:'PUSH',
+   label,
    row:'background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.38);border-left:4px solid #f59e0b;',
    badge:'color:#8a5b00;'
   };
@@ -2628,20 +2666,20 @@ function cfbPhaseVisual(item){
  }
  if(phase==='CLOSED'||status==='EVENT_CLOSED'){
   return {
-   label:'FINISHED',
+   label,
    row:'background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.24);border-left:4px solid #94a3b8;opacity:.82;',
    badge:'color:#404040;'
   };
  }
  if(phase==='PREGAME'||status==='MATCHED_PREGAME'||status==='MATCHED_PREGAME_ALTERNATE'){
   return {
-   label:'PREGAME',
+   label,
    row:'background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.35);border-left:4px solid #3b82f6;',
    badge:'color:#000080;'
   };
  }
  return {
-  label:'',
+  label,
   row:'border:1px solid rgba(255,255,255,.07);',
   badge:''
  };
