@@ -1,3 +1,13 @@
+## 2026-09-30 — Termux self-update + executable capability handshake
+
+To remove the repeated manual-update ambiguity on the Android executor, the supervisor now performs a conservative update check before each launch. It updates only a clean `main` working tree using `git fetch origin main` + `git merge --ff-only origin/main`. Dirty checkouts and non-main branches are logged and left untouched. Dependency installation only runs when `requirements.txt` actually changed.
+
+The executor heartbeat now includes the running short Git revision plus an explicit capability list (`PREVIEW`, `BUY`, `SELL`, `COMBO_PREVIEW`, `COMBO_BUY`). Railway persists those values and exposes `combo_capable` in executor status. This gives a deterministic post-restart check that the phone is actually running the Combo-aware worker.
+
+This change cannot update an already-running pre-change supervisor by itself. One final manual pull/restart is required on the phone; after that, normal supervisor restarts self-update automatically while preserving local changes.
+
+Files changed: `scripts/start_termux_executor.sh`, `scripts/termux_executor.py`, `app/termux_executor_dashboard.py`, `tests/test_termux_executor_caps.py`, `CHANGES.md`, and `DEVELOPMENT_NOTES.md`.
+
 ## 2026-09-30 — Polymarket Combo RFQ execution (#186)
 
 Objective: add native Polymarket sports Combo execution without disturbing the existing single-market CLOB order path.

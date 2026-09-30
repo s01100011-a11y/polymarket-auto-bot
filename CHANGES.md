@@ -1,3 +1,11 @@
+## 2026-09-30 — Termux self-update and capability reporting
+
+- The Termux supervisor now safely fast-forwards a clean `main` checkout from `origin/main` before launching the executor. It never overwrites a dirty checkout or a non-main branch.
+- If `requirements.txt` changed during the update, the supervisor refreshes the existing virtualenv before launch and refuses to start if that dependency sync fails.
+- Executor heartbeats now report the running Git revision and explicit supported actions.
+- Railway executor status now exposes `worker_revision`, `capabilities`, and `combo_capable`, allowing Combo readiness to be verified remotely instead of inferred from connectivity.
+- Added regression coverage for revision detection and Combo capability heartbeat fields.
+
 ## 2026-09-30 — Polymarket Combo RFQ execution (#186)
 
 - Added a separate Polymarket Combo path that resolves 2+ sports legs to exact outcome position IDs and keeps ordinary single-market orders on the existing CLOB executor.
