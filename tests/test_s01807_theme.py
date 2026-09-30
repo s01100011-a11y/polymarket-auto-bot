@@ -280,3 +280,18 @@ def test_top_mode_row_keeps_horizontal_inset_after_shared_status_rule():
     assert override > shared
     assert "padding:7px 8px 5px!important" in source[override:override+180]
     assert "padding:4px 8px 5px;" in source
+
+
+def test_shared_monitor_signal_card_matches_wnba_visual_system():
+    source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+
+    assert ".monitor-signal{" in source
+    assert "background:#000!important" in source
+    assert "border-top:2px solid #404040!important" in source
+    assert "border-right:2px solid #fff!important" in source
+    assert "border-radius:0!important" in source
+    assert ".monitor-meta{" in source
+    assert "font-size:11px!important" in source
+    assert ".monitor-action{" in source
+    assert "font-size:12px!important" in source
+    assert ".monitor-signal-actions{" in source
