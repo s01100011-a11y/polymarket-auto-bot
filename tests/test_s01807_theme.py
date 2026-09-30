@@ -295,3 +295,10 @@ def test_shared_monitor_signal_card_matches_wnba_visual_system():
     assert ".monitor-action{" in source
     assert "font-size:12px!important" in source
     assert ".monitor-signal-actions{" in source
+
+
+def test_mobile_sizing_controls_use_two_columns_after_symbol_removal():
+    source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+
+    assert ".capper-sizing-controls{display:grid;grid-template-columns:auto minmax(72px,1fr);gap:5px}" in source
+    assert "grid-template-columns:auto minmax(72px,1fr) auto" not in source
