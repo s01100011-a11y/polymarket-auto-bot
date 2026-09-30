@@ -18,7 +18,7 @@ ENV_FILE = Path(os.getenv("EXECUTOR_ENV_FILE", str(Path.home() / ".polymarket_ex
 load_dotenv(ENV_FILE)
 sys.path.insert(0, str(ROOT))
 
-from polymarket import PublicClient, SecureClient  # noqa: E402
+from polymarket import BuilderApiKey, PublicClient, SecureClient  # noqa: E402
 from app import main as core  # noqa: E402
 
 BRIDGE_URL = os.getenv("EXECUTOR_BRIDGE_URL", "https://polymarket-auto-bot-production.up.railway.app").rstrip("/")
@@ -26,6 +26,14 @@ WORKER_NAME = os.getenv("EXECUTOR_NAME", "termux-phone")
 FILL_WAIT_SECONDS = max(3, min(15, int(os.getenv("EXECUTOR_FILL_WAIT_SECONDS", "8"))))
 TOKEN_FILE = Path(os.getenv("EXECUTOR_TOKEN_FILE", str(Path.home() / ".config/polymarket-termux/executor_token"))).expanduser()
 JOURNAL_FILE = Path(os.getenv("EXECUTOR_JOURNAL_FILE", str(Path.home() / ".config/polymarket-termux/executor_journal.json"))).expanduser()
+BUILDER_KEY_FILE = Path(
+    os.getenv(
+        "POLYMARKET_BUILDER_KEY_FILE",
+        str(Path.home() / ".config/polymarket-termux/builder_api_key.json"),
+    )
+).expanduser()
+COMBO_MAX_LEGS = max(2, min(12, int(os.getenv("COMBO_MAX_LEGS", "8"))))
+COMBO_FILL_WAIT_SECONDS = max(10, min(120, int(os.getenv("COMBO_FILL_WAIT_SECONDS", "45"))))
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -177,6 +185,59 @@ def _secure(private_key: str, wallet: str) -> SecureClient:
     return SecureClient.create(private_key=private_key, wallet=wallet)
 
 
+def _builder_key_from_env() -> BuilderApiKey | None:
+    key = os.getenv("POLYMARKET_BUILDER_API_KEY", "").strip()
+    secret = os.getenv("POLYMARKET_BUILDER_SECRET", "").strip()
+    passphrase = os.getenv("POLYMARKET_BUILDER_PASSPHRASE", "").strip()
+    values = [key, secret, passphrase]
+    if any(values) and not all(values):
+        raise RuntimeError(
+            "Builder credentials are incomplete. Set POLYMARKET_BUILDER_API_KEY, "
+            "POLYMARKET_BUILDER_SECRET and POLYMARKET_BUILDER_PASSPHRASE together."
+        )
+    if all(values):
+        return BuilderApiKey(key=key, secret=secret, passphrase=passphrase)
+    return None
+
+
+def _builder_key(private_key: str, wallet: str) -> BuilderApiKey:
+    env_key = _builder_key_from_env()
+    if env_key is not None:
+        return env_key
+
+    saved = _read_json(BUILDER_KEY_FILE)
+    if all(saved.get(name) for name in ("key", "secret", "passphrase")):
+        return BuilderApiKey(
+            key=str(saved["key"]),
+            secret=str(saved["secret"]),
+            passphrase=str(saved["passphrase"]),
+        )
+
+    try:
+        with _secure(private_key, wallet) as client:
+            created = client.create_builder_api_key()
+    except Exception as exc:
+        raise RuntimeError(
+            "Combo RFQ requires a Polymarket Builder API key and automatic key creation failed. "
+            "Configure POLYMARKET_BUILDER_API_KEY / POLYMARKET_BUILDER_SECRET / "
+            f"POLYMARKET_BUILDER_PASSPHRASE. Underlying error: {type(exc).__name__}: {exc}"
+        ) from exc
+
+    _write_json(
+        BUILDER_KEY_FILE,
+        {"key": created.key, "secret": created.secret, "passphrase": created.passphrase},
+    )
+    return created
+
+
+def _secure_combo(private_key: str, wallet: str) -> SecureClient:
+    return SecureClient.create(
+        private_key=private_key,
+        wallet=wallet,
+        api_key=_builder_key(private_key, wallet),
+    )
+
+
 def _asset_market(client: PublicClient, asset_id: str) -> tuple[Any, str]:
     markets = list(
         client.list_markets(
@@ -319,6 +380,114 @@ def _validate_buy(payload: dict[str, Any]) -> dict[str, Any]:
         "budget_usdc": str(budget),
         "max_price": str(max_price),
     }
+
+
+def _validate_combo_payload(payload: dict[str, Any]) -> tuple[list[str], Decimal, Decimal]:
+    budget = _validate_budget_caps(payload)
+    raw_ids = payload.get("leg_position_ids") or []
+    if not isinstance(raw_ids, list):
+        raise RuntimeError("Combo leg_position_ids must be a list")
+    leg_position_ids = [str(value).strip() for value in raw_ids if str(value).strip()]
+    if len(leg_position_ids) < 2:
+        raise RuntimeError("A Combo requires at least two position IDs")
+    if len(leg_position_ids) > COMBO_MAX_LEGS:
+        raise RuntimeError(f"Combo exceeds COMBO_MAX_LEGS={COMBO_MAX_LEGS}")
+    if len(set(leg_position_ids)) != len(leg_position_ids):
+        raise RuntimeError("Combo contains duplicate position IDs")
+
+    max_price = Decimal(str(payload.get("max_price") or "0.95"))
+    if max_price <= 0 or max_price >= 1:
+        raise RuntimeError(f"Invalid Combo max price {max_price}")
+    return leg_position_ids, budget, max_price
+
+
+def _combo_quote(payload: dict[str, Any], private_key: str, wallet: str) -> tuple[Any, dict[str, Any]]:
+    leg_position_ids, budget, max_price = _validate_combo_payload(payload)
+    _geo()
+    with _secure_combo(private_key, wallet) as client:
+        quote_result = client.request_combo_quote(
+            leg_position_ids=leg_position_ids,
+            direction="BUY",
+            amount=str(budget),
+            side="YES",
+        )
+
+    quote = getattr(quote_result, "quote", None)
+    if quote is None:
+        reason = getattr(quote_result, "reason", None)
+        raise RuntimeError(f"Combo RFQ returned no usable quote ({reason or 'NO_QUOTES'})")
+
+    blended_price = Decimal(str(getattr(quote, "blended_price", "0") or "0"))
+    if blended_price <= 0 or blended_price >= 1:
+        raise RuntimeError(f"Combo RFQ returned invalid blended price {blended_price}")
+    if blended_price > max_price:
+        raise RuntimeError(
+            f"Combo RFQ blended price {blended_price} exceeds maximum price {max_price}"
+        )
+
+    summary = {
+        "ok": True,
+        "rfq_id": str(getattr(quote, "rfq_id", "") or getattr(quote_result, "rfq_id", "")),
+        "quote_id": str(getattr(quote, "quote_id", "") or ""),
+        "combo_position_id": str(getattr(quote, "position_id", "") or ""),
+        "blended_price": str(blended_price),
+        "maker_amount": str(getattr(quote, "maker_amount", "") or ""),
+        "taker_amount": str(getattr(quote, "taker_amount", "") or ""),
+        "total_required": str(getattr(quote, "total_required", "") or ""),
+        "expires_at": getattr(quote, "expires_at", None),
+        "budget_usdc": str(budget),
+        "max_price": str(max_price),
+        "leg_position_ids": leg_position_ids,
+        "legs": payload.get("legs") or [],
+        "label": payload.get("label") or "Polymarket Combo",
+        "trade_id": payload.get("trade_id"),
+        "executor": WORKER_NAME,
+    }
+    return quote, summary
+
+
+def _combo_preview(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, Any]:
+    _, summary = _combo_quote(payload, private_key, wallet)
+    summary["no_order_placed"] = True
+    summary["status"] = "QUOTE_ONLY"
+    return summary
+
+
+def _combo_buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, Any]:
+    quote, summary = _combo_quote(payload, private_key, wallet)
+    with _secure_combo(private_key, wallet) as client:
+        acceptance = client.accept_combo_quote(quote)
+        if str(getattr(acceptance, "status", "")).lower() != "executing":
+            reason = getattr(acceptance, "reason", None)
+            error = getattr(acceptance, "error", None)
+            raise RuntimeError(f"Combo RFQ acceptance failed ({reason or error or 'unknown reason'})")
+        fill = client.wait_for_combo_fill(
+            rfq_id=str(getattr(acceptance, "rfq_id", summary["rfq_id"])),
+            timeout=float(COMBO_FILL_WAIT_SECONDS),
+            polling_interval=1.0,
+        )
+
+    fill_status = str(getattr(fill, "status", "")).upper()
+    if fill_status != "FILLED":
+        error = getattr(fill, "error", None)
+        raise RuntimeError(f"Combo RFQ did not fill: {fill_status or 'UNKNOWN'} {error or ''}".strip())
+
+    filled_shares = Decimal(str(summary["taker_amount"] or "0"))
+    if filled_shares <= 0:
+        raise RuntimeError("Combo RFQ reported FILLED but returned zero outcome shares")
+
+    summary.update(
+        {
+            "ok": True,
+            "status": "ORDER_SUBMITTED",
+            "filled_shares": str(filled_shares),
+            "entry_price": summary["blended_price"],
+            "taker_order_hash": str(getattr(acceptance, "taker_order_hash", "") or ""),
+            "tx_hash": str(getattr(fill, "tx_hash", "") or ""),
+            "execution_type": "COMBO_RFQ",
+        }
+    )
+    return summary
 
 
 def _preview(payload: dict[str, Any]) -> dict[str, Any]:
@@ -540,7 +709,7 @@ def main() -> None:
             if existing and existing.get("status") == "COMPLETED":
                 _send_result(token, request_id, existing["body"])
                 continue
-            if existing and existing.get("status") == "STARTED" and action in {"BUY", "SELL"}:
+            if existing and existing.get("status") == "STARTED" and action in {"BUY", "SELL", "COMBO_BUY"}:
                 body = {
                     "ok": False,
                     "error": "This trade request was interrupted after execution began. Automatic retry was blocked to prevent a duplicate order; reconcile the wallet position manually.",
@@ -556,11 +725,15 @@ def main() -> None:
                     result = _preview(payload)
                 elif action == "BUY":
                     result = _buy(payload, private_key, wallet)
+                elif action == "COMBO_PREVIEW":
+                    result = _combo_preview(payload, private_key, wallet)
+                elif action == "COMBO_BUY":
+                    result = _combo_buy(payload, private_key, wallet)
                 elif action == "SELL":
                     result = _sell(payload, private_key, wallet)
                 else:
                     raise RuntimeError(f"Unknown executor action {action}")
-                if action == "BUY" and result.get("ok") is False:
+                if action in {"BUY", "COMBO_BUY"} and result.get("ok") is False:
                     body = {
                         "ok": False,
                         "result": result,
