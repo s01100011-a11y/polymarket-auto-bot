@@ -107,10 +107,34 @@ class ComboTradingTests(unittest.TestCase):
             "status": "PENDING",
             "payload": {"budget_usdc": "25"},
         }
-        with patch.object(remote.core, "MAX_AUTO_TRADE_USDC", Decimal("50")):
+        with (
+            patch.object(remote.core, "MAX_AUTO_TRADE_USDC", Decimal("50")),
+            patch.object(remote.core, "bot_enabled", return_value=True),
+            patch.object(remote.core, "live_trading_enabled", return_value=True),
+            patch.object(remote.core, "auto_trading_enabled", return_value=True),
+            patch.dict(remote.os.environ, {"COMBO_TRADING_ENABLED": "true"}, clear=False),
+        ):
             allowed = remote._authorize_order_for_handoff(rec)
         self.assertTrue(allowed)
         self.assertEqual(rec["payload"]["authorized_max_auto_trade_usdc"], "50")
+
+    def test_combo_handoff_blocks_when_combo_gate_is_off(self):
+        rec = {
+            "id": "exec-combo",
+            "action": "COMBO_BUY",
+            "status": "PENDING",
+            "payload": {"budget_usdc": "10"},
+        }
+        with (
+            patch.object(remote.core, "bot_enabled", return_value=True),
+            patch.object(remote.core, "live_trading_enabled", return_value=True),
+            patch.object(remote.core, "auto_trading_enabled", return_value=True),
+            patch.dict(remote.os.environ, {"COMBO_TRADING_ENABLED": "false"}, clear=False),
+        ):
+            allowed = remote._authorize_order_for_handoff(rec)
+        self.assertFalse(allowed)
+        self.assertEqual(rec["status"], "FAILED")
+        self.assertIn("gate is OFF", rec["error"])
 
     def test_termux_combo_payload_validates_duplicates_and_max_price(self):
         payload = {
