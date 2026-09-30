@@ -53,8 +53,14 @@ def test_more_stats_breaks_execution_history_down_by_capper_and_sport():
     assert 'rec.get("strategy_sport")' in metrics_source
     assert '"by_capper"' in metrics_source
     assert '"by_sport"' in metrics_source
+    assert '"by_bet_type"' in metrics_source
+    assert '"bet_types"' in metrics_source
+    assert 'quote.get("market_type")' in metrics_source
     assert 'id="moreStatsToggle"' in metrics_source
     assert "BY CAPPER" in metrics_source
     assert "BY SPORT" in metrics_source
+    assert "BET TYPES" in metrics_source
+    assert 'bet_type_order = ("ML", "Spread", "Total")' in metrics_source
+    assert "moreStatsBetTypes" in metrics_source
     assert "localStorage.getItem('dashboardStatsFilter')||'live'" in metrics_source
 
