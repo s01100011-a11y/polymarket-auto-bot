@@ -1,3 +1,14 @@
+## 2026-09-30 — Polymarket Combo RFQ execution (#186)
+
+- Added a separate Polymarket Combo path that resolves 2+ sports legs to exact outcome position IDs and keeps ordinary single-market orders on the existing CLOB executor.
+- Added protected `/api/combo/preview` and `/api/combo/buy` endpoints. Preview requests an RFQ without accepting it; live BUY accepts the winning RFQ and waits for terminal fill confirmation.
+- Combo live execution is fail-closed behind the dashboard master switch, `LIVE_TRADING`, `AUTO_TRADING`, and the new `COMBO_TRADING_ENABLED=false` default gate.
+- Combo requests reuse the current dashboard auto-trade cap, daily budget cap, executor connectivity, geoblock checks, stale BUY expiry, and server-stamped handoff authorization.
+- Added a maximum Combo price guard so the executor rejects an RFQ whose blended price is worse than the requested ceiling.
+- Termux can use explicit Builder API credentials or create and persist a Builder API key locally on first Combo use with protected file permissions.
+- Execution records store the Combo label, every leg, leg position IDs, Combo position ID, blended entry price, RFQ/quote IDs, taker order hash, and transaction hash as one trade.
+- Added regression coverage for Combo leg constraints, duplicate-leg rejection, queue expiry/caps, fill validation, executor payload validation, and builder-key configuration.
+
 # CHANGES
 
 ## 2026-09-30 — Consistent sizing-control layout across all sports
