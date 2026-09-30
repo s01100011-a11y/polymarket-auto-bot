@@ -295,6 +295,23 @@ def _authorize_order_for_handoff(rec: dict[str, Any]) -> bool:
     if rec.get("action") not in {"BUY", "PREVIEW", "COMBO_BUY", "COMBO_PREVIEW"}:
         return True
 
+    if rec.get("action") == "COMBO_BUY":
+        combo_enabled = os.getenv("COMBO_TRADING_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+        if (
+            not core.bot_enabled()
+            or not core.live_trading_enabled()
+            or not core.auto_trading_enabled()
+            or not combo_enabled
+        ):
+            stamp = _now_iso()
+            rec["status"] = "FAILED"
+            rec["updated_at"] = stamp
+            rec["error"] = (
+                "COMBO_BUY blocked before executor pickup: dashboard/LIVE/AUTO/COMBO gate is OFF"
+            )
+            rec.pop("lease_until_unix", None)
+            return False
+
     payload = rec.get("payload") or {}
     try:
         budget = Decimal(str(payload.get("budget_usdc") or "0"))
