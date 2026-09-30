@@ -1,3 +1,11 @@
+## 2026-09-30 — Termux queue-poll diagnostics and single-BUY recorder fix
+
+- Executor heartbeats now include queue-poll phase, last start/success timestamps, HTTP status, last error, and consecutive error count.
+- Queue polling uses a bounded 8-second request timeout by default so a stuck `/api/executor/next` call cannot hide behind otherwise healthy heartbeats.
+- Poll failures are immediately surfaced through the next heartbeat while keeping the worker fail-closed for order execution.
+- Fixed a regression in normal single-BUY result recording where an undefined Combo-only `pending` variable could raise after a successful fill.
+- Added regression tests for queue telemetry and successful single-BUY persistence.
+
 ## 2026-09-30 — Termux self-update and capability reporting
 
 - The Termux supervisor now safely fast-forwards a clean `main` checkout from `origin/main` before launching the executor. It never overwrites a dirty checkout or a non-main branch.
