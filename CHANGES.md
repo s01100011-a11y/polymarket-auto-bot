@@ -1,3 +1,12 @@
+## 2026-09-30 — Termux startup geoblock timeout recovery
+
+- The Termux queue worker no longer exits when the public Polymarket geoblock endpoint temporarily times out during startup.
+- Explicit blocked-region responses still stop the worker immediately.
+- Live BUY, SELL, and COMBO_BUY execution still require a fresh successful geoblock check and remain fail-closed.
+- Quote-only COMBO_PREVIEW can continue through a transient geoblock-endpoint timeout because it does not accept or place an order; an explicit blocked response still fails closed.
+- Replaced the corrupted/duplicated Termux supervisor script with a clean deterministic launcher that safely self-updates a clean main checkout, kills stale workers, and launches the v2 wrapper/base queue worker.
+- Added regression coverage for transient startup timeout handling, explicit geoblock blocking, quote-only Combo preview behavior, and strict Combo BUY geo enforcement.
+
 ## 2026-09-30 — Termux queue-poll diagnostics and single-BUY recorder fix
 
 - Executor heartbeats now include queue-poll phase, last start/success timestamps, HTTP status, last error, and consecutive error count.

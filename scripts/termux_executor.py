@@ -424,9 +424,31 @@ def _validate_combo_payload(payload: dict[str, Any]) -> tuple[list[str], Decimal
     return leg_position_ids, budget, max_price
 
 
-def _combo_quote(payload: dict[str, Any], private_key: str, wallet: str) -> tuple[Any, dict[str, Any]]:
+def _combo_quote(
+    payload: dict[str, Any],
+    private_key: str,
+    wallet: str,
+    *,
+    require_geo: bool = True,
+) -> tuple[Any, dict[str, Any]]:
     leg_position_ids, budget, max_price = _validate_combo_payload(payload)
-    _geo()
+    if require_geo:
+        _geo()
+    else:
+        try:
+            _geo()
+        except RuntimeError:
+            # An explicit blocked response must still fail closed.
+            raise
+        except Exception as exc:
+            # Quote-only RFQs place no order. A transient geoblock-endpoint
+            # timeout may be bypassed for preview only; live Combo BUY still
+            # requires a fresh successful _geo() immediately before quoting.
+            print(
+                f"Combo preview geoblock check unavailable: {type(exc).__name__}: {exc}; "
+                "continuing quote-only preview",
+                flush=True,
+            )
     with _secure_combo(private_key, wallet) as client:
         quote_result = client.request_combo_quote(
             leg_position_ids=leg_position_ids,
@@ -470,14 +492,14 @@ def _combo_quote(payload: dict[str, Any], private_key: str, wallet: str) -> tupl
 
 
 def _combo_preview(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, Any]:
-    _, summary = _combo_quote(payload, private_key, wallet)
+    _, summary = _combo_quote(payload, private_key, wallet, require_geo=False)
     summary["no_order_placed"] = True
     summary["status"] = "QUOTE_ONLY"
     return summary
 
 
 def _combo_buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, Any]:
-    quote, summary = _combo_quote(payload, private_key, wallet)
+    quote, summary = _combo_quote(payload, private_key, wallet, require_geo=True)
     with _secure_combo(private_key, wallet) as client:
         acceptance = client.accept_combo_quote(quote)
         if str(getattr(acceptance, "status", "")).lower() != "executing":
@@ -710,17 +732,35 @@ def _existing_journal(request_id: str) -> dict[str, Any] | None:
     return _read_json(JOURNAL_FILE).get(request_id)
 
 
+def _initial_geo_check() -> tuple[dict[str, Any] | None, str]:
+    try:
+        geo = _geo()
+        return geo, "Ready"
+    except RuntimeError:
+        # Explicit geoblock response: caller must stop.
+        raise
+    except Exception as exc:
+        return None, f"Geoblock check unavailable: {type(exc).__name__}: {exc}"
+
+
 def main() -> None:
     private_key, wallet = _credentials()
     token = _load_token() or _pair()
 
     geo: dict[str, Any] | None = None
+    startup_status = "Ready"
     try:
-        geo = _geo()
-        print(f"Polymarket geoblock check passed: {geo.get('country')}/{geo.get('region')}")
-        _post_heartbeat(token, private_key, wallet, geo, "Ready")
-    except Exception as exc:
-        # Report the blocked state to the dashboard, then stop. Do not bypass it.
+        geo, startup_status = _initial_geo_check()
+        if geo is not None:
+            print(f"Polymarket geoblock check passed: {geo.get('country')}/{geo.get('region')}")
+        else:
+            print(
+                f"{startup_status}; starting queue worker with live execution still fail-closed",
+                flush=True,
+            )
+    except RuntimeError as exc:
+        # _geo raises RuntimeError only for an explicit blocked response.
+        # Preserve the hard stop for blocked jurisdictions.
         try:
             r = httpx.get("https://polymarket.com/api/geoblock", timeout=10)
             geo = r.json() if r.is_success else None
@@ -729,7 +769,7 @@ def main() -> None:
         _post_heartbeat(token, private_key, wallet, geo, str(exc))
         print(str(exc))
         raise SystemExit(2)
-
+    _post_heartbeat(token, private_key, wallet, geo, startup_status)
     print(f"Termux executor online as {WORKER_NAME}. Ctrl+C to stop.")
     # The startup path already posted a full wallet heartbeat above. Mark it as
     # current so the first worker-loop action is an executor queue poll instead
