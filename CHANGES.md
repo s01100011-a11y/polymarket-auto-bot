@@ -1,3 +1,9 @@
+## 2026-10-01 — Retry encoded preflight connection timeouts
+
+- Failed Slack BUY retries now recognize both the raw `ConnectTimeout` class spelling and executor error codes such as `BUY_PREFLIGHT_CONNECT_TIMEOUT`.
+- This allows safe pre-submission transport failures to be requeued through the 120-second resting-limit path after the existing wallet/open-order reconciliation.
+- Added regression coverage for the encoded preflight timeout form.
+
 ## 2026-10-01 — NBA/WNBA live Slack orders rest at signal price for 120 seconds
 
 - NBA/WNBA `slack_live` BUY payloads now include the exact Polymarket asset ID and a 120-second limit-order lifetime.

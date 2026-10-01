@@ -463,7 +463,11 @@ def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any
     payload = dict(original.get("payload") or {})
     error = str(original.get("error") or "")
     interrupted_after_start = "interrupted after execution began" in error.lower()
-    connect_timeout = "ConnectTimeout" in error
+    normalized_error = error.replace("-", "_").upper()
+    connect_timeout = (
+        "CONNECTTIMEOUT" in normalized_error.replace("_", "")
+        or "CONNECT_TIMEOUT" in normalized_error
+    )
     if (
         original.get("action") != "BUY"
         or original.get("status") != "FAILED"
