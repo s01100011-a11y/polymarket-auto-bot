@@ -64,24 +64,22 @@ if [ "${AUTO_UPDATE}" = "true" ] && [ -d "${ROOT}/.git" ]; then
   fi
 fi
 
-# Retire any legacy supervisor shells first. Older launcher revisions trapped
-# TERM without exiting, so escalate to KILL if one survives briefly. This is
-# required once during migration to the singleton-worker launcher.
-if command -v pgrep >/dev/null 2>&1; then
-  for pid in $(pgrep -f '[s]cripts/start_termux_executor.sh' 2>/dev/null || true); do
-    if [ "${pid}" = "$" ] || [ "${pid}" = "${PPID}" ]; then
-      continue
+# Retire legacy supervisors by following their executor child processes.
+# Avoid matching supervisor command lines directly because the current launcher's
+# ancestor shell can also contain this script name in its command line.
+if command -v pgrep >/dev/null 2>&1 && command -v ps >/dev/null 2>&1; then
+  for worker_pid in $(pgrep -f '[t]ermux_executor_v2.py' 2>/dev/null || true); do
+    supervisor_pid="$(ps -o ppid= -p "${worker_pid}" 2>/dev/null | tr -d '[:space:]')"
+    if [ -n "${supervisor_pid}" ] && [ "${supervisor_pid}" != "1" ] && [ "${supervisor_pid}" != "$$" ] && [ "${supervisor_pid}" != "${PPID}" ]; then
+      echo "$(date -Is) stopping legacy executor supervisor pid=${supervisor_pid} worker=${worker_pid}" | tee -a "${LOG_FILE}"
+      kill "${supervisor_pid}" 2>/dev/null || true
     fi
-    echo "$(date -Is) stopping legacy executor supervisor pid=${pid}" | tee -a "${LOG_FILE}"
-    kill "${pid}" 2>/dev/null || true
-    sleep 0.2
-    if kill -0 "${pid}" 2>/dev/null; then
-      kill -9 "${pid}" 2>/dev/null || true
-    fi
+    kill "${worker_pid}" 2>/dev/null || true
   done
+  sleep 0.3
 fi
 
-# Kill stale direct workers before starting the supervised v2 wrapper.
+# Kill any remaining direct workers before starting the supervised v2 wrapper.
 pkill -f '[t]ermux_executor_v2.py' 2>/dev/null || true
 pkill -f '[t]ermux_executor.py' 2>/dev/null || true
 
