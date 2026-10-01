@@ -2614,8 +2614,8 @@ function cfbEsc(v){
 function cfbOdds(v){
  if(v===null||v===undefined||v==='')return '—';
  const p=Number(v);if(!Number.isFinite(p)||p<=0||p>=1)return '—';
- const cents=p*100, centText=Math.abs(cents-Math.round(cents))<0.05?String(Math.round(cents)):cents.toFixed(1);
- return (1/p).toFixed(2)+' ('+centText+'¢)';
+ const cents=p*100, ct=Math.abs(cents-Math.round(cents))<0.05?String(Math.round(cents)):cents.toFixed(1);
+ return (1/p).toFixed(2)+' ('+ct+'¢)';
 }
 function cfbUnits(v){
  if(v===null||v===undefined||v==='')return '';
@@ -2801,7 +2801,15 @@ async function cfbApproveBuy(requestId,btn){
   if(!qr.ok)throw new Error(q.detail||'Live quote refresh failed');
   const live=cfbOdds(q.polymarket_price), units=cfbUnits(q.units);
   btn.textContent='BUY LIVE '+live;
-  const target=q.target_profit_usdc?(' · To win 
+  const target=q.target_profit_usdc?(' · To win $'+Number(q.target_profit_usdc).toFixed(2)+(units?' ('+units+')':'')):'';
+  if(!confirm('Approve BUY at current '+live+'? Risk $'+Number(q.budget_usdc||0).toFixed(2)+target)){btn.disabled=false;btn.textContent=original;return}
+  btn.textContent='APPROVING '+live+'…';
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED '+cfbOdds(d.polymarket_price);
+  await loadCfbCapperStats();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
 async function cfbManualBuy(signalId,btn){
  const original=btn.textContent;
  btn.disabled=true;
@@ -2969,15 +2977,12 @@ function cfbPositionList(x){
  const all=Array.isArray(x.positions)?x.positions:[];
  const open=all.filter(item=>item.sell_available);
  const settledAll=all.filter(item=>!item.sell_available&&item.finished);
- const settled=capperLast24hOnly
-  ? settledAll.filter(item=>capperWithin24h(item.closed_at||item.submitted_at))
-  : settledAll;
+ const settled=capperLast24hOnly?settledAll.filter(item=>capperWithin24h(item.closed_at||item.submitted_at)):settledAll;
  const openHtml=open.length?open.map(item=>{
   const raw=item.live_pnl_usdc===null||item.live_pnl_usdc===undefined?null:Number(item.live_pnl_usdc);
   const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
   const pnl=raw===null?'—':(raw>0?'+':'')+'$'+raw.toFixed(2)+(item.live_pnl_pct===null||item.live_pnl_pct===undefined?'':' ('+Number(item.live_pnl_pct).toFixed(1)+'%)');
-  const entry=cfbOdds(item.entry_price);
-  const live=cfbOdds(item.current_price);
+  const entry=cfbOdds(item.entry_price), live=cfbOdds(item.current_price);
   const shares=item.shares===null||item.shares===undefined?'—':Number(item.shares).toFixed(2);
   const cost=item.open_cost_basis_usdc||item.stake_usdc;
   const value=item.current_value_usdc===null||item.current_value_usdc===undefined?'—':'$'+Number(item.current_value_usdc).toFixed(2);
