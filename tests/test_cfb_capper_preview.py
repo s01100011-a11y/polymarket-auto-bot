@@ -2347,3 +2347,18 @@ def test_cfb_sell_zero_balance_is_treated_as_already_sold_ui_state():
     source = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
     assert "CLOB outcome-token balance became zero before SELL" in source
     assert "No second SELL was submitted" in source
+
+def test_unt_alias_normalizes_to_north_texas_for_market_matching():
+    assert capper._canonical_cfb_hint("UNT") == "North Texas"
+    assert capper._canonical_cfb_hint("North Texas Mean Green") == "North Texas"
+    assert capper._norm_text("UNT") == "north texas"
+
+
+def test_cfb_open_position_ui_uses_universal_position_format():
+    source = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
+    assert "function cfbOdds(v)" in source
+    assert "function cfbUnits(v)" in source
+    assert "Exact position:" in source
+    assert "To win $" in source
+    assert "unitTitle+' · OPEN" in source
+    assert "Entry odds '+entry+' · Live odds '+live" in source
