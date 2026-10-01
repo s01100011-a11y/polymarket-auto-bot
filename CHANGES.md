@@ -1,3 +1,10 @@
+## 2026-10-01 — Safe supervisor retirement fix
+
+- Fixed the Termux cleanup path that could terminate the current launcher's process chain before the executor started.
+- Legacy supervisors are now found through their existing `termux_executor_v2.py` child PID and only that worker's parent supervisor is terminated.
+- The current launcher PID and parent PID are explicitly excluded.
+- The prior direct supervisor command-line scan has been removed.
+
 ## 2026-10-01 — Retire legacy Termux supervisors on singleton startup
 
 - The Termux launcher now detects and terminates older `start_termux_executor.sh` supervisor shells before launching the singleton worker.
