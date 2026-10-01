@@ -1420,7 +1420,7 @@ def _pending_auto_budget(remote: Any) -> Decimal:
     except Exception:
         return total
     for rec in queue.values():
-        if rec.get("action") != "BUY" or rec.get("status") not in {"PENDING", "LEASED"}:
+        if rec.get("action") != "BUY" or rec.get("status") not in {"WAITING_APPROVAL", "PENDING", "LEASED"}:
             continue
         try:
             total += Decimal(str((rec.get("payload") or {}).get("budget_usdc") or "0"))
@@ -2027,6 +2027,10 @@ def _nfl_signal_dashboard_item(
         "reason": record.get("reason"),
         "last_error": record.get("last_error"),
         "request_id": record.get("request_id"),
+        "approval_required": record.get("approval_required"),
+        "approval_reason": record.get("approval_reason"),
+        "signal_decimal_odds": record.get("signal_decimal_odds"),
+        "minimum_decimal_odds": record.get("minimum_decimal_odds"),
         "signal_id": record.get("id"),
         "pick_result": record.get("pick_result"),
         "trade_executed": execution is not None,
@@ -2736,7 +2740,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
 
             stats[label].update({
                 "signals": len(rows),
-                "queued": sum(1 for r in rows if r.get("status") == "QUEUED"),
+                "queued": sum(1 for r in rows if r.get("status") in {"QUEUED", "WAITING_APPROVAL"}),
                 "done": sum(1 for r in rows if r.get("status") == "EXECUTOR_DONE"),
                 "failed": sum(1 for r in rows if r.get("status") == "EXECUTOR_FAILED"),
                 "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
@@ -2745,7 +2749,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "closed": sum(1 for item in items if item.get("event_phase") == "CLOSED"),
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
                 "all_items": items[:60],
-                "queued_items": status_items("QUEUED"),
+                "queued_items": status_items("QUEUED", "WAITING_APPROVAL"),
                 "done_items": status_items("EXECUTOR_DONE"),
                 "failed_items": status_items("EXECUTOR_FAILED"),
                 "retrying_items": status_items("RETRYING"),
