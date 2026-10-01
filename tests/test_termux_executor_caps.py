@@ -158,25 +158,21 @@ class SlackLiveRestingLimitTests(unittest.TestCase):
         market.trading.minimum_order_size = "1"
         market_type = patch.object(executor.core, "_market_type", return_value="moneyline")
         public = MagicMock()
-        public.return_value.__enter__.return_value.get_price.return_value = "0.62"
-        public.return_value.__enter__.return_value.get_spread.return_value = "0.10"
-        book = type("Book", (), {"asks": [type("L", (), {"price": "0.62"})()]})()
-        public.return_value.__enter__.return_value.get_order_book.return_value = book
-        intent_market = patch.object(executor.core, "_select_market", return_value=market)
-        resolve = patch.object(executor.core, "_resolve_asset", return_value=("asset-1", None, "Dallas Wings"))
         with (
             patch.object(executor, "_geo", return_value={"blocked": False}),
             patch.object(executor, "PublicClient", public),
+            patch.object(executor, "_asset_market", return_value=(market, "Dallas Wings")),
             market_type,
-            intent_market,
-            resolve,
         ):
             quote = executor._validate_buy({
                 "source": "slack_live",
                 "market_url": "https://polymarket.com/sports/wnba/test-event",
                 "outcome": "Dallas Wings",
                 "market_type": "moneyline",
+                "asset_id": "asset-1",
                 "max_price": "0.40",
+                "signal_buy_price": "0.40",
+                "signal_spread": "0.02",
                 "budget_usdc": "10",
                 "max_spread": "0.08",
                 "max_price_global": "0.95",
@@ -186,6 +182,9 @@ class SlackLiveRestingLimitTests(unittest.TestCase):
         self.assertTrue(quote["will_rest_if_needed"])
         self.assertEqual(quote["max_price"], "0.40")
         self.assertEqual(quote["limit_order_ttl_seconds"], 120)
+        public.return_value.__enter__.return_value.get_price.assert_not_called()
+        public.return_value.__enter__.return_value.get_spread.assert_not_called()
+        public.return_value.__enter__.return_value.get_order_book.assert_not_called()
 
     def test_live_limit_lease_covers_120_second_rest_window(self):
         rec = {
