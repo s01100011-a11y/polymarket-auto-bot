@@ -840,7 +840,14 @@ def _preview(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, Any]:
+def _buy(
+    payload: dict[str, Any],
+    private_key: str,
+    wallet: str,
+    *,
+    request_id: str | None = None,
+    executor_token: str | None = None,
+) -> dict[str, Any]:
     trade_id = str(payload.get("trade_id") or "")
     fast_quote = _fast_slack_preflight(payload)
     if fast_quote is not None:
@@ -898,6 +905,30 @@ def _buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, An
         f"order_id={order_id or '-'}",
         flush=True,
     )
+    if order_id and request_id:
+        _journal_submission(
+            request_id,
+            order_id=order_id,
+            trade_id=trade_id,
+            asset_id=asset_id,
+        )
+        if executor_token:
+            try:
+                _send_submission(
+                    executor_token,
+                    request_id,
+                    order_id=order_id,
+                    trade_id=trade_id,
+                    asset_id=asset_id,
+                )
+            except Exception as exc:
+                # The order is already accepted. Provenance telemetry failure must
+                # never cause another BUY submission for the same request.
+                print(
+                    f"BUY_SUBMISSION_RECEIPT_FAILED request={request_id} "
+                    f"order_id={order_id} error={type(exc).__name__}: {exc}",
+                    flush=True,
+                )
 
     # Once place_limit_order returns, never submit a second BUY for this request.
     # For Slack live orders, allow the limit to rest for the requested window.
@@ -1109,6 +1140,28 @@ def _post_heartbeat(token: str, private_key: str, wallet: str, geo: dict[str, An
         print(f"Heartbeat failed: {exc}")
 
 
+def _send_submission(
+    token: str,
+    request_id: str,
+    *,
+    order_id: str,
+    trade_id: str,
+    asset_id: str,
+) -> None:
+    with _bridge_client(timeout=12) as h:
+        r = h.post(
+            f"{BRIDGE_URL}/api/executor/submission/{request_id}",
+            headers=_headers(token),
+            json={
+                "order_id": order_id,
+                "trade_id": trade_id or None,
+                "asset_id": asset_id or None,
+                "accepted_at_unix": time.time(),
+            },
+        )
+        r.raise_for_status()
+
+
 def _send_result(token: str, request_id: str, body: dict[str, Any]) -> None:
     with _bridge_client(timeout=20) as h:
         r = h.post(
@@ -1122,6 +1175,27 @@ def _send_result(token: str, request_id: str, body: dict[str, Any]) -> None:
 def _journal_started(request_id: str, action: str) -> None:
     journal = _read_json(JOURNAL_FILE)
     journal[request_id] = {"status": "STARTED", "action": action, "started_at": time.time()}
+    _write_json(JOURNAL_FILE, journal)
+
+
+def _journal_submission(
+    request_id: str,
+    *,
+    order_id: str,
+    trade_id: str,
+    asset_id: str,
+) -> None:
+    journal = _read_json(JOURNAL_FILE)
+    rec = dict(journal.get(request_id) or {})
+    rec.update({
+        "status": "STARTED",
+        "action": "BUY",
+        "order_id": order_id,
+        "trade_id": trade_id,
+        "asset_id": asset_id,
+        "order_accepted_at": time.time(),
+    })
+    journal[request_id] = rec
     _write_json(JOURNAL_FILE, journal)
 
 
@@ -1257,9 +1331,18 @@ def main() -> None:
                 _send_result(token, request_id, existing["body"])
                 continue
             if existing and existing.get("status") == "STARTED" and action in {"BUY", "SELL", "COMBO_BUY"}:
+                known_order_id = str(existing.get("order_id") or "")
                 body = {
                     "ok": False,
-                    "error": "This trade request was interrupted after execution began. Automatic retry was blocked to prevent a duplicate order; reconcile the wallet position manually.",
+                    "error": (
+                        "This trade request was interrupted after execution began. "
+                        + (
+                            f"Bot-owned Polymarket order_id={known_order_id} was already accepted; "
+                            if known_order_id
+                            else ""
+                        )
+                        + "Automatic retry was blocked to prevent a duplicate order."
+                    ),
                 }
                 _journal_completed(request_id, action, body)
                 _send_result(token, request_id, body)
@@ -1271,7 +1354,13 @@ def main() -> None:
                 if action == "PREVIEW":
                     result = _preview(payload)
                 elif action == "BUY":
-                    result = _buy(payload, private_key, wallet)
+                    result = _buy(
+                        payload,
+                        private_key,
+                        wallet,
+                        request_id=request_id,
+                        executor_token=token,
+                    )
                 elif action == "COMBO_PREVIEW":
                     result = _combo_preview(payload, private_key, wallet)
                 elif action == "COMBO_BUY":

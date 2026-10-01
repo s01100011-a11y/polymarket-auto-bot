@@ -28,6 +28,23 @@ class TermuxExecutorSingletonTests(unittest.TestCase):
                 third.close()
 
 
+class TermuxExecutorSubmissionReceiptTests(unittest.TestCase):
+    def test_journal_submission_persists_order_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = executor.Path(tmp) / "journal.json"
+            with patch.object(executor, "JOURNAL_FILE", path):
+                executor._journal_started("exec-test", "BUY")
+                executor._journal_submission(
+                    "exec-test",
+                    order_id="0xbot-order",
+                    trade_id="slack-live-test",
+                    asset_id="asset-1",
+                )
+                rec = executor._existing_journal("exec-test")
+        self.assertEqual(rec["order_id"], "0xbot-order")
+        self.assertEqual(rec["trade_id"], "slack-live-test")
+
+
 class TermuxExecutorTransportTests(unittest.TestCase):
     def test_bridge_client_forces_ipv4_with_retries(self):
         with (
@@ -571,7 +588,7 @@ class SlackFastHandoffAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["server_position_before"], "0")
         self.assertEqual(payload["authorized_max_auto_trade_usdc"], "25")
 
-    def test_handoff_blocks_fast_preflight_when_position_exists(self):
+    def test_handoff_treats_existing_position_as_manual_baseline(self):
         rec = self._rec()
         with (
             patch.object(remote.core, "MAX_AUTO_TRADE_USDC", Decimal("25")),
@@ -583,17 +600,19 @@ class SlackFastHandoffAuthorizationTests(unittest.TestCase):
                     "geo_blocked": False,
                 },
             ),
+            patch.object(remote, "_bot_owned_execution", return_value=None),
+            patch.object(remote, "_bot_owned_submission", return_value=None),
             patch.object(remote, "_strict_position_size", return_value=Decimal("5")),
             patch.object(remote, "_strict_open_orders_for_asset", return_value=[]),
         ):
-            allowed = remote._authorize_order_for_handoff(rec)
+            allowed = remote._authorize_order_for_handoff(rec, queue_data={"exec-live": rec})
 
-        self.assertFalse(allowed)
-        self.assertEqual(rec["status"], "FAILED")
-        self.assertIn("already holds", rec["error"])
+        self.assertTrue(allowed)
+        self.assertEqual(rec["payload"]["server_position_before"], "5")
 
-    def test_handoff_blocks_fast_preflight_when_open_order_exists(self):
+    def test_handoff_treats_existing_open_order_as_external_baseline(self):
         rec = self._rec()
+        order = type("Order", (), {"order_id": "manual-order-1"})()
         with (
             patch.object(remote.core, "MAX_AUTO_TRADE_USDC", Decimal("25")),
             patch.object(
@@ -604,14 +623,48 @@ class SlackFastHandoffAuthorizationTests(unittest.TestCase):
                     "geo_blocked": False,
                 },
             ),
+            patch.object(remote, "_bot_owned_execution", return_value=None),
+            patch.object(remote, "_bot_owned_submission", return_value=None),
             patch.object(remote, "_strict_position_size", return_value=Decimal("0")),
-            patch.object(remote, "_strict_open_orders_for_asset", return_value=[object()]),
+            patch.object(remote, "_strict_open_orders_for_asset", return_value=[order]),
         ):
-            allowed = remote._authorize_order_for_handoff(rec)
+            allowed = remote._authorize_order_for_handoff(rec, queue_data={"exec-live": rec})
+
+        self.assertTrue(allowed)
+        self.assertEqual(
+            rec["payload"]["server_preexisting_open_order_ids"],
+            ["manual-order-1"],
+        )
+
+    def test_handoff_blocks_bot_owned_submission_for_same_signal(self):
+        rec = self._rec()
+        rec["payload"]["slack_event_id"] = "Ev-test"
+        prior = {
+            "id": "exec-prior",
+            "action": "BUY",
+            "status": "FAILED",
+            "payload": {"source": "slack_live", "slack_event_id": "Ev-test"},
+            "submission": {"order_id": "bot-order-1"},
+        }
+        with (
+            patch.object(remote.core, "MAX_AUTO_TRADE_USDC", Decimal("25")),
+            patch.object(
+                remote,
+                "_state",
+                return_value={
+                    "last_seen_unix": remote.time.time(),
+                    "geo_blocked": False,
+                },
+            ),
+            patch.object(remote, "_bot_owned_execution", return_value=None),
+        ):
+            allowed = remote._authorize_order_for_handoff(
+                rec,
+                queue_data={"exec-live": rec, "exec-prior": prior},
+            )
 
         self.assertFalse(allowed)
-        self.assertEqual(rec["status"], "FAILED")
-        self.assertIn("open order", rec["error"])
+        self.assertIn("bot-owned", rec["error"])
 
 
 class ExecutorLeaseTests(unittest.TestCase):

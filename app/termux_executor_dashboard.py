@@ -86,6 +86,13 @@ class ExecutorResult(BaseModel):
     error: str | None = Field(default=None, max_length=2000)
 
 
+class ExecutorSubmission(BaseModel):
+    order_id: str = Field(min_length=1, max_length=200)
+    trade_id: str | None = Field(default=None, max_length=240)
+    asset_id: str | None = Field(default=None, max_length=240)
+    accepted_at_unix: float | None = None
+
+
 class Heartbeat(BaseModel):
     name: str = Field(default="termux", min_length=1, max_length=80)
     worker_revision: str | None = Field(default=None, max_length=80)
@@ -264,6 +271,68 @@ def _strict_position_size(asset_id: str) -> Decimal:
     return Decimal("0")
 
 
+def _bot_signal_key(payload: dict[str, Any]) -> str:
+    for key in ("slack_event_id", "strategy_pick_id"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    trade_id = str(payload.get("trade_id") or "").strip()
+    return trade_id.split("-retry-", 1)[0] if trade_id else ""
+
+
+def _bot_owned_execution(payload: dict[str, Any]) -> dict[str, Any] | None:
+    signal_key = _bot_signal_key(payload)
+    if not signal_key:
+        return None
+    executions = core._load(core.EXECUTIONS_FILE)
+    for rec in executions.values():
+        if rec.get("paper") or str(rec.get("source") or "") != "slack_live":
+            continue
+        rec_key = str(rec.get("slack_event_id") or rec.get("strategy_pick_id") or "").strip()
+        if not rec_key:
+            rec_key = str(rec.get("id") or "").split("-retry-", 1)[0]
+        if rec_key != signal_key:
+            continue
+        if bool((rec.get("execution") or {}).get("placed")) or rec.get("status") in {
+            "ORDER_SUBMITTED",
+            "PARTIALLY_CLOSED",
+            "CLOSED",
+            "CLOSED_RECONCILED",
+            "SETTLED_WIN",
+            "SETTLED_LOSS",
+            "SETTLED_PUSH",
+        }:
+            return rec
+    return None
+
+
+def _bot_owned_submission(
+    payload: dict[str, Any],
+    queue_data: dict[str, Any] | None,
+    *,
+    exclude_request_id: str | None = None,
+) -> dict[str, Any] | None:
+    if not queue_data:
+        return None
+    signal_key = _bot_signal_key(payload)
+    if not signal_key:
+        return None
+    for request_id, rec in queue_data.items():
+        if exclude_request_id and str(request_id) == str(exclude_request_id):
+            continue
+        rp = rec.get("payload") or {}
+        if str(rp.get("source") or "") != "slack_live":
+            continue
+        if _bot_signal_key(rp) != signal_key:
+            continue
+        submission = rec.get("submission") or {}
+        if str(submission.get("order_id") or "").strip():
+            return rec
+        if rec.get("status") in {"PENDING", "LEASED"}:
+            return rec
+    return None
+
+
 def _strict_open_orders_for_asset(asset_id: str) -> list[Any]:
     with live_trading._secure_client() as client:
         try:
@@ -357,7 +426,10 @@ def _expire_stale_buys_persisted() -> list[str]:
     return expired
 
 
-def _authorize_order_for_handoff(rec: dict[str, Any]) -> bool:
+def _authorize_order_for_handoff(
+    rec: dict[str, Any],
+    queue_data: dict[str, Any] | None = None,
+) -> bool:
     """Apply the current dashboard auto-trade cap immediately before Termux pickup."""
     if rec.get("action") not in {"BUY", "PREVIEW", "COMBO_BUY", "COMBO_PREVIEW"}:
         return True
@@ -430,6 +502,23 @@ def _authorize_order_for_handoff(rec: dict[str, Any]) -> bool:
             rec.pop("lease_until_unix", None)
             return False
 
+        owned_execution = _bot_owned_execution(payload)
+        owned_submission = _bot_owned_submission(
+            payload,
+            queue_data,
+            exclude_request_id=str(rec.get("id") or ""),
+        )
+        if owned_execution or owned_submission:
+            stamp = _now_iso()
+            rec["status"] = "FAILED"
+            rec["updated_at"] = stamp
+            rec["error"] = (
+                "Slack live BUY blocked at handoff: this PW signal already has "
+                "a bot-owned execution/order or active bot request"
+            )
+            rec.pop("lease_until_unix", None)
+            return False
+
         asset_id = str(payload.get("asset_id") or "").strip()
         try:
             position_before = _strict_position_size(asset_id)
@@ -439,37 +528,25 @@ def _authorize_order_for_handoff(rec: dict[str, Any]) -> bool:
             rec["status"] = "FAILED"
             rec["updated_at"] = stamp
             rec["error"] = (
-                "Slack live BUY blocked at handoff: authoritative duplicate "
-                f"reconciliation failed: {type(exc).__name__}: {exc}"
+                "Slack live BUY blocked at handoff: baseline reconciliation failed: "
+                f"{type(exc).__name__}: {exc}"
             )
             rec.pop("lease_until_unix", None)
             return False
 
-        if position_before > 0:
-            stamp = _now_iso()
-            rec["status"] = "FAILED"
-            rec["updated_at"] = stamp
-            rec["error"] = (
-                f"Slack live BUY blocked at handoff: wallet already holds {position_before} "
-                "shares of this outcome"
-            )
-            rec.pop("lease_until_unix", None)
-            return False
-
-        if open_orders:
-            stamp = _now_iso()
-            rec["status"] = "FAILED"
-            rec["updated_at"] = stamp
-            rec["error"] = (
-                f"Slack live BUY blocked at handoff: {len(open_orders)} open order(s) "
-                "already exist for this outcome"
-            )
-            rec.pop("lease_until_unix", None)
-            return False
+        # Existing wallet shares/open orders may be manual or from another system.
+        # They are recorded as baseline context, not treated as proof this bot
+        # already placed the PW signal.
+        preexisting_order_ids = [
+            str(getattr(order, "order_id", None) or getattr(order, "id", None) or "")
+            for order in open_orders
+            if str(getattr(order, "order_id", None) or getattr(order, "id", None) or "")
+        ]
 
         payload["server_fast_preflight"] = True
         payload["server_fast_preflight_unix"] = time.time()
         payload["server_position_before"] = str(position_before)
+        payload["server_preexisting_open_order_ids"] = preexisting_order_ids[:50]
         payload["server_geo_heartbeat_unix"] = last_seen
         payload["server_fast_preflight_max_age_seconds"] = SLACK_FAST_PREFLIGHT_MAX_AGE_SECONDS
 
@@ -751,7 +828,7 @@ def executor_next(_: dict[str, Any] = Depends(_executor_auth)):
             status = rec.get("status")
             lease_until = float(rec.get("lease_until_unix") or 0)
             if status == "PENDING" or (status == "LEASED" and lease_until <= now):
-                if not _authorize_order_for_handoff(rec):
+                if not _authorize_order_for_handoff(rec, queue_data=data):
                     handoff_changed = True
                     continue
                 if rec.get("action") in {"BUY", "PREVIEW", "COMBO_BUY", "COMBO_PREVIEW"}:
@@ -986,6 +1063,42 @@ def _effective_executor_result_ok(action: str, body_ok: bool, result: dict[str, 
         return Decimal(str(result.get("filled_shares") or "0")) > 0
     except Exception:
         return False
+
+
+@app.post("/api/executor/submission/{request_id}")
+def executor_submission(
+    request_id: str,
+    body: ExecutorSubmission,
+    _: dict[str, Any] = Depends(_executor_auth),
+):
+    with _QUEUE_LOCK:
+        data = _queue_load()
+        rec = data.get(request_id)
+        if not rec:
+            raise HTTPException(status_code=404, detail="Unknown executor request")
+        if rec.get("action") != "BUY":
+            raise HTTPException(status_code=409, detail="Submission receipts are only supported for BUY")
+        existing = rec.get("submission") or {}
+        if existing.get("order_id") and str(existing.get("order_id")) != str(body.order_id):
+            raise HTTPException(status_code=409, detail="Request already has a different bot order id")
+        stamp = _now_iso()
+        rec["submission"] = {
+            "order_id": str(body.order_id),
+            "trade_id": body.trade_id,
+            "asset_id": body.asset_id,
+            "accepted_at_unix": body.accepted_at_unix or time.time(),
+            "recorded_at": stamp,
+            "executor": "termux",
+        }
+        rec["updated_at"] = stamp
+        data[request_id] = rec
+        _queue_save(data)
+    print(
+        f"EXECUTOR_SUBMISSION request={request_id} order_id={body.order_id} "
+        f"trade={body.trade_id or '-'} asset={body.asset_id or '-'}",
+        flush=True,
+    )
+    return {"ok": True, "request_id": request_id, "order_id": body.order_id}
 
 
 @app.post("/api/executor/result/{request_id}")
