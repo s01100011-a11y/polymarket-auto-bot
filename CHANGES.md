@@ -1,3 +1,12 @@
+## 2026-10-01 — Duplicate WNBA/NBA PW buys keyed by signal ID
+
+- Slack live duplicate detection now keys repeat protection to the PW/Slack signal ID when one is available, rather than blocking every later call on the same team/outcome.
+- Multiple legitimate PW calls on Dallas Wings (or any other selection) can therefore each generate their own live trade.
+- The same Slack/PW call still cannot create a second active or already-open bot position.
+- Both initial live dispatch and failed-BUY resend queue scans use the same signal-specific rule.
+- Legacy/manual Slack-live payloads without a signal ID retain the broader market/outcome duplicate behavior.
+- Added regression tests proving that different PW calls on the same asset are allowed while the same PW call remains blocked.
+
 ## 2026-10-01 — Allow explicit resend after pre-submission v2 wrapper TypeError
 
 - The one-shot manual Slack BUY resend path now recognizes the known pre-submission v2 wrapper signature failure (`_buy() got an unexpected keyword argument 'request_id'`) as safely retryable.

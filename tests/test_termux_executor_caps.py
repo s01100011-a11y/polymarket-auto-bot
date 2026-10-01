@@ -288,6 +288,62 @@ class SlackLiveRestingLimitTests(unittest.TestCase):
         self.assertGreaterEqual(remote._lease_seconds_for(rec), 240)
 
 
+class PwSignalDuplicateTests(unittest.TestCase):
+    def test_different_pw_calls_same_asset_are_not_duplicates(self):
+        from app import dashboard_live_control_v4 as live_control
+
+        executions = {
+            "trade-first": {
+                "id": "trade-first",
+                "paper": False,
+                "source": "slack_live",
+                "status": "ORDER_SUBMITTED",
+                "slack_event_id": "Ev-first",
+                "quote": {"asset_id": "asset-dallas"},
+            }
+        }
+        with (
+            patch.object(live_control.remote, "_expire_stale_buys_persisted"),
+            patch.object(live_control.core, "_load", return_value=executions),
+            patch.object(live_control.remote, "_queue_load", return_value={}),
+        ):
+            self.assertFalse(
+                live_control._active_or_pending(
+                    "asset-dallas",
+                    "https://polymarket.com/sports/wnba/test",
+                    "Dallas Wings",
+                    signal_key="Ev-second",
+                )
+            )
+
+    def test_same_pw_call_same_asset_is_duplicate(self):
+        from app import dashboard_live_control_v4 as live_control
+
+        executions = {
+            "trade-first": {
+                "id": "trade-first",
+                "paper": False,
+                "source": "slack_live",
+                "status": "ORDER_SUBMITTED",
+                "slack_event_id": "Ev-first",
+                "quote": {"asset_id": "asset-dallas"},
+            }
+        }
+        with (
+            patch.object(live_control.remote, "_expire_stale_buys_persisted"),
+            patch.object(live_control.core, "_load", return_value=executions),
+            patch.object(live_control.remote, "_queue_load", return_value={}),
+        ):
+            self.assertTrue(
+                live_control._active_or_pending(
+                    "asset-dallas",
+                    "https://polymarket.com/sports/wnba/test",
+                    "Dallas Wings",
+                    signal_key="Ev-first",
+                )
+            )
+
+
 class SlackFailedBuyRetryTests(unittest.TestCase):
     def test_v2_wrapper_signature_failure_is_retryable(self):
         from app import dashboard_live_control_v4 as live_control
