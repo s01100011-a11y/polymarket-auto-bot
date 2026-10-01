@@ -70,7 +70,8 @@ def _execution_sport(rec: dict[str, Any], ingest: Any) -> str | None:
         return direct
 
     event_id = str(rec.get("slack_event_id") or rec.get("strategy_pick_id") or "")
-    if not event_id.startswith("pwexport-"):
+    source = str(rec.get("source") or "")
+    if source != "slack_live" and not event_id.startswith("pwexport-"):
         return None
 
     decision = rec.get("pw_strategy_decision") or {}
