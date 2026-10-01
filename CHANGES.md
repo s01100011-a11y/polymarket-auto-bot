@@ -1,3 +1,10 @@
+## 2026-10-01 — Retire legacy Termux supervisors on singleton startup
+
+- The Termux launcher now detects and terminates older `start_termux_executor.sh` supervisor shells before launching the singleton worker.
+- Legacy supervisors that ignore TERM are escalated to KILL after a short grace period, preventing them from respawning old workers behind the new supervisor.
+- New supervisor revisions now exit cleanly on INT/TERM instead of merely running cleanup and continuing.
+- Existing stale worker cleanup remains in place before the singleton executor starts.
+
 ## 2026-10-01 — Singleton Termux executor and longer live-order lease
 
 - Added an OS-level exclusive worker lock so only one Termux executor process can consume the shared queue and journal at a time.

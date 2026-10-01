@@ -21,7 +21,13 @@ cleanup() {
     termux-wake-unlock || true
   fi
 }
-trap cleanup EXIT INT TERM
+
+terminate_supervisor() {
+  exit 0
+}
+
+trap cleanup EXIT
+trap terminate_supervisor INT TERM
 
 cd "${ROOT}" || exit 1
 if [ ! -x "${VENV}/bin/python" ]; then
@@ -56,6 +62,23 @@ if [ "${AUTO_UPDATE}" = "true" ] && [ -d "${ROOT}/.git" ]; then
       echo "$(date -Is) auto-update failed; continuing with existing checked-out code" | tee -a "${LOG_FILE}"
     fi
   fi
+fi
+
+# Retire any legacy supervisor shells first. Older launcher revisions trapped
+# TERM without exiting, so escalate to KILL if one survives briefly. This is
+# required once during migration to the singleton-worker launcher.
+if command -v pgrep >/dev/null 2>&1; then
+  for pid in $(pgrep -f '[s]cripts/start_termux_executor.sh' 2>/dev/null || true); do
+    if [ "${pid}" = "$" ] || [ "${pid}" = "${PPID}" ]; then
+      continue
+    fi
+    echo "$(date -Is) stopping legacy executor supervisor pid=${pid}" | tee -a "${LOG_FILE}"
+    kill "${pid}" 2>/dev/null || true
+    sleep 0.2
+    if kill -0 "${pid}" 2>/dev/null; then
+      kill -9 "${pid}" 2>/dev/null || true
+    fi
+  done
 fi
 
 # Kill stale direct workers before starting the supervised v2 wrapper.
