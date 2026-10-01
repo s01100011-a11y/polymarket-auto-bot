@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app import termux_executor_dashboard as remote
 
@@ -32,7 +32,7 @@ class TermuxExecutorBuyRetryTests(unittest.TestCase):
 
     def test_buy_retries_connect_timeout_during_preflight(self):
         response = type("Order", (), {"order_id": "order-1"})()
-        secure = unittest.mock.MagicMock()
+        secure = MagicMock()
         secure.return_value.__enter__.return_value.place_limit_order.return_value = response
         with (
             patch.object(
@@ -55,7 +55,7 @@ class TermuxExecutorBuyRetryTests(unittest.TestCase):
 
     def test_buy_retries_connect_timeout_during_submission(self):
         response = type("Order", (), {"order_id": "order-2"})()
-        secure = unittest.mock.MagicMock()
+        secure = MagicMock()
         secure.return_value.__enter__.return_value.place_limit_order.side_effect = [
             executor.httpx.ConnectTimeout("timed out"),
             response,
@@ -74,9 +74,28 @@ class TermuxExecutorBuyRetryTests(unittest.TestCase):
             2,
         )
 
+    def test_buy_does_not_retry_ambiguous_read_timeout_during_submission(self):
+        secure = MagicMock()
+        secure.return_value.__enter__.return_value.place_limit_order.side_effect = (
+            executor.httpx.ReadTimeout("timed out")
+        )
+        with (
+            patch.object(executor, "_validate_buy", return_value=self._quote()),
+            patch.object(executor, "_position_size", return_value=Decimal("0")),
+            patch.object(executor, "_secure", secure),
+            patch.object(executor.time, "sleep", return_value=None),
+            self.assertRaisesRegex(RuntimeError, "BUY_SUBMISSION_AMBIGUOUS_TIMEOUT"),
+        ):
+            executor._buy({"trade_id": "ambiguous-submit"}, "private", "wallet")
+
+        self.assertEqual(
+            secure.return_value.__enter__.return_value.place_limit_order.call_count,
+            1,
+        )
+
     def test_buy_never_resubmits_after_submission_when_reconcile_times_out(self):
         response = type("Order", (), {"order_id": "order-3"})()
-        secure = unittest.mock.MagicMock()
+        secure = MagicMock()
         secure.return_value.__enter__.return_value.place_limit_order.return_value = response
 
         position_calls = [Decimal("0")] + [
