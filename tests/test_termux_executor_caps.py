@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
@@ -7,6 +8,24 @@ from unittest.mock import MagicMock, patch
 from app import termux_executor_dashboard as remote
 
 from scripts import termux_executor as executor
+
+
+class TermuxExecutorSingletonTests(unittest.TestCase):
+    def test_worker_lock_allows_only_one_executor_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock_path = executor.Path(tmp) / "executor.lock"
+            with patch.object(executor, "WORKER_LOCK_FILE", lock_path):
+                first = executor._acquire_worker_lock()
+                self.assertIsNotNone(first)
+                try:
+                    second = executor._acquire_worker_lock()
+                    self.assertIsNone(second)
+                finally:
+                    first.close()
+
+                third = executor._acquire_worker_lock()
+                self.assertIsNotNone(third)
+                third.close()
 
 
 class TermuxExecutorTransportTests(unittest.TestCase):
@@ -326,6 +345,12 @@ class SlackFailedBuyRetryTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "open_order_check_failed")
         self.assertNotIn("manual_retry_request_id", store[request_id])
+
+
+class ExecutorLeaseTests(unittest.TestCase):
+    def test_live_executor_lease_exceeds_single_buy_fill_window(self):
+        self.assertGreaterEqual(remote.LEASE_SECONDS, 30)
+        self.assertGreater(remote.LEASE_SECONDS, executor.FILL_WAIT_SECONDS)
 
 
 class TermuxExecutorCapTests(unittest.TestCase):
