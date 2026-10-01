@@ -346,6 +346,8 @@ def _slack_trade_handler(
         "asset_id": asset_id,
         "max_price": str(buy_price),
         "limit_order_ttl_seconds": 120,
+        "signal_buy_price": str(buy_price),
+        "signal_spread": str(spread),
         "budget_usdc": str(stake),
         "trade_id": trade_id,
         "max_spread": str(core.MAX_SPREAD),
