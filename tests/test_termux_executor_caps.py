@@ -30,7 +30,7 @@ class TermuxExecutorSingletonTests(unittest.TestCase):
 
 class TermuxExecutorV2ForwardingTests(unittest.TestCase):
     def test_v2_buy_forwards_provenance_arguments(self):
-        import termux_executor_v2 as executor_v2
+        from scripts import termux_executor_v2 as executor_v2
 
         payload = {"trade_id": "slack-live-test"}
         expected = {"ok": True, "asset_id": ""}
