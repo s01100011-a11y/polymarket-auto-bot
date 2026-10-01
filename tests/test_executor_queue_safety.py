@@ -66,6 +66,35 @@ class ExecutorQueueSafetyTests(unittest.TestCase):
         self.assertEqual(saved["trade-buy"]["status"], "ORDER_SUBMITTED")
         self.assertNotIn("execution_pending", saved["trade-buy"])
 
+    def test_executor_submission_receipt_persists_bot_order_id(self):
+        store = {
+            "exec-test": {
+                "id": "exec-test",
+                "action": "BUY",
+                "status": "LEASED",
+                "payload": {
+                    "source": "slack_live",
+                    "slack_event_id": "Ev-test",
+                    "trade_id": "slack-live-Ev-test",
+                },
+            }
+        }
+        body = remote.ExecutorSubmission(
+            order_id="0xbot-order",
+            trade_id="slack-live-Ev-test",
+            asset_id="asset-1",
+            accepted_at_unix=123.0,
+        )
+        with (
+            patch.object(remote, "_queue_load", side_effect=lambda: store),
+            patch.object(remote, "_queue_save", side_effect=lambda data: store.update(data)),
+        ):
+            result = remote.executor_submission("exec-test", body, {})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(store["exec-test"]["submission"]["order_id"], "0xbot-order")
+        self.assertEqual(store["exec-test"]["submission"]["asset_id"], "asset-1")
+
     def test_pending_buy_expires(self):
         data = {
             "exec-test": {
