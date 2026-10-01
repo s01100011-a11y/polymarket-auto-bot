@@ -569,8 +569,19 @@ def _classify_pick(pick: dict[str, Any]) -> tuple[str | None, str | None]:
     return kind, None
 
 
+_CFB_CANONICAL_HINTS = {
+    "unt": "North Texas",
+    "north texas mean green": "North Texas",
+}
+
+
+def _canonical_cfb_hint(value: Any) -> str:
+    raw = re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+    return _CFB_CANONICAL_HINTS.get(raw, str(value or "").strip())
+
+
 def _norm_text(value: Any) -> str:
-    text = str(value or "").casefold()
+    text = str(_canonical_cfb_hint(value) or "").casefold()
     # ESPN commonly spells the school as Hawai'i/Hawaiʻi while Telegram and
     # Polymarket often use Hawaii. Treat those spellings as the same team.
     text = text.replace("hawaiʻi", "hawaii").replace("hawai'i", "hawaii").replace("hawai’i", "hawaii")
@@ -1132,7 +1143,7 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
     with PublicClient() as client:
         events_by_key: dict[str, Any] = {}
         for query in hints:
-            result = client.list_events(title_search=query, closed=False, page_size=30).first_page()
+            result = client.list_events(title_search=_canonical_cfb_hint(query), closed=False, page_size=30).first_page()
             for event in result.items:
                 key = str(
                     getattr(event, "id", "")
@@ -1298,7 +1309,7 @@ def _find_spread_alternatives(
     with PublicClient() as client:
         events_by_key: dict[str, Any] = {}
         for query in hints:
-            result = client.list_events(title_search=query, closed=False, page_size=30).first_page()
+            result = client.list_events(title_search=_canonical_cfb_hint(query), closed=False, page_size=30).first_page()
             for event in result.items:
                 key = _event_key(event)
                 if key:
