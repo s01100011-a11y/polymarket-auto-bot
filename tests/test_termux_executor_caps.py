@@ -385,7 +385,7 @@ class SlackFailedBuyRetryTests(unittest.TestCase):
         self.assertEqual(store[original_id]["manual_retry_request_id"], result["request_id"])
         self.assertEqual(store[result["request_id"]]["payload"]["retry_of_request_id"], original_id)
 
-    def test_failed_slack_buy_does_not_requeue_when_position_exists(self):
+    def test_failed_slack_buy_requeues_even_when_wallet_has_manual_position(self):
         from app import dashboard_live_control_v4 as live_control
 
         original_id = "exec-original"
@@ -406,23 +406,23 @@ class SlackFailedBuyRetryTests(unittest.TestCase):
                 },
             }
         }
-        position = type("Position", (), {"current_size": "12.5"})()
         with (
             patch.object(live_control.core, "bot_enabled", return_value=True),
             patch.object(live_control.core, "live_trading_enabled", return_value=True),
             patch.object(live_control.core, "auto_trading_enabled", return_value=True),
             patch.object(live_control, "_executor_ready", return_value=(True, {})),
             patch.object(live_control, "_retry_asset_id", return_value="asset-1"),
-            patch.object(live_control.remote, "_authoritative_position", return_value=position),
-            patch.object(live_control.remote, "_queue_load", return_value=store),
+            patch.object(live_control, "_active_or_pending", return_value=False),
+            patch.object(live_control.remote, "_queue_load", side_effect=lambda: store),
+            patch.object(live_control.remote, "_queue_save", side_effect=lambda data: store.update(data)),
         ):
             result = live_control._retry_failed_slack_buy_once(original_id)
 
-        self.assertEqual(result["status"], "position_exists")
-        self.assertNotIn("manual_retry_request_id", store[original_id])
+        self.assertEqual(result["status"], "queued")
+        self.assertIn("manual_retry_request_id", store[original_id])
 
 
-    def test_interrupted_slack_buy_blocks_when_open_order_exists(self):
+    def test_interrupted_slack_buy_requeues_despite_external_open_order(self):
         from app import dashboard_live_control_v4 as live_control
 
         request_id = "exec-interrupted"
@@ -433,8 +433,7 @@ class SlackFailedBuyRetryTests(unittest.TestCase):
                 "status": "FAILED",
                 "error": (
                     "This trade request was interrupted after execution began. "
-                    "Automatic retry was blocked to prevent a duplicate order; "
-                    "reconcile the wallet position manually."
+                    "Automatic retry was blocked to prevent a duplicate order."
                 ),
                 "payload": {
                     "source": "slack_live",
@@ -447,22 +446,19 @@ class SlackFailedBuyRetryTests(unittest.TestCase):
                 },
             }
         }
-        order = type("OpenOrder", (), {"order_id": "live-order-1"})()
         with (
             patch.object(live_control.core, "bot_enabled", return_value=True),
             patch.object(live_control.core, "live_trading_enabled", return_value=True),
             patch.object(live_control.core, "auto_trading_enabled", return_value=True),
             patch.object(live_control, "_executor_ready", return_value=(True, {})),
             patch.object(live_control, "_retry_asset_id", return_value="asset-1"),
-            patch.object(live_control.remote, "_authoritative_position", return_value=None),
-            patch.object(live_control, "_open_orders_for_asset", return_value=[order]),
-            patch.object(live_control.remote, "_queue_load", return_value=store),
+            patch.object(live_control, "_active_or_pending", return_value=False),
+            patch.object(live_control.remote, "_queue_load", side_effect=lambda: store),
+            patch.object(live_control.remote, "_queue_save", side_effect=lambda data: store.update(data)),
         ):
             result = live_control._retry_failed_slack_buy_once(request_id)
 
-        self.assertEqual(result["status"], "open_order_exists")
-        self.assertEqual(result["order_ids"], ["live-order-1"])
-        self.assertNotIn("manual_retry_request_id", store[request_id])
+        self.assertEqual(result["status"], "queued")
 
     def test_interrupted_slack_buy_requeues_only_after_empty_reconciliation(self):
         from app import dashboard_live_control_v4 as live_control
@@ -510,7 +506,7 @@ class SlackFailedBuyRetryTests(unittest.TestCase):
             "manual_resend_after_interrupted_execution_reconciled",
         )
 
-    def test_interrupted_slack_buy_fails_closed_when_open_order_check_errors(self):
+    def test_interrupted_slack_buy_does_not_depend_on_external_open_order_lookup(self):
         from app import dashboard_live_control_v4 as live_control
 
         request_id = "exec-interrupted"
@@ -537,18 +533,13 @@ class SlackFailedBuyRetryTests(unittest.TestCase):
             patch.object(live_control.core, "auto_trading_enabled", return_value=True),
             patch.object(live_control, "_executor_ready", return_value=(True, {})),
             patch.object(live_control, "_retry_asset_id", return_value="asset-1"),
-            patch.object(live_control.remote, "_authoritative_position", return_value=None),
-            patch.object(
-                live_control,
-                "_open_orders_for_asset",
-                side_effect=RuntimeError("order query unavailable"),
-            ),
-            patch.object(live_control.remote, "_queue_load", return_value=store),
+            patch.object(live_control, "_active_or_pending", return_value=False),
+            patch.object(live_control.remote, "_queue_load", side_effect=lambda: store),
+            patch.object(live_control.remote, "_queue_save", side_effect=lambda data: store.update(data)),
         ):
             result = live_control._retry_failed_slack_buy_once(request_id)
 
-        self.assertEqual(result["status"], "open_order_check_failed")
-        self.assertNotIn("manual_retry_request_id", store[request_id])
+        self.assertEqual(result["status"], "queued")
 
 
 class SlackFastHandoffAuthorizationTests(unittest.TestCase):
