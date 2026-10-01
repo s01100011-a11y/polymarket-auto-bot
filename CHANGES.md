@@ -1,3 +1,11 @@
+## 2026-10-01 — Reconcile interrupted Slack BUY before resend
+
+- Failed Slack BUYs interrupted after execution began can now be considered for a fresh resend only after authoritative reconciliation.
+- The retry path checks the wallet for existing outcome shares and the authenticated CLOB for any still-open order on the same asset.
+- Any existing position or open order blocks a new BUY; any reconciliation error fails closed and places no new order.
+- Only when both checks prove empty can the interrupted request be requeued with a new request/trade ID.
+- Added regression coverage for open-order blocking, empty-state resend, and reconciliation-query failure.
+
 ## 2026-10-01 — One-shot safe resend for failed Slack live BUYs
 
 - Added a one-shot resend path keyed by `SLACK_RETRY_REQUEST_ID` for a specific failed Slack live BUY.
