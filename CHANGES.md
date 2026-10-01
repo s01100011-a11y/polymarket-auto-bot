@@ -1,3 +1,9 @@
+## 2026-10-01 — Forward BUY provenance through Termux v2 wrapper
+
+- Updated `scripts/termux_executor_v2.py` so its BUY wrapper accepts and forwards `request_id` and `executor_token` to the base executor.
+- This fixes live BUY failures caused by the v2 wrapper retaining the old three-argument signature after accepted-order provenance tracking was added.
+- Added regression coverage for provenance-argument forwarding.
+
 ## 2026-10-01 — Bot-order provenance separated from manual wallet holdings
 
 - Existing wallet shares and open orders are no longer treated as proof that this bot already placed a WNBA/NBA PW signal.
