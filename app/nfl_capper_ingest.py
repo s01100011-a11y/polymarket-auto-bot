@@ -1446,12 +1446,6 @@ def _prepare_pick(
     if not core.auto_trading_enabled():
         raise RuntimeError("AUTO_TRADING is disabled")
 
-    ready, executor_state = live_control._executor_ready()
-    if not ready:
-        if executor_state.get("geo_blocked"):
-            raise RuntimeError("Termux executor is geoblocked")
-        raise RuntimeError("Termux executor is offline")
-
     units = _units_for_pick(pick)
     target_profit = _target_profit_for_pick(pick, unit_usdc)
 
@@ -3181,7 +3175,7 @@ function nflPickList(title,items,kind){
    }else{
     pnlLine='<div class="monitor-action flat">Trade P/L — · NOT TRADED</div>';
    }
-  }else if(!item.trade_executed&&String(item.status||'').toUpperCase()!=='QUEUED'){
+  }else if(!item.trade_executed&&!['QUEUED','WAITING_APPROVAL'].includes(String(item.status||'').toUpperCase())){
    pnlLine='<div class="monitor-action flat">NOT TRADED</div>';
   }
   const action=approveAction+sellAction+marketAction;
