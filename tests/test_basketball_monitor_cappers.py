@@ -129,3 +129,11 @@ def test_pw_retry_hydrates_monitor_metadata_before_requeue():
     assert 'hydrated["strategy_pick_id"]' in source
     assert 'hydrated["strategy_selection"]' in source
     assert "payload = _hydrate_monitor_retry_payload" in source
+
+
+def test_basketball_open_positions_show_stake_and_shares():
+    source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+
+    assert "const stake=item.stake_usdc" in source
+    assert "const shares=item.shares" in source
+    assert "' · Stake '+stake+' · Shares '+shares" in source
