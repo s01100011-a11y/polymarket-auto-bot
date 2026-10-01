@@ -206,7 +206,8 @@ _PAPER_HANDLER = ingest._paper_trade_from_alert
 
 
 def _prepare_remote_buy(payload: dict[str, Any]) -> dict[str, Any]:
-    if core.auto_trading_enabled():
+    odds_approval_required = bool(remote._buy_requires_min_odds_approval(payload))
+    if core.auto_trading_enabled() and not odds_approval_required:
         ready, state = _executor_ready()
 
         if not ready:
@@ -216,7 +217,6 @@ def _prepare_remote_buy(payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(
                 "Termux executor is offline; live BUY was not queued"
             )
-    odds_approval_required = bool(remote._buy_requires_min_odds_approval(payload))
     req_id = f"exec-{uuid.uuid4().hex[:14]}"
     record = {
         "id": req_id,
