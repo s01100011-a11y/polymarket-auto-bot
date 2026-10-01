@@ -2185,12 +2185,6 @@ def _prepare_pick(
     if not core.auto_trading_enabled():
         raise RuntimeError("AUTO_TRADING is disabled")
 
-    ready, executor_state = live_control._executor_ready()
-    if not ready:
-        if executor_state.get("geo_blocked"):
-            raise RuntimeError("Termux executor is geoblocked")
-        raise RuntimeError("Termux executor is offline")
-
     units = _units_for_pick(pick)
     target_profit = nfl._target_profit_for_pick(pick, unit_usdc)
 
