@@ -1242,6 +1242,154 @@ class NflBetterTotalFallbackTests(unittest.TestCase):
 
 
 
+    def test_team_total_tag_classifies_as_total_market(self):
+        kind, reason = capper._classify_pick(
+            _pick(
+                selection="STEELERS TEAM TOTAL UNDER 21.5",
+                teams=["PIT"],
+                bet_types=["team_total"],
+                spread_lines=[],
+                total_side="UNDER",
+                total_line=21.5,
+            )
+        )
+        self.assertEqual(kind, "total")
+        self.assertIsNone(reason)
+
+    def test_low_one_team_total_infers_team_total_scope(self):
+        pick = _pick(
+            selection="STEELERS UNDER 21.5",
+            teams=["PIT"],
+            bet_types=["total"],
+            spread_lines=[],
+            total_side="UNDER",
+            total_line=21.5,
+        )
+        self.assertTrue(capper._is_team_total_pick(pick))
+
+    def test_team_total_exact_match_rejects_game_total(self):
+        game_over = SimpleNamespace(label="Over", token_id="game-over")
+        game_under = SimpleNamespace(label="Under", token_id="game-under")
+        team_over = SimpleNamespace(label="Over", token_id="pit-over")
+        team_under = SimpleNamespace(label="Under", token_id="pit-under")
+        game_market = SimpleNamespace(
+            id="pit-ne-game-total",
+            question="Steelers vs Patriots: O/U 21.5",
+            slug="nfl-pit-ne-game-total-21pt5",
+            sports=SimpleNamespace(sports_market_type="total", line=21.5),
+            outcomes=SimpleNamespace(yes=game_over, no=game_under),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        team_market = SimpleNamespace(
+            id="pit-team-total",
+            question="Steelers Team Total: O/U 21.5",
+            slug="nfl-pit-ne-steelers-team-total-21pt5",
+            sports=SimpleNamespace(sports_market_type="total", line=21.5),
+            outcomes=SimpleNamespace(yes=team_over, no=team_under),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        event = SimpleNamespace(
+            id="pit-ne-2026-10-02",
+            slug="nfl-pit-ne-2026-10-02",
+            title="Pittsburgh Steelers vs New England Patriots",
+            markets=[game_market, team_market],
+        )
+        pick = _pick(
+            posted_at="2026-10-02T00:00:00+00:00",
+            selection="STEELERS UNDER 21.5",
+            teams=["PIT"],
+            bet_types=["total"],
+            spread_lines=[],
+            total_side="UNDER",
+            total_line=21.5,
+        )
+        with patch.object(
+            capper,
+            "PublicClient",
+            return_value=NflCapperMarketResolutionTests._client([event]),
+        ):
+            _, matched_market, label, outcome = capper._find_market(pick, "total")
+        self.assertEqual(matched_market.id, "pit-team-total")
+        self.assertEqual(label, "Under")
+        self.assertEqual(outcome.token_id, "pit-under")
+
+    def test_team_total_under_21_5_falls_forward_to_23_5(self):
+        over = SimpleNamespace(label="Over", token_id="pit-over-23-5")
+        under = SimpleNamespace(label="Under", token_id="pit-under-23-5")
+        market = SimpleNamespace(
+            id="pit-team-total-23-5",
+            question="Steelers Team Total: O/U 23.5",
+            slug="nfl-pit-ne-steelers-team-total-23pt5",
+            sports=SimpleNamespace(sports_market_type="total", line=23.5),
+            outcomes=SimpleNamespace(yes=over, no=under),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        event = SimpleNamespace(
+            id="pit-ne-2026-10-02",
+            slug="nfl-pit-ne-2026-10-02",
+            title="Pittsburgh Steelers vs New England Patriots",
+            markets=[market],
+        )
+        pick = _pick(
+            posted_at="2026-10-02T00:00:00+00:00",
+            selection="STEELERS UNDER 21.5",
+            teams=["PIT"],
+            bet_types=["total"],
+            spread_lines=[],
+            total_side="UNDER",
+            total_line=21.5,
+        )
+        with patch.object(
+            capper,
+            "PublicClient",
+            return_value=NflCapperMarketResolutionTests._client([event]),
+        ):
+            _, matched_market, label, outcome, line = capper._find_better_total_fallback(
+                pick,
+                max_distance=Decimal("2.0"),
+            )
+        self.assertEqual(matched_market.id, "pit-team-total-23-5")
+        self.assertEqual(label, "Under")
+        self.assertEqual(outcome.token_id, "pit-under-23-5")
+        self.assertEqual(line, Decimal("23.5"))
+
+    def test_team_total_fallback_blocks_more_than_two_points(self):
+        over = SimpleNamespace(label="Over", token_id="pit-over-24-5")
+        under = SimpleNamespace(label="Under", token_id="pit-under-24-5")
+        market = SimpleNamespace(
+            id="pit-team-total-24-5",
+            question="Steelers Team Total: O/U 24.5",
+            slug="nfl-pit-ne-steelers-team-total-24pt5",
+            sports=SimpleNamespace(sports_market_type="total", line=24.5),
+            outcomes=SimpleNamespace(yes=over, no=under),
+            state=SimpleNamespace(accepting_orders=True),
+        )
+        event = SimpleNamespace(
+            id="pit-ne-2026-10-02",
+            slug="nfl-pit-ne-2026-10-02",
+            title="Pittsburgh Steelers vs New England Patriots",
+            markets=[market],
+        )
+        pick = _pick(
+            selection="STEELERS UNDER 21.5",
+            teams=["PIT"],
+            bet_types=["total"],
+            spread_lines=[],
+            total_side="UNDER",
+            total_line=21.5,
+        )
+        with patch.object(
+            capper,
+            "PublicClient",
+            return_value=NflCapperMarketResolutionTests._client([event]),
+        ):
+            with self.assertRaisesRegex(ValueError, "No safer same-game NFL total"):
+                capper._find_better_total_fallback(
+                    pick,
+                    max_distance=Decimal("2.0"),
+                )
+
+
 class NflNoFillRetryTests(unittest.TestCase):
     def test_zero_fill_queue_result_is_retryable(self):
         self.assertTrue(
