@@ -797,6 +797,60 @@ def slack_pending_live():
     return {"pending": rows[:50]}
 
 
+def _sync_approval_source_state(
+    request_id: str,
+    *,
+    approved: bool,
+    decided_at: str,
+) -> None:
+    """Keep sport signal cards in sync with the executor approval queue."""
+    signal_status = "QUEUED" if approved else "APPROVAL_REJECTED"
+    for filename in ("nfl_capper_signals.json", "cfb_capper_preview_signals.json"):
+        path = core.DATA_DIR / filename
+        data = core._load(path)
+        if not isinstance(data, dict):
+            continue
+        changed = False
+        for key, row in data.items():
+            if not isinstance(row, dict) or str(row.get("request_id") or "") != request_id:
+                continue
+            row["status"] = signal_status
+            row["approval_required"] = False
+            row["approval_decision"] = "APPROVED" if approved else "REJECTED"
+            row["approval_decided_at"] = decided_at
+            row["updated_at"] = decided_at
+            data[key] = row
+            changed = True
+        if changed:
+            core._save(path, data)
+
+    alerts = core._load(ingest.SLACK_ALERTS_FILE)
+    if isinstance(alerts, dict):
+        changed = False
+        for key, row in alerts.items():
+            if not isinstance(row, dict):
+                continue
+            live_trade = row.get("live_trade") or {}
+            row_request_id = str(
+                row.get("executor_request_id")
+                or live_trade.get("request_id")
+                or ""
+            )
+            if row_request_id != request_id:
+                continue
+            row["status"] = "LIVE_TRADE_QUEUED" if approved else "LIVE_TRADE_REJECTED"
+            if isinstance(live_trade, dict):
+                live_trade["requires_approval"] = False
+                live_trade["queued"] = approved
+                live_trade["approval_decision"] = "APPROVED" if approved else "REJECTED"
+                live_trade["approval_decided_at"] = decided_at
+                row["live_trade"] = live_trade
+            alerts[key] = row
+            changed = True
+        if changed:
+            core._save(ingest.SLACK_ALERTS_FILE, alerts)
+
+
 def _approve_waiting_buy(request_id: str) -> dict[str, Any]:
     ready, state = _executor_ready()
     if not ready:
@@ -808,11 +862,13 @@ def _approve_waiting_buy(request_id: str) -> dict[str, Any]:
         rec = queue.get(request_id)
         if not rec or rec.get("action") != "BUY" or rec.get("status") != "WAITING_APPROVAL":
             raise HTTPException(status_code=404, detail="Prepared BUY is not awaiting approval")
+        decided_at = ingest._now_iso()
         rec["status"] = "PENDING"
-        rec["approved_at"] = ingest._now_iso()
-        rec["updated_at"] = ingest._now_iso()
+        rec["approved_at"] = decided_at
+        rec["updated_at"] = decided_at
         queue[request_id] = rec
         remote._queue_save(queue)
+    _sync_approval_source_state(request_id, approved=True, decided_at=decided_at)
     return {"ok": True, "request_id": request_id, "status": "PENDING"}
 
 
@@ -822,11 +878,13 @@ def _reject_waiting_buy(request_id: str) -> dict[str, Any]:
         rec = queue.get(request_id)
         if not rec or rec.get("action") != "BUY" or rec.get("status") != "WAITING_APPROVAL":
             raise HTTPException(status_code=404, detail="Prepared BUY is not awaiting approval")
+        decided_at = ingest._now_iso()
         rec["status"] = "CANCELLED"
-        rec["rejected_at"] = ingest._now_iso()
-        rec["updated_at"] = ingest._now_iso()
+        rec["rejected_at"] = decided_at
+        rec["updated_at"] = decided_at
         queue[request_id] = rec
         remote._queue_save(queue)
+    _sync_approval_source_state(request_id, approved=False, decided_at=decided_at)
     return {"ok": True, "request_id": request_id, "status": "CANCELLED"}
 
 
