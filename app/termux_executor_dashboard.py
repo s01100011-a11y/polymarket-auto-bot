@@ -59,7 +59,7 @@ def _decimal_odds_from_price(price: Any) -> Decimal | None:
 
 
 def _buy_requires_min_odds_approval(payload: dict[str, Any]) -> bool:
-    """Mark sub-threshold sports BUYs for explicit user approval instead of rejecting them."""
+    """Hold sports BUYs for approval when odds or the automatic price ceiling is breached."""
     raw_price = payload.get("signal_buy_price")
     if raw_price in {None, ""}:
         raw_price = payload.get("max_price")
@@ -69,12 +69,22 @@ def _buy_requires_min_odds_approval(payload: dict[str, Any]) -> bool:
 
     payload["signal_decimal_odds"] = str(decimal_odds)
     payload["minimum_decimal_odds"] = str(MIN_DECIMAL_ODDS)
+    reasons: list[str] = []
     if decimal_odds < MIN_DECIMAL_ODDS:
+        reasons.append("MIN_ODDS")
+    try:
+        requested_price = Decimal(str(payload.get("max_price") or raw_price))
+        automatic_ceiling = Decimal(str(payload.get("max_price_global") or core.MAX_PRICE))
+        if requested_price > automatic_ceiling:
+            reasons.append("PRICE_LIMIT")
+    except Exception:
+        pass
+    if reasons:
         payload["approval_required"] = True
-        payload["approval_reason"] = "MIN_ODDS"
+        payload["approval_reason"] = "+".join(reasons)
         payload["approval_message"] = (
-            f"Decimal odds {decimal_odds} are below the {MIN_DECIMAL_ODDS} minimum; "
-            "explicit approval is required."
+            f"Current decimal odds {decimal_odds}; automatic minimum is {MIN_DECIMAL_ODDS}. "
+            f"Approval gates: {', '.join(reasons)}. Explicit approval is required."
         )
         return True
     return False
