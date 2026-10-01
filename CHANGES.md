@@ -1,3 +1,11 @@
+## 2026-10-01 — Standardize stake and shares across all sport open-position cards
+
+- WNBA and NBA open positions show **Stake $X.XX · Shares X.XX**.
+- NFL and CFB open positions use the same wording/order instead of the older **Shares · Cost** presentation.
+- NFL/CFB retain current marked position value on the following line.
+- Rebuilt the basketball dashboard from the last clean revision after the first embedded-JavaScript edit failed syntax validation.
+- Added Python compile regression checks for all affected sport dashboard sources.
+
 ## 2026-10-01 — Show stake and share count on basketball open positions
 
 - WNBA/NBA **Open positions** cards now display the tracked stake and current share holding.
