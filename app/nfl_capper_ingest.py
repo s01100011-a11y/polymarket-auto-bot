@@ -3269,7 +3269,16 @@ async function nflSellPosition(tradeId,btn){
     await loadNflCapperStats();
     return;
    }
-   if(sd.status==='FAILED')throw new Error(sd.error||'SELL failed');
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     btn.textContent='SOLD';
+     await loadNflCapperStats();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
   }
   throw new Error('SELL timed out waiting for Termux');
  }catch(e){
