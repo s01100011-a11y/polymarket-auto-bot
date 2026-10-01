@@ -1,3 +1,11 @@
+## 2026-10-01 — One-shot safe resend for failed Slack live BUYs
+
+- Added a one-shot resend path keyed by `SLACK_RETRY_REQUEST_ID` for a specific failed Slack live BUY.
+- Resend is allowed only for an original `BUY` with `status=FAILED`, `source=slack_live`, and a `ConnectTimeout` error.
+- Before requeueing, the bot verifies dashboard/LIVE/AUTO gates, executor readiness, resolves the exact outcome token, checks the authoritative wallet for an existing position, and blocks if an equivalent BUY is already pending.
+- The original request is stamped with the new retry request/trade IDs, making the resend idempotent across redeploys.
+- Added regression coverage for one-time requeue and wallet-position duplicate prevention.
+
 ## 2026-10-01 — Safe retry for transient WNBA/NBA BUY connection timeouts
 
 - Live single-market BUY execution now retries transient `ConnectTimeout` failures during Polymarket preflight, pre-order position lookup, and order submission.
