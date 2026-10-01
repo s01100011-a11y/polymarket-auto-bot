@@ -1,3 +1,14 @@
+## 2026-10-01 — Bot-order provenance separated from manual wallet holdings
+
+- Existing wallet shares and open orders are no longer treated as proof that this bot already placed a WNBA/NBA PW signal.
+- Slack live handoff now blocks duplicates using bot-owned execution records, accepted-order receipts, and active bot queue requests for the same signal.
+- Existing manual/external shares are carried forward as `server_position_before` so the executor measures only incremental position changes.
+- Existing external open-order IDs are recorded as baseline diagnostics but do not block the bot by themselves.
+- Termux now persists the real Polymarket order ID locally immediately after acceptance and posts an authenticated submission receipt to Railway before waiting for fills.
+- Railway stores that order ID on the exact executor request, so future audits can distinguish bot-placed orders from manual/external positions even if later reconciliation fails.
+- Interrupted requests now report a known bot-owned order ID when one had already been accepted.
+- Added regression coverage for manual-position baselines, external open-order baselines, bot-owned submission blocking, Railway submission receipts, and local order-ID journaling.
+
 ## 2026-10-01 — Explicit resend support for reconciled TransportError timeouts
 
 - The one-shot manual Slack BUY resend path now recognizes `TransportError: timed out` in addition to explicit ConnectTimeout error codes.
