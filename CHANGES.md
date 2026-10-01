@@ -1,3 +1,12 @@
+## 2026-10-01 — Direct authenticated submit for server-authorized Slack live limits
+
+- Moved duplicate-position and open-order reconciliation for WNBA/NBA `slack_live` resting BUYs to Railway immediately before executor handoff.
+- Railway now requires a recent explicit non-blocked executor heartbeat, zero authoritative wallet shares for the outcome, and zero authenticated open orders before stamping a short-lived fast-preflight authorization.
+- The Termux executor validates that short-lived authorization, exact sports URL/asset, budget, cap, price, and TTL locally, then skips redundant phone-side geoblock, public market lookup, and pre-buy wallet-position calls.
+- Server-verified `position_before` is carried into post-submission reconciliation; once an order is accepted, duplicate BUY submission remains prohibited.
+- SDK `TransportError: timed out` during submission is now treated as ambiguous unless an underlying `ConnectTimeout` cause proves the request never reached the peer.
+- Added tests for no-network fast preflight, stale-authorization rejection, server handoff stamping, existing-position blocking, and open-order blocking.
+
 ## 2026-10-01 — Retry encoded preflight connection timeouts
 
 - Failed Slack BUY retries now recognize both the raw `ConnectTimeout` class spelling and executor error codes such as `BUY_PREFLIGHT_CONNECT_TIMEOUT`.

@@ -344,6 +344,7 @@ def _slack_trade_handler(
         "outcome": outcome_label,
         "market_type": "moneyline",
         "asset_id": asset_id,
+        "market_label": str(getattr(market, "question", None) or getattr(event, "title", "") or outcome_label),
         "max_price": str(buy_price),
         "limit_order_ttl_seconds": 120,
         "signal_buy_price": str(buy_price),

@@ -243,9 +243,16 @@ def _position_size(wallet: str, asset_id: str) -> Decimal:
 
 
 def _is_connect_timeout(exc: BaseException) -> bool:
-    # Preserve compatibility if the SDK re-raises the httpx exception through a
-    # thin wrapper while keeping the concrete class name.
-    return isinstance(exc, httpx.ConnectTimeout) or type(exc).__name__ == "ConnectTimeout"
+    # Preserve compatibility if the SDK re-raises an httpx connection timeout
+    # through a wrapper while retaining the original cause/context.
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, httpx.ConnectTimeout) or type(current).__name__ == "ConnectTimeout":
+            return True
+        current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+    return False
 
 
 def _retry_connect(stage: str, fn: Any) -> Any:
@@ -283,6 +290,78 @@ def _limit_order_seconds(payload: dict[str, Any]) -> int:
     return max(0, min(300, value))
 
 
+def _fast_slack_preflight(payload: dict[str, Any]) -> dict[str, Any] | None:
+    if str(payload.get("source") or "") != "slack_live":
+        return None
+    if not payload.get("server_fast_preflight"):
+        return None
+    if _limit_order_seconds(payload) <= 0:
+        return None
+
+    try:
+        authorized_at = float(payload.get("server_fast_preflight_unix") or 0)
+        max_age = float(payload.get("server_fast_preflight_max_age_seconds") or 45)
+    except Exception as exc:
+        raise RuntimeError("Invalid Slack fast-preflight authorization timestamp") from exc
+    age = time.time() - authorized_at
+    if authorized_at <= 0 or age < -5 or age > max_age:
+        raise RuntimeError(
+            f"Slack fast-preflight authorization is stale ({age:.1f}s > {max_age:.1f}s)"
+        )
+
+    market_type = _canonical_market_type(payload.get("market_type"))
+    if market_type not in {"moneyline", "spread", "total"}:
+        raise RuntimeError("Fast Slack BUY has unsupported market type")
+
+    budget = _validate_budget_caps(payload)
+    asset_id = str(payload.get("asset_id") or "").strip()
+    market_url = str(payload.get("market_url") or "")
+    outcome = str(payload.get("outcome") or "").strip()
+    if not asset_id:
+        raise RuntimeError("Fast Slack BUY is missing exact asset_id")
+    if core._sports_event_slug(market_url) is None:
+        raise RuntimeError("Fast Slack BUY requires a Polymarket /sports/ event URL")
+    if not outcome:
+        raise RuntimeError("Fast Slack BUY is missing outcome")
+
+    max_price = Decimal(str(payload.get("max_price") or "0"))
+    max_price_global = Decimal(str(payload.get("max_price_global") or "0.95"))
+    if max_price <= 0 or max_price >= 1 or max_price > max_price_global:
+        raise RuntimeError(f"Invalid max price {max_price}")
+
+    signal_price = Decimal(str(payload.get("signal_buy_price") or max_price))
+    if signal_price <= 0 or signal_price >= 1:
+        raise RuntimeError(f"Invalid signal BUY price {signal_price}")
+
+    shares = (budget / max_price).quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
+    if shares <= 0:
+        raise RuntimeError("Fast Slack BUY calculated zero shares")
+
+    try:
+        position_before = Decimal(str(payload.get("server_position_before") or "0"))
+    except Exception as exc:
+        raise RuntimeError("Invalid server_position_before") from exc
+    if position_before < 0:
+        raise RuntimeError("Invalid negative server_position_before")
+
+    return {
+        "market": str(payload.get("market_label") or "Slack live sports market"),
+        "market_type": market_type,
+        "outcome": outcome,
+        "asset_id": asset_id,
+        "current_buy_price": str(signal_price),
+        "spread": str(payload.get("signal_spread") or "0"),
+        "best_ask": "None",
+        "requested_shares": str(shares),
+        "budget_usdc": str(budget),
+        "max_price": str(max_price),
+        "limit_order_ttl_seconds": _limit_order_seconds(payload),
+        "will_rest_if_needed": True,
+        "server_fast_preflight": True,
+        "server_position_before": str(position_before),
+    }
+
+
 def _place_limit_order_with_connect_retry(
     private_key: str,
     wallet: str,
@@ -318,11 +397,14 @@ def _place_limit_order_with_connect_retry(
                 time.sleep(BUY_CONNECT_RETRY_DELAY_SECONDS)
                 continue
 
-            if isinstance(exc, httpx.TimeoutException) or type(exc).__name__ in {
-                "ReadTimeout",
-                "WriteTimeout",
-                "PoolTimeout",
-            }:
+            if (
+                isinstance(exc, httpx.TimeoutException)
+                or type(exc).__name__ in {"ReadTimeout", "WriteTimeout", "PoolTimeout"}
+                or (
+                    type(exc).__name__ == "TransportError"
+                    and "timed out" in str(exc).lower()
+                )
+            ):
                 raise RuntimeError(
                     "BUY_SUBMISSION_AMBIGUOUS_TIMEOUT: "
                     f"{type(exc).__name__}: {exc}; automatic retry blocked to prevent a duplicate order"
@@ -760,18 +842,35 @@ def _preview(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, Any]:
     trade_id = str(payload.get("trade_id") or "")
-    print(f"BUY_STAGE trade={trade_id or '-'} stage=PREFLIGHT status=START", flush=True)
-    quote = _retry_connect("PREFLIGHT", lambda: _validate_buy(payload))
+    fast_quote = _fast_slack_preflight(payload)
+    if fast_quote is not None:
+        print(
+            f"BUY_STAGE trade={trade_id or '-'} stage=PREFLIGHT_FAST status=AUTHORIZED",
+            flush=True,
+        )
+        quote = fast_quote
+    else:
+        print(f"BUY_STAGE trade={trade_id or '-'} stage=PREFLIGHT status=START", flush=True)
+        quote = _retry_connect("PREFLIGHT", lambda: _validate_buy(payload))
+
     asset_id = quote["asset_id"]
     shares = Decimal(quote["requested_shares"])
     max_price = Decimal(quote["max_price"])
     limit_order_seconds = int(quote.get("limit_order_ttl_seconds") or 0)
 
-    print(f"BUY_STAGE trade={trade_id or '-'} stage=POSITION_BEFORE status=START", flush=True)
-    before = _retry_connect(
-        "POSITION_BEFORE",
-        lambda: _position_size(wallet, asset_id),
-    )
+    if quote.get("server_fast_preflight"):
+        before = Decimal(str(quote.get("server_position_before") or "0"))
+        print(
+            f"BUY_STAGE trade={trade_id or '-'} stage=POSITION_BEFORE status=SERVER_VERIFIED "
+            f"shares={before}",
+            flush=True,
+        )
+    else:
+        print(f"BUY_STAGE trade={trade_id or '-'} stage=POSITION_BEFORE status=START", flush=True)
+        before = _retry_connect(
+            "POSITION_BEFORE",
+            lambda: _position_size(wallet, asset_id),
+        )
 
     # The current SDK requires GTD expirations several minutes in the future.
     # We still enforce the user's shorter 120s policy locally, while the later
