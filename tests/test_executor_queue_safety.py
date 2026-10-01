@@ -304,3 +304,23 @@ class ExecutorQueueSafetyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+def test_above_automatic_price_limit_buy_waits_for_explicit_approval():
+    payload = {
+        "max_price": "0.60",
+        "max_price_global": "0.55",
+    }
+    assert remote._buy_requires_min_odds_approval(payload)
+    assert "PRICE_LIMIT" in payload["approval_reason"]
+    assert payload["signal_decimal_odds"] == "1.6667"
+
+
+def test_price_limit_only_can_require_approval_even_when_decimal_odds_are_above_minimum():
+    payload = {
+        "max_price": "0.56",
+        "max_price_global": "0.55",
+    }
+    with patch.object(remote, "MIN_DECIMAL_ODDS", Decimal("1.70")):
+        assert remote._buy_requires_min_odds_approval(payload)
+    assert payload["approval_reason"] == "PRICE_LIMIT"
+    assert payload["signal_decimal_odds"] == "1.7857"
