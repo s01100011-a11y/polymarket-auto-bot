@@ -10,7 +10,10 @@ from polymarket import PublicClient
 from polymarket._internal.actions import account as _account_actions
 from polymarket._internal.actions.orders.allowance import resolve_order_balance_allowance_target
 from polymarket._internal.wallet import signature_type_for
-import termux_executor as base
+try:
+    import termux_executor as base
+except ModuleNotFoundError:
+    from scripts import termux_executor as base
 
 # A SELL uses immediate FAK market execution, but never below this bounded floor.
 # Defaults allow at most 3 cents adverse movement from the best bid observed when
