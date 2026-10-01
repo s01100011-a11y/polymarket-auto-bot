@@ -851,25 +851,112 @@ def _sync_approval_source_state(
             core._save(ingest.SLACK_ALERTS_FILE, alerts)
 
 
+def _waiting_buy_live_quote(rec: dict[str, Any]) -> dict[str, Any]:
+    payload = rec.get("payload") or {}
+    asset_id = str(payload.get("asset_id") or "").strip()
+    if not asset_id:
+        raise HTTPException(status_code=409, detail="Prepared BUY has no exact Polymarket asset id")
+    try:
+        with ingest.PublicClient() as client:
+            book = client.get_order_book(asset_id=asset_id)
+            spread = Decimal(str(client.get_spread(asset_id=asset_id)))
+        asks = getattr(book, "asks", None) or []
+        best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not refresh live Polymarket quote: {type(exc).__name__}: {exc}") from exc
+    if best_ask is None or best_ask <= 0 or best_ask >= 1:
+        raise HTTPException(status_code=409, detail="No valid live Polymarket ask is available")
+    if spread > core.MAX_SPREAD:
+        raise HTTPException(status_code=409, detail=f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
+    decimal_odds = remote._decimal_odds_from_price(best_ask)
+    target_raw = payload.get("strategy_target_profit_usdc")
+    budget = Decimal(str(payload.get("budget_usdc") or "0"))
+    if target_raw not in {None, ""}:
+        target = Decimal(str(target_raw))
+        budget = (target * best_ask / (Decimal("1") - best_ask)).quantize(Decimal("0.01"), rounding=ROUND_UP)
+    if budget <= 0:
+        raise HTTPException(status_code=409, detail="Prepared BUY has an invalid stake")
+    if budget > core.MAX_AUTO_TRADE_USDC:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Live price requires ${budget} stake, above Auto trade cap ${core.MAX_AUTO_TRADE_USDC}",
+        )
+    return {
+        "best_ask": best_ask,
+        "spread": spread,
+        "decimal_odds": decimal_odds,
+        "budget_usdc": budget,
+        "polymarket_cents": (best_ask * Decimal("100")).quantize(Decimal("0.1")),
+    }
+
+
+@app.get("/api/executor/approval-quote/{request_id}", dependencies=[Depends(dashboard._auth)])
+def waiting_buy_approval_quote(request_id: str):
+    rec = remote._queue_load().get(request_id)
+    if not rec or rec.get("action") != "BUY" or rec.get("status") != "WAITING_APPROVAL":
+        raise HTTPException(status_code=404, detail="Prepared BUY is not awaiting approval")
+    live = _waiting_buy_live_quote(rec)
+    payload = rec.get("payload") or {}
+    return {
+        "ok": True,
+        "request_id": request_id,
+        "decimal_odds": str(live["decimal_odds"]) if live["decimal_odds"] is not None else None,
+        "polymarket_price": str(live["best_ask"]),
+        "polymarket_cents": str(live["polymarket_cents"]),
+        "spread": str(live["spread"]),
+        "budget_usdc": str(live["budget_usdc"]),
+        "target_profit_usdc": payload.get("strategy_target_profit_usdc"),
+        "units": payload.get("strategy_units"),
+        "approval_reason": payload.get("approval_reason"),
+    }
+
 def _approve_waiting_buy(request_id: str) -> dict[str, Any]:
     ready, state = _executor_ready()
     if not ready:
         if state.get("geo_blocked"):
             raise HTTPException(status_code=409, detail="Termux executor is geoblocked")
         raise HTTPException(status_code=409, detail="Termux executor is not connected")
+
+    initial = remote._queue_load().get(request_id)
+    if not initial or initial.get("action") != "BUY" or initial.get("status") != "WAITING_APPROVAL":
+        raise HTTPException(status_code=404, detail="Prepared BUY is not awaiting approval")
+    live = _waiting_buy_live_quote(initial)
+
     with remote._QUEUE_LOCK:
         queue = remote._queue_load()
         rec = queue.get(request_id)
         if not rec or rec.get("action") != "BUY" or rec.get("status") != "WAITING_APPROVAL":
             raise HTTPException(status_code=404, detail="Prepared BUY is not awaiting approval")
+        payload = dict(rec.get("payload") or {})
+        live_price = Decimal(str(live["best_ask"]))
+        payload["max_price"] = str(live_price)
+        payload["signal_buy_price"] = str(live_price)
+        payload["signal_decimal_odds"] = str(live["decimal_odds"])
+        payload["budget_usdc"] = str(live["budget_usdc"])
+        payload["approved_live_price"] = str(live_price)
+        payload["approved_live_decimal_odds"] = str(live["decimal_odds"])
+        payload["approved_price_override"] = live_price > core.MAX_PRICE
+        # Explicit approval widens only this request; dashboard defaults stay unchanged.
+        payload["max_price_global"] = str(max(core.MAX_PRICE, live_price))
         decided_at = ingest._now_iso()
+        payload["approved_at"] = decided_at
+        rec["payload"] = payload
         rec["status"] = "PENDING"
         rec["approved_at"] = decided_at
         rec["updated_at"] = decided_at
         queue[request_id] = rec
         remote._queue_save(queue)
     _sync_approval_source_state(request_id, approved=True, decided_at=decided_at)
-    return {"ok": True, "request_id": request_id, "status": "PENDING"}
+    return {
+        "ok": True,
+        "request_id": request_id,
+        "status": "PENDING",
+        "decimal_odds": str(live["decimal_odds"]) if live["decimal_odds"] is not None else None,
+        "polymarket_price": str(live["best_ask"]),
+        "budget_usdc": str(live["budget_usdc"]),
+    }
 
 
 def _reject_waiting_buy(request_id: str) -> dict[str, Any]:
