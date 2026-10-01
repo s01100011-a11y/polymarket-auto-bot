@@ -469,11 +469,19 @@ def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any
         "CONNECTTIMEOUT" in normalized_error.replace("_", "")
         or "CONNECT_TIMEOUT" in normalized_error
     )
+    # This helper is only invoked for an explicit one-shot manual resend request.
+    # Generic TransportError timeouts are therefore eligible only here, and only
+    # after the wallet/open-order reconciliation below proves the asset is clear.
+    manual_transport_timeout = (
+        type(error).__name__ == "str"
+        and "TRANSPORTERROR" in normalized_error.replace("_", "")
+        and "TIMED OUT" in normalized_error
+    )
     if (
         original.get("action") != "BUY"
         or original.get("status") != "FAILED"
         or payload.get("source") != "slack_live"
-        or not (connect_timeout or interrupted_after_start)
+        or not (connect_timeout or interrupted_after_start or manual_transport_timeout)
     ):
         return {"status": "not_retryable"}
 

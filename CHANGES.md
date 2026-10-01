@@ -1,3 +1,10 @@
+## 2026-10-01 — Explicit resend support for reconciled TransportError timeouts
+
+- The one-shot manual Slack BUY resend path now recognizes `TransportError: timed out` in addition to explicit ConnectTimeout error codes.
+- This does not create an automatic retry loop: it applies only when a specific failed request ID is explicitly armed for resend.
+- The existing authoritative wallet-position and authenticated open-order reconciliation still runs first and blocks the resend if any exposure/order already exists.
+- Added regression coverage for the explicit reconciled TransportError resend path.
+
 ## 2026-10-01 — Direct authenticated submit for server-authorized Slack live limits
 
 - Moved duplicate-position and open-order reconciliation for WNBA/NBA `slack_live` resting BUYs to Railway immediately before executor handoff.
