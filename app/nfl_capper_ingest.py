@@ -2240,6 +2240,8 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
     no_fill_retry_limit = max(0, int(os.getenv("NFL_CAPPER_NO_FILL_RETRIES", "2")))
     test_preview_raw = os.getenv("NFL_CAPPER_TEST_PREVIEW_JSON", "").strip()
     test_preview_marker = core.DATA_DIR / "nfl_capper_test_preview.json"
+    manual_resend_raw = os.getenv("NFL_CAPPER_MANUAL_RESEND_JSON", "").strip()
+    manual_resend_marker = core.DATA_DIR / "nfl_capper_manual_resend.json"
 
     def _load_signals() -> dict[str, Any]:
         data = core._load(signal_file)
@@ -2627,6 +2629,110 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         _STATUS["last_error"] = None
         _STATUS["cycles"] = int(_STATUS.get("cycles") or 0) + 1
 
+    async def _run_manual_resend_once() -> None:
+        """One-shot, environment-triggered resend through the normal NFL BUY path.
+
+        This exists for repairing a specific already-audited signal after a parser/
+        market-scope bug. A SHA marker on the persistent volume makes deploy/restart
+        retries idempotent, and the normal auto-trading, price, spread, sizing,
+        budget, approval and Termux-executor safeguards remain in force.
+        """
+        if not manual_resend_raw:
+            return
+
+        trigger_hash = hashlib.sha256(manual_resend_raw.encode("utf-8")).hexdigest()
+        existing_marker = core._load(manual_resend_marker) if manual_resend_marker.exists() else {}
+        if (
+            isinstance(existing_marker, dict)
+            and existing_marker.get("trigger_hash") == trigger_hash
+            and existing_marker.get("status") in {"QUEUED", "WAITING_APPROVAL", "DONE", "SKIPPED_DUPLICATE"}
+        ):
+            return
+
+        try:
+            request = json.loads(manual_resend_raw)
+            if not isinstance(request, dict):
+                raise RuntimeError("NFL_CAPPER_MANUAL_RESEND_JSON must decode to an object")
+            pick = dict(request.get("pick") or {})
+            if not pick:
+                raise RuntimeError("manual resend requires a pick object")
+            pick["posted_at"] = _now_iso()
+            if _source_label(pick) not in SOURCE_LABELS:
+                raise RuntimeError("manual resend source must resolve to Slam or Syndicate")
+            kind, reason = _classify_pick(pick)
+            if kind is None:
+                raise RuntimeError(reason or "manual resend pick is unsupported")
+            if kind == "total" and bool(request.get("require_team_total", False)) and not _is_team_total_pick(pick):
+                raise RuntimeError("manual resend requires team-total classification")
+
+            # Block a second corrected position/request for the same selection.
+            selection_norm = _norm(pick.get("selection"))
+            executions = core._load(core.EXECUTIONS_FILE)
+            if isinstance(executions, dict):
+                for rec in executions.values():
+                    if not isinstance(rec, dict) or rec.get("parent_trade_id"):
+                        continue
+                    if _norm(rec.get("strategy_selection")) != selection_norm:
+                        continue
+                    if str(rec.get("strategy_total_scope") or "") != "team_total":
+                        continue
+                    if str(rec.get("status") or "").upper() not in {
+                        "FAILED", "CLOSED", "CLOSED_RECONCILED",
+                        "SETTLED_WIN", "SETTLED_LOSS", "SETTLED_PUSH",
+                    }:
+                        marker = {
+                            "trigger_hash": trigger_hash,
+                            "created_at": _now_iso(),
+                            "status": "SKIPPED_DUPLICATE",
+                            "reason": "an open corrected team-total execution already exists",
+                            "trade_id": rec.get("id"),
+                        }
+                        core._save(manual_resend_marker, marker)
+                        print("NFL_CAPPER_MANUAL_RESEND " + json.dumps(marker, sort_keys=True, default=str), flush=True)
+                        return
+
+            try:
+                resend_unit = Decimal(str(request["unit_usdc"]))
+            except Exception as exc:
+                raise RuntimeError("manual resend requires unit_usdc") from exc
+            if resend_unit <= 0:
+                raise RuntimeError("manual resend unit_usdc must be positive")
+
+            result = await asyncio.to_thread(
+                _prepare_pick,
+                pick,
+                core=core,
+                remote=remote,
+                unit_usdc=resend_unit,
+                recovery=False,
+                better_spread_fallback_enabled=better_spread_fallback_enabled,
+                max_alt_spread_points=max_alt_spread_points,
+                max_alt_total_points=max_alt_total_points,
+            )
+            if bool(request.get("require_team_total", False)) and result.get("market_scope") != "team_total":
+                raise RuntimeError("resolved resend was not a team-total market")
+
+            marker = {
+                "trigger_hash": trigger_hash,
+                "created_at": _now_iso(),
+                "status": result.get("status"),
+                "pick": pick,
+                "unit_usdc": str(resend_unit),
+                "result": result,
+            }
+            core._save(manual_resend_marker, marker)
+            print("NFL_CAPPER_MANUAL_RESEND " + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str), flush=True)
+        except Exception as exc:
+            marker = {
+                "trigger_hash": trigger_hash,
+                "created_at": _now_iso(),
+                "status": "FAILED",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            core._save(manual_resend_marker, marker)
+            print("NFL_CAPPER_MANUAL_RESEND " + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str), flush=True)
+
+
     async def _run_test_preview_once() -> None:
         if not test_preview_raw:
             return
@@ -2738,12 +2844,16 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 _run_test_preview_once(),
                 name="nfl-capper-test-preview",
             )
+            manual_resend_task = asyncio.create_task(
+                _run_manual_resend_once(),
+                name="nfl-capper-manual-resend",
+            )
             try:
                 yield
             finally:
-                for pending in (task, preview_task):
+                for pending in (task, preview_task, manual_resend_task):
                     pending.cancel()
-                for pending in (task, preview_task):
+                for pending in (task, preview_task, manual_resend_task):
                     try:
                         await pending
                     except asyncio.CancelledError:
