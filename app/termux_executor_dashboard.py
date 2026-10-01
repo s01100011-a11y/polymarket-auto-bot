@@ -28,7 +28,7 @@ EXECUTOR_QUEUE_FILE = core.DATA_DIR / "termux_executor_queue.json"
 EXECUTOR_STATE_FILE = core.DATA_DIR / "termux_executor_state.json"
 _QUEUE_LOCK = threading.Lock()
 PAIR_TTL_SECONDS = 1800
-LEASE_SECONDS = 20
+LEASE_SECONDS = max(30, min(300, int(os.getenv("EXECUTOR_LEASE_SECONDS", "90"))))
 CONNECTED_SECONDS = 60
 EXECUTOR_BUY_TTL_SECONDS = max(
     30,

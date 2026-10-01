@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import fcntl
 import getpass
 import json
 import os
@@ -28,6 +29,7 @@ WORKER_CAPABILITIES = ("PREVIEW", "BUY", "SELL", "COMBO_PREVIEW", "COMBO_BUY")
 FILL_WAIT_SECONDS = max(3, min(15, int(os.getenv("EXECUTOR_FILL_WAIT_SECONDS", "8"))))
 TOKEN_FILE = Path(os.getenv("EXECUTOR_TOKEN_FILE", str(Path.home() / ".config/polymarket-termux/executor_token"))).expanduser()
 JOURNAL_FILE = Path(os.getenv("EXECUTOR_JOURNAL_FILE", str(Path.home() / ".config/polymarket-termux/executor_journal.json"))).expanduser()
+WORKER_LOCK_FILE = Path(os.getenv("EXECUTOR_WORKER_LOCK_FILE", str(Path.home() / ".config/polymarket-termux/executor_worker.lock"))).expanduser()
 BUILDER_KEY_FILE = Path(
     os.getenv(
         "POLYMARKET_BUILDER_KEY_FILE",
@@ -65,6 +67,23 @@ BUY_POSITION_RECONCILE_DELAY_SECONDS = max(
     0.2,
     min(5.0, float(os.getenv("EXECUTOR_BUY_POSITION_RECONCILE_DELAY_SECONDS", "0.75"))),
 )
+
+
+def _acquire_worker_lock():
+    """Guarantee only one Termux executor process can consume the shared queue/journal."""
+    WORKER_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    handle = WORKER_LOCK_FILE.open("a+")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(str(os.getpid()) + "\n")
+    handle.flush()
+    os.chmod(WORKER_LOCK_FILE, 0o600)
+    return handle
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -913,6 +932,14 @@ def _initial_geo_check() -> tuple[dict[str, Any] | None, str]:
 
 
 def main() -> None:
+    worker_lock = _acquire_worker_lock()
+    if worker_lock is None:
+        print(
+            f"Another Termux executor already holds {WORKER_LOCK_FILE}; refusing duplicate worker.",
+            flush=True,
+        )
+        raise SystemExit(4)
+
     private_key, wallet = _credentials()
     token = _load_token() or _pair()
 

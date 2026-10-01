@@ -80,6 +80,10 @@ while true; do
       echo "Delete ~/.config/polymarket-termux/executor_token and pair again." | tee -a "${LOG_FILE}"
       exit 3
       ;;
+    4)
+      echo "$(date -Is) another executor already owns the worker lock; duplicate supervisor exiting" | tee -a "${LOG_FILE}"
+      exit 4
+      ;;
     *)
       echo "$(date -Is) executor exited code=${code}; restarting in ${RESTART_DELAY}s" | tee -a "${LOG_FILE}"
       sleep "${RESTART_DELAY}"

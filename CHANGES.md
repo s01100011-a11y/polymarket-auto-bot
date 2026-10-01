@@ -1,3 +1,11 @@
+## 2026-10-01 — Singleton Termux executor and longer live-order lease
+
+- Added an OS-level exclusive worker lock so only one Termux executor process can consume the shared queue and journal at a time.
+- A duplicate executor exits immediately with a dedicated exit code; the supervisor now treats that as a duplicate-supervisor condition and exits instead of restart-looping.
+- Increased the executor queue lease from 20 seconds to a configurable 90-second default so a valid BUY cannot be reclaimed while its first worker is still completing network checks/fill reconciliation.
+- This fixes repeated `interrupted after execution began` failures caused by overlapping Termux workers using the same journal.
+- Added regression coverage for exclusive worker locking and lease duration.
+
 ## 2026-10-01 — Reconcile interrupted Slack BUY before resend
 
 - Failed Slack BUYs interrupted after execution began can now be considered for a fresh resend only after authoritative reconciliation.
