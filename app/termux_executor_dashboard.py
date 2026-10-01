@@ -618,6 +618,20 @@ def request_status(request_id: str):
     }
 
 
+def _lease_seconds_for(rec: dict[str, Any]) -> int:
+    lease = LEASE_SECONDS
+    if rec.get("action") == "BUY":
+        payload = rec.get("payload") or {}
+        try:
+            ttl = int(payload.get("limit_order_ttl_seconds") or 0)
+        except Exception:
+            ttl = 0
+        if ttl > 0:
+            # Cover the local resting-window plus preflight/cancel/reconciliation.
+            lease = max(lease, min(420, ttl + 120))
+    return lease
+
+
 @app.get("/api/executor/next")
 def executor_next(_: dict[str, Any] = Depends(_executor_auth)):
     now = time.time()
@@ -646,7 +660,7 @@ def executor_next(_: dict[str, Any] = Depends(_executor_auth)):
             return {"ok": True, "request": None}
         rec = sorted(candidates, key=lambda x: x.get("created_unix", 0))[0]
         rec["status"] = "LEASED"
-        rec["lease_until_unix"] = now + LEASE_SECONDS
+        rec["lease_until_unix"] = now + _lease_seconds_for(rec)
         rec["updated_at"] = _now_iso()
         data[rec["id"]] = rec
         _queue_save(data)
