@@ -230,8 +230,21 @@ def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, A
 _original_buy = base._buy
 
 
-def _buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, Any]:
-    result = _original_buy(payload, private_key, wallet)
+def _buy(
+    payload: dict[str, Any],
+    private_key: str,
+    wallet: str,
+    *,
+    request_id: str | None = None,
+    executor_token: str | None = None,
+) -> dict[str, Any]:
+    result = _original_buy(
+        payload,
+        private_key,
+        wallet,
+        request_id=request_id,
+        executor_token=executor_token,
+    )
     asset_id = str(result.get("asset_id") or "")
     if result.get("ok") and asset_id:
         try:
