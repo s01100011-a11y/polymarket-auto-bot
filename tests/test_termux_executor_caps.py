@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app import termux_executor_dashboard as remote
 
@@ -20,6 +20,104 @@ class TermuxExecutorTransportTests(unittest.TestCase):
         transport.assert_called_once_with(local_address="0.0.0.0", retries=2)
         client.assert_called_once_with(transport=transport.return_value, timeout=17)
         self.assertIs(result, client.return_value)
+
+
+class TermuxExecutorBuyRetryTests(unittest.TestCase):
+    def _quote(self):
+        return {
+            "asset_id": "asset-1",
+            "requested_shares": "10",
+            "max_price": "0.50",
+        }
+
+    def test_buy_retries_connect_timeout_during_preflight(self):
+        response = type("Order", (), {"order_id": "order-1"})()
+        secure = MagicMock()
+        secure.return_value.__enter__.return_value.place_limit_order.return_value = response
+        with (
+            patch.object(
+                executor,
+                "_validate_buy",
+                side_effect=[executor.httpx.ConnectTimeout("timed out"), self._quote()],
+            ) as validate,
+            patch.object(executor, "_position_size", side_effect=[Decimal("0"), Decimal("10")]),
+            patch.object(executor, "_secure", secure),
+            patch.object(executor.time, "sleep", return_value=None),
+        ):
+            result = executor._buy({"trade_id": "retry-preflight"}, "private", "wallet")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(validate.call_count, 2)
+        self.assertEqual(
+            secure.return_value.__enter__.return_value.place_limit_order.call_count,
+            1,
+        )
+
+    def test_buy_retries_connect_timeout_during_submission(self):
+        response = type("Order", (), {"order_id": "order-2"})()
+        secure = MagicMock()
+        secure.return_value.__enter__.return_value.place_limit_order.side_effect = [
+            executor.httpx.ConnectTimeout("timed out"),
+            response,
+        ]
+        with (
+            patch.object(executor, "_validate_buy", return_value=self._quote()),
+            patch.object(executor, "_position_size", side_effect=[Decimal("0"), Decimal("10")]),
+            patch.object(executor, "_secure", secure),
+            patch.object(executor.time, "sleep", return_value=None),
+        ):
+            result = executor._buy({"trade_id": "retry-submit"}, "private", "wallet")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            secure.return_value.__enter__.return_value.place_limit_order.call_count,
+            2,
+        )
+
+    def test_buy_does_not_retry_ambiguous_read_timeout_during_submission(self):
+        secure = MagicMock()
+        secure.return_value.__enter__.return_value.place_limit_order.side_effect = (
+            executor.httpx.ReadTimeout("timed out")
+        )
+        with (
+            patch.object(executor, "_validate_buy", return_value=self._quote()),
+            patch.object(executor, "_position_size", return_value=Decimal("0")),
+            patch.object(executor, "_secure", secure),
+            patch.object(executor.time, "sleep", return_value=None),
+            self.assertRaisesRegex(RuntimeError, "BUY_SUBMISSION_AMBIGUOUS_TIMEOUT"),
+        ):
+            executor._buy({"trade_id": "ambiguous-submit"}, "private", "wallet")
+
+        self.assertEqual(
+            secure.return_value.__enter__.return_value.place_limit_order.call_count,
+            1,
+        )
+
+    def test_buy_never_resubmits_after_submission_when_reconcile_times_out(self):
+        response = type("Order", (), {"order_id": "order-3"})()
+        secure = MagicMock()
+        secure.return_value.__enter__.return_value.place_limit_order.return_value = response
+
+        position_calls = [Decimal("0")] + [
+            executor.httpx.ConnectTimeout("timed out")
+            for _ in range(
+                (executor.BUY_CONNECT_RETRIES + 1)
+                * executor.BUY_POSITION_RECONCILE_ATTEMPTS
+            )
+        ]
+        with (
+            patch.object(executor, "_validate_buy", return_value=self._quote()),
+            patch.object(executor, "_position_size", side_effect=position_calls),
+            patch.object(executor, "_secure", secure),
+            patch.object(executor.time, "sleep", return_value=None),
+            self.assertRaisesRegex(RuntimeError, "not re-submitted"),
+        ):
+            executor._buy({"trade_id": "no-duplicate"}, "private", "wallet")
+
+        self.assertEqual(
+            secure.return_value.__enter__.return_value.place_limit_order.call_count,
+            1,
+        )
 
 
 class TermuxExecutorCapTests(unittest.TestCase):

@@ -1,3 +1,11 @@
+## 2026-10-01 — Safe retry for transient WNBA/NBA BUY connection timeouts
+
+- Live single-market BUY execution now retries transient `ConnectTimeout` failures during Polymarket preflight, pre-order position lookup, and order submission.
+- Submission retries are restricted to connection-establishment timeouts, where the request could not have reached the exchange; ambiguous read/write timeouts remain fail-closed to prevent duplicate orders.
+- After an order has been accepted, position reconciliation can retry network reads but the executor never submits a second BUY for the same request.
+- Added explicit BUY stage/retry logging so future failures identify preflight, position lookup, submission, reconciliation, or completion instead of reporting only a generic timeout.
+- Added regression coverage for preflight retry, safe submission retry, and the no-duplicate guard after submission.
+
 ## 2026-09-30 — More Stats bet-type breakdowns (#198)
 
 - Added ML, Spread, and Total performance breakdowns to every BY CAPPER row.

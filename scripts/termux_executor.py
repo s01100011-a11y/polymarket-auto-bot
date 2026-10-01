@@ -46,6 +46,26 @@ QUEUE_POLL_HEALTH: dict[str, Any] = {
     "consecutive_errors": 0,
 }
 
+# Live single-market BUYs may cross several public/private Polymarket endpoints
+# before and after the actual order submission. A ConnectTimeout is safe to retry
+# because the TCP connection was never established, so no request could have
+# reached the exchange. Read/write timeouts are intentionally NOT retried around
+# submission because their delivery state is ambiguous and a second BUY could
+# duplicate the position.
+BUY_CONNECT_RETRIES = max(0, min(4, int(os.getenv("EXECUTOR_BUY_CONNECT_RETRIES", "2"))))
+BUY_CONNECT_RETRY_DELAY_SECONDS = max(
+    0.1,
+    min(5.0, float(os.getenv("EXECUTOR_BUY_CONNECT_RETRY_DELAY_SECONDS", "0.8"))),
+)
+BUY_POSITION_RECONCILE_ATTEMPTS = max(
+    1,
+    min(10, int(os.getenv("EXECUTOR_BUY_POSITION_RECONCILE_ATTEMPTS", "4"))),
+)
+BUY_POSITION_RECONCILE_DELAY_SECONDS = max(
+    0.2,
+    min(5.0, float(os.getenv("EXECUTOR_BUY_POSITION_RECONCILE_DELAY_SECONDS", "0.75"))),
+)
+
 
 def _read_json(path: Path) -> dict[str, Any]:
     try:
@@ -193,6 +213,115 @@ def _position_size(wallet: str, asset_id: str) -> Decimal:
             if str(getattr(position, "asset_id", "")) == str(asset_id):
                 return Decimal(str(getattr(position, "current_size", "0") or "0"))
     return Decimal("0")
+
+
+def _is_connect_timeout(exc: BaseException) -> bool:
+    # Preserve compatibility if the SDK re-raises the httpx exception through a
+    # thin wrapper while keeping the concrete class name.
+    return isinstance(exc, httpx.ConnectTimeout) or type(exc).__name__ == "ConnectTimeout"
+
+
+def _retry_connect(stage: str, fn: Any) -> Any:
+    """Retry only transport failures that prove no request reached the peer."""
+    attempts = BUY_CONNECT_RETRIES + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            if not _is_connect_timeout(exc):
+                raise
+            if attempt >= attempts:
+                raise RuntimeError(
+                    f"BUY_{stage}_CONNECT_TIMEOUT after {attempt} attempts: {exc}"
+                ) from exc
+            print(
+                f"BUY_RETRY stage={stage} attempt={attempt}/{attempts} "
+                f"error={type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            time.sleep(BUY_CONNECT_RETRY_DELAY_SECONDS)
+    raise RuntimeError(f"BUY_{stage}_CONNECT_TIMEOUT retry loop exhausted")
+
+
+def _place_limit_order_with_connect_retry(
+    private_key: str,
+    wallet: str,
+    *,
+    asset_id: str,
+    price: Decimal,
+    shares: Decimal,
+) -> Any:
+    """Retry a BUY only when connection establishment itself timed out."""
+    attempts = BUY_CONNECT_RETRIES + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            with _secure(private_key, wallet) as client:
+                return client.place_limit_order(
+                    token_id=asset_id,
+                    price=str(price),
+                    size=str(shares),
+                    side="BUY",
+                )
+        except Exception as exc:
+            if _is_connect_timeout(exc):
+                if attempt >= attempts:
+                    raise RuntimeError(
+                        f"BUY_SUBMISSION_CONNECT_TIMEOUT after {attempt} attempts: {exc}"
+                    ) from exc
+                print(
+                    f"BUY_RETRY stage=SUBMISSION attempt={attempt}/{attempts} "
+                    f"error={type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                time.sleep(BUY_CONNECT_RETRY_DELAY_SECONDS)
+                continue
+
+            if isinstance(exc, httpx.TimeoutException) or type(exc).__name__ in {
+                "ReadTimeout",
+                "WriteTimeout",
+                "PoolTimeout",
+            }:
+                raise RuntimeError(
+                    "BUY_SUBMISSION_AMBIGUOUS_TIMEOUT: "
+                    f"{type(exc).__name__}: {exc}; automatic retry blocked to prevent a duplicate order"
+                ) from exc
+            raise
+    raise RuntimeError("BUY_SUBMISSION_CONNECT_TIMEOUT retry loop exhausted")
+
+
+def _position_size_after_submission(
+    wallet: str,
+    asset_id: str,
+    before: Decimal,
+) -> Decimal:
+    """Reconcile a submitted BUY without ever submitting a second order."""
+    last_error: Exception | None = None
+    after = before
+    for attempt in range(1, BUY_POSITION_RECONCILE_ATTEMPTS + 1):
+        try:
+            after = _retry_connect(
+                "POSITION_RECONCILE",
+                lambda: _position_size(wallet, asset_id),
+            )
+            if after > before:
+                return after
+            last_error = None
+        except Exception as exc:
+            last_error = exc
+            print(
+                f"BUY_RECONCILE attempt={attempt}/{BUY_POSITION_RECONCILE_ATTEMPTS} "
+                f"error={type(exc).__name__}: {exc}",
+                flush=True,
+            )
+        if attempt < BUY_POSITION_RECONCILE_ATTEMPTS:
+            time.sleep(BUY_POSITION_RECONCILE_DELAY_SECONDS)
+
+    if last_error is not None:
+        raise RuntimeError(
+            "BUY_POST_SUBMISSION_RECONCILE_FAILED: order may have been accepted; "
+            f"automatic new BUY blocked. Last error: {type(last_error).__name__}: {last_error}"
+        ) from last_error
+    return after
 
 
 def _cancel_quietly(client: SecureClient, order_id: str | None) -> None:
@@ -571,23 +700,58 @@ def _preview(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, Any]:
-    quote = _validate_buy(payload)
+    trade_id = str(payload.get("trade_id") or "")
+    print(f"BUY_STAGE trade={trade_id or '-'} stage=PREFLIGHT status=START", flush=True)
+    quote = _retry_connect("PREFLIGHT", lambda: _validate_buy(payload))
     asset_id = quote["asset_id"]
     shares = Decimal(quote["requested_shares"])
     max_price = Decimal(quote["max_price"])
-    before = _position_size(wallet, asset_id)
-    order_id = None
+
+    print(f"BUY_STAGE trade={trade_id or '-'} stage=POSITION_BEFORE status=START", flush=True)
+    before = _retry_connect(
+        "POSITION_BEFORE",
+        lambda: _position_size(wallet, asset_id),
+    )
+
+    print(f"BUY_STAGE trade={trade_id or '-'} stage=SUBMISSION status=START", flush=True)
+    response = _place_limit_order_with_connect_retry(
+        private_key,
+        wallet,
+        asset_id=asset_id,
+        price=max_price,
+        shares=shares,
+    )
+    order_id = str(getattr(response, "order_id", "") or "")
+    print(
+        f"BUY_STAGE trade={trade_id or '-'} stage=SUBMISSION status=ACCEPTED order_id={order_id or '-'}",
+        flush=True,
+    )
+
+    # Once place_limit_order returns, never submit a second BUY for this request.
+    # Reconciliation/cancellation may be retried, but another order cannot be
+    # created from this execution path.
+    after = before
+    deadline = time.time() + FILL_WAIT_SECONDS
+    reconcile_error: Exception | None = None
+    while time.time() < deadline:
+        time.sleep(0.75)
+        try:
+            after = _position_size_after_submission(wallet, asset_id, before)
+            reconcile_error = None
+        except Exception as exc:
+            reconcile_error = exc
+            break
+        if after > before:
+            break
+
     with _secure(private_key, wallet) as client:
-        response = client.place_limit_order(token_id=asset_id, price=str(max_price), size=str(shares), side="BUY")
-        order_id = str(getattr(response, "order_id", "") or "")
-        deadline = time.time() + FILL_WAIT_SECONDS
-        after = before
-        while time.time() < deadline:
-            time.sleep(0.75)
-            after = _position_size(wallet, asset_id)
-            if after > before:
-                break
         _cancel_quietly(client, order_id)
+
+    if reconcile_error is not None:
+        raise RuntimeError(
+            f"{reconcile_error}; submitted order_id={order_id or 'unknown'} was not re-submitted"
+        ) from reconcile_error
+
     filled = max(Decimal("0"), after - before)
     result = dict(quote)
     result.update({
@@ -602,6 +766,11 @@ def _buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, An
         "trade_id": payload.get("trade_id"),
         "executor": WORKER_NAME,
     })
+    print(
+        f"BUY_STAGE trade={trade_id or '-'} stage=COMPLETE status={result['status']} "
+        f"filled_shares={filled}",
+        flush=True,
+    )
     return result
 
 
