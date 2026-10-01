@@ -698,7 +698,15 @@ async function monitorSell(tradeId,btn){
    const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'}),sd=await sr.json();
    if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
    if(sd.status==='DONE'){await loadBasketballMonitors();return}
-   if(sd.status==='FAILED')throw new Error(sd.error||'SELL failed');
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     await loadBasketballMonitors();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
   }
   throw new Error('SELL timed out');
  }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
