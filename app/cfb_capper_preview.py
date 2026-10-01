@@ -1821,12 +1821,17 @@ def _read_live_buy_quote(asset_id: str) -> dict[str, str]:
     }
 
 
-def _refresh_live_buy_quote(asset_id: str, core: Any) -> dict[str, str]:
-    """Refresh executable BUY data and enforce live trading limits."""
+def _refresh_live_buy_quote(
+    asset_id: str,
+    core: Any,
+    *,
+    allow_price_approval: bool = False,
+) -> dict[str, str]:
+    """Refresh executable BUY data; optionally retain above-ceiling quotes for approval."""
     quote = _read_live_buy_quote(asset_id)
     best_ask = Decimal(quote["best_ask"])
     spread = Decimal(quote["spread"])
-    if best_ask > core.MAX_PRICE:
+    if best_ask > core.MAX_PRICE and not allow_price_approval:
         raise RuntimeError(f"Current best ask {best_ask} exceeds MAX_PRICE={core.MAX_PRICE}")
     if spread > core.MAX_SPREAD:
         raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
@@ -2190,7 +2195,7 @@ def _prepare_pick(
 
     match = _saved_market_match(matched, kind) or _resolve_market_match(pick, kind)
     asset_id = str(match["asset_id"])
-    quote = _refresh_live_buy_quote(asset_id, core)
+    quote = _refresh_live_buy_quote(asset_id, core, allow_price_approval=True)
     best_ask = Decimal(quote["best_ask"])
 
     stake = nfl._stake_to_win_at_price(target_profit, best_ask)
