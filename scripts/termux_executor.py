@@ -541,18 +541,27 @@ def _validate_buy(payload: dict[str, Any]) -> dict[str, Any]:
                 )
             asset_id, _, outcome_label = core._resolve_asset(market, outcome)
 
-        buy_price = Decimal(str(client.get_price(asset_id=asset_id, side="BUY")))
-        spread = Decimal(str(client.get_spread(asset_id=asset_id)))
-        book = client.get_order_book(asset_id=asset_id)
         min_size = Decimal(
             str(getattr(getattr(market, "trading", None), "minimum_order_size", "0") or "0")
         )
 
-    if buy_price <= 0 or buy_price >= 1:
-        raise RuntimeError(f"Invalid current BUY price {buy_price}")
+        if limit_order_seconds > 0 and expected_asset_id:
+            # Railway already resolved the exact token at signal time. For a
+            # resting limit, re-fetching price/spread/book only creates latency
+            # and can incorrectly reject an order whose whole purpose is to wait
+            # for the market to return to max_price.
+            buy_price = Decimal(str(payload.get("signal_buy_price") or max_price))
+            spread = Decimal(str(payload.get("signal_spread") or "0"))
+            best_ask = None
+        else:
+            buy_price = Decimal(str(client.get_price(asset_id=asset_id, side="BUY")))
+            spread = Decimal(str(client.get_spread(asset_id=asset_id)))
+            book = client.get_order_book(asset_id=asset_id)
+            asks = getattr(book, "asks", None) or []
+            best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
 
-    asks = getattr(book, "asks", None) or []
-    best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
+    if buy_price <= 0 or buy_price >= 1:
+        raise RuntimeError(f"Invalid BUY reference price {buy_price}")
 
     # Immediate BUYs keep the old crossing/spread checks. Time-limited live
     # limit orders intentionally do not: if price has moved above the signal
@@ -580,7 +589,7 @@ def _validate_buy(payload: dict[str, Any]) -> dict[str, Any]:
         "budget_usdc": str(budget),
         "max_price": str(max_price),
         "limit_order_ttl_seconds": limit_order_seconds,
-        "will_rest_if_needed": bool(limit_order_seconds > 0 and (best_ask is None or best_ask > max_price)),
+        "will_rest_if_needed": bool(limit_order_seconds > 0),
     }
 
 
@@ -806,8 +815,6 @@ def _buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, An
             last_reconcile_error = None
             reconcile_errors = 0
         except Exception as exc:
-            # The order already exists. A temporary position-read failure must
-            # not cause a re-submit or an early cancellation; keep waiting.
             last_reconcile_error = exc
             reconcile_errors += 1
             print(
@@ -815,12 +822,20 @@ def _buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, An
                 f"error_count={reconcile_errors} error={type(exc).__name__}: {exc}",
                 flush=True,
             )
+            # Preserve the old fail-fast behavior for immediate orders. Resting
+            # Slack limits keep their already-submitted order alive and retry
+            # position reconciliation without ever submitting another BUY.
+            if limit_order_seconds <= 0:
+                break
             continue
-        if after > before:
+
+        filled_so_far = max(Decimal("0"), after - before)
+        if filled_so_far >= shares - Decimal("0.0001"):
             break
 
     cancel_confirmed = True
-    if order_id:
+    filled_before_cancel = max(Decimal("0"), after - before)
+    if order_id and filled_before_cancel < shares - Decimal("0.0001"):
         attempts = BUY_CONNECT_RETRIES + 1
         cancel_confirmed = False
         for attempt in range(1, attempts + 1):
