@@ -2118,6 +2118,51 @@ def _nfl_signal_dashboard_item(
     }
 
 
+def _format_strategy_line(value: Any, *, signed: bool = False) -> str | None:
+    try:
+        number = Decimal(str(value))
+    except Exception:
+        return None
+    text = format(number.normalize(), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    if signed and number > 0:
+        text = "+" + text
+    return text
+
+
+def _exact_position_label(rec: dict[str, Any], quote: dict[str, Any]) -> str | None:
+    """Describe the exact Polymarket contract held, not only the capper's requested line."""
+    outcome = str(quote.get("resolved_outcome") or quote.get("requested_outcome") or "").strip()
+    market = str(quote.get("market") or "").strip()
+    market_type = str(quote.get("market_type") or "").strip().lower()
+
+    executed_total = rec.get("strategy_executed_total_line")
+    executed_spread = rec.get("strategy_executed_spread_line")
+
+    # Legacy fills may predate explicit executed-line metadata. Recover the
+    # contract line from the persisted Polymarket market question when possible.
+    if executed_total in {None, ""} and market_type == "total":
+        matches = re.findall(r"(?<![A-Za-z])([+-]?\d+(?:\.\d+)?)(?![A-Za-z])", market)
+        if matches:
+            executed_total = matches[-1]
+    if executed_spread in {None, ""} and market_type == "spread":
+        matches = re.findall(r"([+-]\d+(?:\.\d+)?)", market)
+        if matches:
+            executed_spread = matches[-1]
+
+    if executed_total not in {None, ""}:
+        line = _format_strategy_line(executed_total)
+        if line:
+            side = outcome or ("Under" if "under" in str(rec.get("strategy_selection") or "").lower() else "Over" if "over" in str(rec.get("strategy_selection") or "").lower() else "")
+            return (f"{side} {line}").strip()
+    if executed_spread not in {None, ""}:
+        line = _format_strategy_line(executed_spread, signed=True)
+        if line:
+            return (f"{outcome} {line}").strip()
+    return outcome or market or None
+
+
 def _position_items(
     executions: dict[str, Any],
     label: str,
@@ -2165,9 +2210,23 @@ def _position_items(
                     live_pnl_pct = str((Decimal(str(live_pnl)) / basis * Decimal("100")).quantize(Decimal("0.1")))
         except Exception:
             pass
+        units = rec.get("strategy_units")
+        unit_usdc = rec.get("strategy_unit_usdc")
+        target_profit = rec.get("strategy_target_profit_usdc")
+        if target_profit in {None, ""}:
+            try:
+                target_profit = str(
+                    (Decimal(str(units)) * Decimal(str(unit_usdc))).quantize(Decimal("0.01"))
+                )
+            except Exception:
+                target_profit = None
         items.append({
             "trade_id": trade_id,
             "selection": rec.get("strategy_selection") or quote.get("requested_outcome") or quote.get("market"),
+            "exact_position": _exact_position_label(rec, quote),
+            "units": units,
+            "unit_usdc": unit_usdc,
+            "target_profit_usdc": target_profit,
             "status": status,
             "result": result,
             "stake_usdc": stake,
