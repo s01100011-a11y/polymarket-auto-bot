@@ -120,6 +120,84 @@ class TermuxExecutorBuyRetryTests(unittest.TestCase):
         )
 
 
+class SlackFailedBuyRetryTests(unittest.TestCase):
+    def test_failed_connect_timeout_slack_buy_requeues_once(self):
+        from app import dashboard_live_control_v4 as live_control
+
+        original_id = "exec-original"
+        original = {
+            "id": original_id,
+            "action": "BUY",
+            "status": "FAILED",
+            "error": "ConnectTimeout: timed out",
+            "payload": {
+                "source": "slack_live",
+                "market_url": "https://polymarket.com/sports/wnba/test-event",
+                "outcome": "Dallas Wings",
+                "market_type": "moneyline",
+                "max_price": "0.40",
+                "budget_usdc": "10",
+                "trade_id": "slack-live-test",
+            },
+        }
+        store = {original_id: original}
+
+        with (
+            patch.object(live_control.core, "bot_enabled", return_value=True),
+            patch.object(live_control.core, "live_trading_enabled", return_value=True),
+            patch.object(live_control.core, "auto_trading_enabled", return_value=True),
+            patch.object(live_control, "_executor_ready", return_value=(True, {})),
+            patch.object(live_control, "_retry_asset_id", return_value="asset-1"),
+            patch.object(live_control.remote, "_authoritative_position", return_value=None),
+            patch.object(live_control, "_active_or_pending", return_value=False),
+            patch.object(live_control.remote, "_queue_load", side_effect=lambda: store),
+            patch.object(live_control.remote, "_queue_save", side_effect=lambda data: store.update(data)),
+        ):
+            result = live_control._retry_failed_slack_buy_once(original_id)
+            again = live_control._retry_failed_slack_buy_once(original_id)
+
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(again["status"], "already_retried")
+        self.assertEqual(store[original_id]["manual_retry_request_id"], result["request_id"])
+        self.assertEqual(store[result["request_id"]]["payload"]["retry_of_request_id"], original_id)
+
+    def test_failed_slack_buy_does_not_requeue_when_position_exists(self):
+        from app import dashboard_live_control_v4 as live_control
+
+        original_id = "exec-original"
+        store = {
+            original_id: {
+                "id": original_id,
+                "action": "BUY",
+                "status": "FAILED",
+                "error": "ConnectTimeout: timed out",
+                "payload": {
+                    "source": "slack_live",
+                    "market_url": "https://polymarket.com/sports/wnba/test-event",
+                    "outcome": "Dallas Wings",
+                    "market_type": "moneyline",
+                    "max_price": "0.40",
+                    "budget_usdc": "10",
+                    "trade_id": "slack-live-test",
+                },
+            }
+        }
+        position = type("Position", (), {"current_size": "12.5"})()
+        with (
+            patch.object(live_control.core, "bot_enabled", return_value=True),
+            patch.object(live_control.core, "live_trading_enabled", return_value=True),
+            patch.object(live_control.core, "auto_trading_enabled", return_value=True),
+            patch.object(live_control, "_executor_ready", return_value=(True, {})),
+            patch.object(live_control, "_retry_asset_id", return_value="asset-1"),
+            patch.object(live_control.remote, "_authoritative_position", return_value=position),
+            patch.object(live_control.remote, "_queue_load", return_value=store),
+        ):
+            result = live_control._retry_failed_slack_buy_once(original_id)
+
+        self.assertEqual(result["status"], "position_exists")
+        self.assertNotIn("manual_retry_request_id", store[original_id])
+
+
 class TermuxExecutorCapTests(unittest.TestCase):
     def test_budget_within_server_stamped_dashboard_cap_is_allowed(self):
         payload = {
