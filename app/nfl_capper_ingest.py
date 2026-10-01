@@ -541,6 +541,8 @@ def _classify_pick(pick: dict[str, Any]) -> tuple[str | None, str | None]:
         return None, "selection is too verbose/ambiguous for unattended execution"
 
     primary = types & {"moneyline", "spread", "total"}
+    if "team_total" in types:
+        primary.add("total")
     if len(primary) != 1:
         return None, "pick does not resolve to exactly one supported game market"
 
@@ -777,6 +779,65 @@ def _full_game_market_type_matches(actual: str, kind: str) -> bool:
         "total": {"total", "totals"},
     }
     return normalized in allowed.get(kind, set())
+
+
+def _is_team_total_pick(pick: dict[str, Any]) -> bool:
+    """Keep team totals separate from game totals, even when the bridge labels both as total."""
+    types = {str(x).lower() for x in (pick.get("bet_types") or [])}
+    if "team_total" in types:
+        return True
+
+    selection = str(pick.get("selection") or "")
+    if re.search(r"\bteam\s+total\b", selection, re.I):
+        return True
+
+    teams = [
+        str(x).upper()
+        for x in (pick.get("teams") or [])
+        if str(x).upper() in NFL_TEAMS
+    ]
+    if len(set(teams)) != 1:
+        return False
+    if re.search(r"(?:/|\bvs\.?\b|\bv\.?\b|\s@\s)", selection, re.I):
+        return False
+
+    # Compatibility guard for bridge posts such as "Steelers U21.5" that omit
+    # an explicit team_total tag. NFL full-game totals do not normally live in
+    # this range; the team name + one-team context prevents a bare U/O line
+    # from being silently reclassified.
+    if not _contains_alias(selection, teams[0]):
+        return False
+    try:
+        line = Decimal(str(pick.get("total_line")))
+    except Exception:
+        return False
+    return Decimal("0") < line <= Decimal("34.5")
+
+
+def _total_market_scope_matches(market: Any, pick: dict[str, Any]) -> bool:
+    """Require team-total signals to hit only full-game team-total markets."""
+    actual = _market_type(market)
+    text = _market_text(market)
+    is_team_market = bool(re.search(r"\bteam\s+total\b", text, re.I))
+    period_market = bool(
+        re.search(
+            r"\b(?:1h|2h|first half|second half|1st half|2nd half|quarter|[1-4](?:st|nd|rd|th)? q)\b",
+            text,
+            re.I,
+        )
+    )
+
+    if _is_team_total_pick(pick):
+        if not _type_matches(actual, "total") or not is_team_market or period_market:
+            return False
+        teams = [
+            str(x).upper()
+            for x in (pick.get("teams") or [])
+            if str(x).upper() in NFL_TEAMS
+        ]
+        return bool(teams and _contains_alias(text, teams[0]))
+
+    return _full_game_market_type_matches(actual, "total") and not is_team_market
 
 
 def _event_date(event: Any) -> date | None:
@@ -1199,7 +1260,10 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
                 continue
             for market in getattr(event, "markets", ()) or ():
                 actual = _market_type(market)
-                if not _full_game_market_type_matches(actual, kind):
+                if kind == "total":
+                    if not _total_market_scope_matches(market, pick):
+                        continue
+                elif not _full_game_market_type_matches(actual, kind):
                     continue
                 outcome = _select_outcome(market, pick, kind)
                 if outcome is None:
@@ -1256,7 +1320,7 @@ def _find_market(pick: dict[str, Any], kind: str) -> tuple[Any, Any, str, Any]:
 def _find_better_total_fallback(
     pick: dict[str, Any],
     *,
-    max_distance: Decimal = Decimal("1.0"),
+    max_distance: Decimal = Decimal("2.0"),
 ) -> tuple[Any, Any, str, Any, Decimal]:
     """Use only a strictly better nearby total when the exact NFL total is unavailable."""
     teams = [str(x).upper() for x in (pick.get("teams") or [])]
@@ -1292,7 +1356,7 @@ def _find_better_total_fallback(
             if not all(_contains_alias(etext, team) for team in teams[:2]):
                 continue
             for market in getattr(event, "markets", ()) or ():
-                if not _full_game_market_type_matches(_market_type(market), "total"):
+                if not _total_market_scope_matches(market, pick):
                     continue
                 if not getattr(getattr(market, "state", None), "accepting_orders", False):
                     continue
@@ -1438,6 +1502,7 @@ def _prepare_pick(
     recovery: bool = False,
     better_spread_fallback_enabled: bool = False,
     max_alt_spread_points: Decimal = Decimal("1.0"),
+    max_alt_total_points: Decimal = Decimal("2.0"),
 ) -> dict[str, Any]:
     kind, reason = _classify_pick(pick)
     if kind is None:
@@ -1474,7 +1539,7 @@ def _prepare_pick(
             try:
                 event, market, outcome_label, outcome_obj, fallback_line = _find_better_total_fallback(
                     pick,
-                    max_distance=Decimal("1.0"),
+                    max_distance=max_alt_total_points,
                 )
             except Exception as fallback_exc:
                 raise ValueError(f"{exact_exc}; safer total fallback failed: {fallback_exc}") from fallback_exc
@@ -1488,6 +1553,11 @@ def _prepare_pick(
         requested = Decimal(str(list(pick.get("spread_lines") or [None])[0]))
         requested_spread_line = _format_signed_spread_line(requested)
         executed_spread_line = requested_spread_line
+
+    if kind == "total" and requested_total_line is None:
+        requested = Decimal(str(pick.get("total_line")))
+        requested_total_line = str(requested.normalize())
+        executed_total_line = requested_total_line
 
     recovery_phase = _matched_event_phase(event, market) if recovery else None
     if recovery and recovery_phase != "PREGAME":
@@ -1573,6 +1643,7 @@ def _prepare_pick(
         "strategy_requested_total_line": requested_total_line,
         "strategy_executed_total_line": executed_total_line,
         "strategy_alternate_total_fallback": alternate_total_fallback,
+        "strategy_total_scope": "team_total" if kind == "total" and _is_team_total_pick(pick) else ("game_total" if kind == "total" else None),
     }
     queued = remote._enqueue("BUY", payload)
     waiting_approval = str(queued.get("status") or "").upper() == "WAITING_APPROVAL"
@@ -1602,6 +1673,10 @@ def _prepare_pick(
         "requested_spread_line": requested_spread_line,
         "executed_spread_line": executed_spread_line,
         "alternate_spread_fallback": alternate_spread_fallback,
+        "requested_total_line": requested_total_line,
+        "executed_total_line": executed_total_line,
+        "alternate_total_fallback": alternate_total_fallback,
+        "market_scope": "team_total" if kind == "total" and _is_team_total_pick(pick) else ("game_total" if kind == "total" else None),
     }
 
 
@@ -2158,6 +2233,10 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         Decimal("0"),
         Decimal(os.getenv("NFL_CAPPER_ALT_SPREAD_MAX_POINTS", "1.0")),
     )
+    max_alt_total_points = max(
+        Decimal("0"),
+        Decimal(os.getenv("NFL_CAPPER_ALT_TOTAL_MAX_POINTS", "2.0")),
+    )
     no_fill_retry_limit = max(0, int(os.getenv("NFL_CAPPER_NO_FILL_RETRIES", "2")))
     test_preview_raw = os.getenv("NFL_CAPPER_TEST_PREVIEW_JSON", "").strip()
     test_preview_marker = core.DATA_DIR / "nfl_capper_test_preview.json"
@@ -2511,6 +2590,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                     recovery=recovery,
                     better_spread_fallback_enabled=better_spread_fallback_enabled,
                     max_alt_spread_points=max_alt_spread_points,
+                    max_alt_total_points=max_alt_total_points,
                 )
                 base_record.update(result)
                 if not base_record.get("stake_usdc_at_call") and result.get("stake_usdc"):
