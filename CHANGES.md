@@ -1,3 +1,11 @@
+## 2026-10-01 — Make PW retries flow through the normal basketball monitor pipeline
+
+- Failed/replayed WNBA/NBA PW calls are now re-hydrated with normal monitor metadata before they are requeued: sport, monitor source, PW signal ID, selection, and posted timestamp when available.
+- The retry execution therefore enters the same WNBA/NBA dashboard stats, open-position, live P/L, and settlement pipeline as a fresh legitimate PW call.
+- Legacy Slack PW executions whose event IDs predate the newer `pwexport-...` prefix are now classified by their basketball selection/team when `source=slack_live`.
+- Existing filled legacy PW positions such as the Dallas Wings execution can therefore appear under the correct WNBA **Open positions** section without rewriting the stored trade.
+- Retry provenance is still preserved for safety/audit purposes; it no longer changes how the resulting legitimate PW trade is presented or counted.
+
 ## 2026-10-01 — Count distinct submitted PW calls on WNBA/NBA dashboard
 
 - Added a separate **PW Calls** metric to the WNBA and NBA monitor cards.
