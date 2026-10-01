@@ -477,11 +477,22 @@ def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any
         and "TRANSPORTERROR" in normalized_error.replace("_", "")
         and "TIMED OUT" in normalized_error
     )
+    wrapper_signature_error = (
+        "TYPEERROR" in normalized_error.replace("_", "")
+        and "_BUY()" in normalized_error
+        and "UNEXPECTED KEYWORD ARGUMENT" in normalized_error
+        and "REQUEST_ID" in normalized_error
+    )
     if (
         original.get("action") != "BUY"
         or original.get("status") != "FAILED"
         or payload.get("source") != "slack_live"
-        or not (connect_timeout or interrupted_after_start or manual_transport_timeout)
+        or not (
+            connect_timeout
+            or interrupted_after_start
+            or manual_transport_timeout
+            or wrapper_signature_error
+        )
     ):
         return {"status": "not_retryable"}
 
