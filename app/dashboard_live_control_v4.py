@@ -738,4 +738,4 @@ def _start_requested_retry_worker() -> None:
     ).start()
 
 
-app.add_event_handler("startup", _start_requested_retry_worker)
+app.router.on_startup.append(_start_requested_retry_worker)
