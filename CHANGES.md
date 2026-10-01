@@ -1,3 +1,14 @@
+## 2026-10-01 — Colorize live trade activity in Termux
+
+- Added bold ANSI trade-status colors to the phone executor so order activity stands out from queue polling noise.
+- **Yellow**: a BUY/SELL/Combo order is being placed; BUY submission-start lines are also yellow.
+- **Green**: an accepted or successfully completed BUY.
+- **Red**: an accepted or successfully completed SELL.
+- Preview, heartbeat, queue-poll, and ordinary diagnostic lines remain uncolored.
+- Unfilled/canceled BUY completion lines are left uncolored so a canceled order is not visually mistaken for a successful buy.
+- Colors default ON in Termux and can be disabled with `TERMUX_COLOR_LOGS=0` or the standard `NO_COLOR` environment variable.
+- Added regression tests for color mapping and the disable switch.
+
 ## 2026-10-01 — Duplicate WNBA/NBA PW buys keyed by signal ID
 
 - Slack live duplicate detection now keys repeat protection to the PW/Slack signal ID when one is available, rather than blocking every later call on the same team/outcome.

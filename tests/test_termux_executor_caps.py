@@ -53,6 +53,29 @@ class TermuxExecutorV2ForwardingTests(unittest.TestCase):
         )
 
 
+class TermuxExecutorColorTests(unittest.TestCase):
+    def test_trade_lines_use_requested_colors(self):
+        with patch.object(executor, "TERMUX_COLOR_LOGS", True):
+            placing = executor._placing_line("BUY", "exec-1")
+            bought = executor._completed_line("BUY", "exec-1", {"ok": True})
+            sold = executor._completed_line("SELL", "exec-2", {"ok": True})
+
+        self.assertIn("\x1b[1;33m", placing)
+        self.assertIn("PLACING BUY", placing)
+        self.assertIn("\x1b[1;32m", bought)
+        self.assertIn("BUY COMPLETE", bought)
+        self.assertIn("\x1b[1;31m", sold)
+        self.assertIn("SELL COMPLETE", sold)
+
+    def test_color_logs_can_be_disabled(self):
+        with patch.object(executor, "TERMUX_COLOR_LOGS", False):
+            self.assertEqual(executor._placing_line("BUY", "exec-1"), "PLACING BUY exec-1")
+            self.assertEqual(
+                executor._completed_line("SELL", "exec-2", {"ok": True}),
+                "SELL COMPLETE exec-2: OK",
+            )
+
+
 class TermuxExecutorSubmissionReceiptTests(unittest.TestCase):
     def test_journal_submission_persists_order_id(self):
         with tempfile.TemporaryDirectory() as tmp:

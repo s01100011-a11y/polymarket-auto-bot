@@ -76,6 +76,35 @@ BUY_POSITION_RECONCILE_DELAY_SECONDS = max(
     min(5.0, float(os.getenv("EXECUTOR_BUY_POSITION_RECONCILE_DELAY_SECONDS", "0.75"))),
 )
 
+TERMUX_COLOR_LOGS = (
+    os.getenv("TERMUX_COLOR_LOGS", "1").strip().lower() not in {"0", "false", "no", "off"}
+    and "NO_COLOR" not in os.environ
+)
+_ANSI_RESET = "\033[0m"
+_ANSI_BOLD_YELLOW = "\033[1;33m"
+_ANSI_BOLD_GREEN = "\033[1;32m"
+_ANSI_BOLD_RED = "\033[1;31m"
+
+
+def _color(text: str, color: str) -> str:
+    if not TERMUX_COLOR_LOGS:
+        return text
+    return f"{color}{text}{_ANSI_RESET}"
+
+
+def _placing_line(action: str, request_id: str) -> str:
+    return _color(f"PLACING {action} {request_id}", _ANSI_BOLD_YELLOW)
+
+
+def _completed_line(action: str, request_id: str, body: dict[str, Any]) -> str:
+    if not body.get("ok"):
+        return f"Completed {action} {request_id}: {body.get('error')}"
+    if action in {"BUY", "COMBO_BUY"}:
+        return _color(f"BUY COMPLETE {request_id}: OK", _ANSI_BOLD_GREEN)
+    if action == "SELL":
+        return _color(f"SELL COMPLETE {request_id}: OK", _ANSI_BOLD_RED)
+    return f"Completed {action} {request_id}: OK"
+
 
 def _acquire_worker_lock():
     """Guarantee only one Termux executor process can consume the shared queue/journal."""
@@ -887,8 +916,11 @@ def _buy(
         expiration = int(time.time()) + limit_order_seconds + GTD_EXPIRY_BUFFER_SECONDS
 
     print(
-        f"BUY_STAGE trade={trade_id or '-'} stage=SUBMISSION status=START "
-        f"limit_price={max_price} rest_seconds={limit_order_seconds or 0}",
+        _color(
+            f"BUY_STAGE trade={trade_id or '-'} stage=SUBMISSION status=START "
+            f"limit_price={max_price} rest_seconds={limit_order_seconds or 0}",
+            _ANSI_BOLD_YELLOW,
+        ),
         flush=True,
     )
     response = _place_limit_order_with_connect_retry(
@@ -901,8 +933,11 @@ def _buy(
     )
     order_id = str(getattr(response, "order_id", "") or "")
     print(
-        f"BUY_STAGE trade={trade_id or '-'} stage=SUBMISSION status=ACCEPTED "
-        f"order_id={order_id or '-'}",
+        _color(
+            f"BUY_STAGE trade={trade_id or '-'} stage=SUBMISSION status=ACCEPTED "
+            f"order_id={order_id or '-'}",
+            _ANSI_BOLD_GREEN,
+        ),
         flush=True,
     )
     if order_id and request_id:
@@ -1036,9 +1071,12 @@ def _buy(
             f"last error: {type(last_reconcile_error).__name__}: {last_reconcile_error}"
         ) from last_reconcile_error
 
-    print(
+    complete_text = (
         f"BUY_STAGE trade={trade_id or '-'} stage=COMPLETE status={result['status']} "
-        f"filled_shares={filled} cancel_confirmed={cancel_confirmed}",
+        f"filled_shares={filled} cancel_confirmed={cancel_confirmed}"
+    )
+    print(
+        _color(complete_text, _ANSI_BOLD_GREEN) if filled > 0 else complete_text,
         flush=True,
     )
     return result
@@ -1348,7 +1386,10 @@ def main() -> None:
                 _send_result(token, request_id, body)
                 continue
 
-            print(f"Processing {action} {request_id}")
+            if action in {"BUY", "SELL", "COMBO_BUY"}:
+                print(_placing_line(action, request_id), flush=True)
+            else:
+                print(f"Processing {action} {request_id}")
             _journal_started(request_id, action)
             try:
                 if action == "PREVIEW":
@@ -1384,7 +1425,7 @@ def main() -> None:
                 body = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
             _journal_completed(request_id, action, body)
             _send_result(token, request_id, body)
-            print(f"Completed {action} {request_id}: {'OK' if body['ok'] else body['error']}")
+            print(_completed_line(action, request_id, body), flush=True)
         except KeyboardInterrupt:
             print("\nExecutor stopped.")
             return

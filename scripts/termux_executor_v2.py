@@ -163,6 +163,15 @@ def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, A
         order_id = str(getattr(response, "order_id", "") or "")
         if order_id:
             order_ids.append(order_id)
+        if accepted:
+            print(
+                base._color(
+                    f"SELL_STAGE trade={payload.get('trade_id') or '-'} "
+                    f"status=ACCEPTED order_id={order_id or '-'}",
+                    base._ANSI_BOLD_RED,
+                ),
+                flush=True,
+            )
         if not accepted:
             response_error = str(
                 getattr(response, "message", None)
