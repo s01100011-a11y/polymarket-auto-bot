@@ -121,6 +121,8 @@ def _performance(mode: str) -> dict[str, Any]:
     realized_total = Decimal("0")
     realized_7d = Decimal("0")
     realized_30d = Decimal("0")
+    volume_7d = Decimal("0")
+    volume_30d = Decimal("0")
     stake_total = Decimal("0")
     now = datetime.now(timezone.utc)
     cutoff_7d = now - timedelta(days=7)
@@ -132,6 +134,35 @@ def _performance(mode: str) -> dict[str, Any]:
             continue
         if mode != "both" and bucket != mode:
             continue
+
+        execution = rec.get("execution") or {}
+        volume = _d(
+            rec.get("actual_cost_usdc")
+            or execution.get("cost_usdc")
+            or rec.get("budget_usdc")
+        )
+        volume_at = None
+        for raw_time in (
+            rec.get("submitted_at"),
+            rec.get("created_at"),
+            rec.get("updated_at"),
+        ):
+            if not raw_time:
+                continue
+            try:
+                parsed = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            volume_at = parsed.astimezone(timezone.utc)
+            break
+        if volume > 0 and volume_at is not None:
+            if volume_at >= cutoff_30d:
+                volume_30d += volume
+            if volume_at >= cutoff_7d:
+                volume_7d += volume
+
         if rec.get("status") in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED", "PAPER_OPEN"}:
             open_trades += 1
             continue
@@ -193,6 +224,8 @@ def _performance(mode: str) -> dict[str, Any]:
         "realized_pnl": str(realized_total.quantize(Decimal("0.01"))),
         "realized_pnl_7d_usdc": str(realized_7d.quantize(Decimal("0.01"))),
         "realized_pnl_30d_usdc": str(realized_30d.quantize(Decimal("0.01"))),
+        "volume_7d_usdc": str(volume_7d.quantize(Decimal("0.01"))),
+        "volume_30d_usdc": str(volume_30d.quantize(Decimal("0.01"))),
         "accuracy_pct": str(accuracy.quantize(Decimal("0.1"))) if accuracy is not None else None,
         "roi_pct": str(roi.quantize(Decimal("0.1"))) if roi is not None else None,
         "portfolio_value_usdc": _portfolio_value(),
@@ -294,6 +327,8 @@ async function refreshFilteredStats(){
   const missedCount=document.getElementById('performanceMissedCount');
   const p7=document.getElementById('performancePnl7d');
   const p30=document.getElementById('performancePnl30d');
+  const v7=document.getElementById('performanceVolume7d');
+  const v30=document.getElementById('performanceVolume30d');
   const roi=document.getElementById('performanceRoi');
   const wl=document.getElementById('performanceWL');
   const acc=document.getElementById('performanceAccuracy');
@@ -318,6 +353,16 @@ async function refreshFilteredStats(){
    const n=Number(s.realized_pnl_30d_usdc||0);
    p30.textContent=(n>0?'+':'')+'$'+n.toFixed(2);
    p30.className='performance-value '+(n>0?'green':n<0?'red':'');
+  }
+  if(v7){
+   const n=Number(s.volume_7d_usdc||0);
+   v7.textContent='$'+n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+   v7.className='performance-value';
+  }
+  if(v30){
+   const n=Number(s.volume_30d_usdc||0);
+   v30.textContent='$'+n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+   v30.className='performance-value';
   }
   if(roi){
    const n=Number(s.roi_pct);

@@ -64,3 +64,26 @@ def test_more_stats_breaks_execution_history_down_by_capper_and_sport():
     assert "moreStatsBetTypes" in metrics_source
     assert "localStorage.getItem('dashboardStatsFilter')||'live'" in metrics_source
 
+
+
+def test_top_stats_include_last_7_and_30_day_volume():
+    metrics_source = Path("app/dashboard_metrics_v3.py").read_text(encoding="utf-8")
+    stats_source = Path("app/dashboard_filters_v5.py").read_text(encoding="utf-8")
+
+    assert 'id="performanceVolume7d"' in metrics_source
+    assert 'id="performanceVolume30d"' in metrics_source
+    assert "Volume L7" in metrics_source
+    assert "Volume L30" in metrics_source
+    assert "executed stake" in metrics_source
+
+    assert 'volume_7d = Decimal("0")' in stats_source
+    assert 'volume_30d = Decimal("0")' in stats_source
+    assert 'rec.get("actual_cost_usdc")' in stats_source
+    assert 'execution.get("cost_usdc")' in stats_source
+    assert '"volume_7d_usdc"' in stats_source
+    assert '"volume_30d_usdc"' in stats_source
+    assert "performanceVolume7d" in stats_source
+    assert "performanceVolume30d" in stats_source
+
+    compile(metrics_source, "app/dashboard_metrics_v3.py", "exec")
+    compile(stats_source, "app/dashboard_filters_v5.py", "exec")

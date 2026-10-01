@@ -1,3 +1,12 @@
+## 2026-10-01 — Add rolling 7-day and 30-day volume to top stats
+
+- Added **Volume L7** and **Volume L30** cards under the main dashboard stats.
+- Volume is executed stake/cash risk by trade submission time, not graded-only stake, so open and closed filled trades are included.
+- Uses actual recorded execution cost when available, then falls back to the trade budget.
+- Zero-fill canceled orders do not create execution volume.
+- Volume respects the existing **BOTH / PAPER / LIVE** stats filter.
+- Added regression coverage and source compile checks.
+
 ## 2026-10-01 — Standardize stake and shares across all sport open-position cards
 
 - WNBA and NBA open positions show **Stake $X.XX · Shares X.XX**.
