@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from app import capper_control
 from app import dashboard_metrics_v3 as base
+from app import live_trading
 
 app = base.app
 dashboard = base.dashboard
@@ -409,6 +410,26 @@ def _retry_asset_id(payload: dict[str, Any]) -> str:
     return str(asset_id)
 
 
+def _open_orders_for_asset(asset_id: str) -> list[Any]:
+    """Authenticated CLOB reconciliation before any failed BUY is resent."""
+    with live_trading._secure_client() as client:
+        try:
+            return list(client.list_open_orders(asset_id=asset_id).iter_items())
+        except TypeError:
+            # Compatibility fallback for SDK builds that do not accept asset_id
+            # as a server-side filter. Filter the authenticated open-order list.
+            orders = list(client.list_open_orders().iter_items())
+            return [
+                order
+                for order in orders
+                if str(
+                    getattr(order, "asset_id", None)
+                    or getattr(order, "token_id", None)
+                    or ""
+                ) == str(asset_id)
+            ]
+
+
 def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any]:
     request_id = str(request_id or os.getenv("SLACK_RETRY_REQUEST_ID", "")).strip()
     if not request_id:
@@ -437,11 +458,13 @@ def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any
 
     payload = dict(original.get("payload") or {})
     error = str(original.get("error") or "")
+    interrupted_after_start = "interrupted after execution began" in error.lower()
+    connect_timeout = "ConnectTimeout" in error
     if (
         original.get("action") != "BUY"
         or original.get("status") != "FAILED"
         or payload.get("source") != "slack_live"
-        or "ConnectTimeout" not in error
+        or not (connect_timeout or interrupted_after_start)
     ):
         return {"status": "not_retryable"}
 
@@ -467,6 +490,25 @@ def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any
             "position_size": str(position_size),
         }
 
+    try:
+        open_orders = _open_orders_for_asset(asset_id)
+    except Exception as exc:
+        return {
+            "status": "open_order_check_failed",
+            "asset_id": asset_id,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    if open_orders:
+        return {
+            "status": "open_order_exists",
+            "asset_id": asset_id,
+            "open_order_count": len(open_orders),
+            "order_ids": [
+                str(getattr(order, "order_id", None) or getattr(order, "id", None) or "")
+                for order in open_orders
+            ][:10],
+        }
+
     if _active_or_pending(asset_id, market_url, outcome):
         return {"status": "duplicate_active", "asset_id": asset_id}
 
@@ -476,7 +518,11 @@ def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any
     retry_payload.update({
         "trade_id": new_trade_id,
         "retry_of_request_id": request_id,
-        "retry_reason": "manual_resend_after_connect_timeout",
+        "retry_reason": (
+            "manual_resend_after_interrupted_execution_reconciled"
+            if interrupted_after_start
+            else "manual_resend_after_connect_timeout"
+        ),
     })
     now_iso = ingest._now_iso()
     record = {
@@ -542,6 +588,7 @@ def _run_requested_retry_worker() -> None:
         "queued",
         "already_retried",
         "position_exists",
+        "open_order_exists",
         "duplicate_active",
         "missing_request",
         "not_retryable",
