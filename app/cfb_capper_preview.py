@@ -2491,6 +2491,10 @@ def _status_pick_item(
         "reason": record.get("reason"),
         "last_error": record.get("last_error"),
         "request_id": record.get("request_id"),
+        "approval_required": record.get("approval_required"),
+        "approval_reason": record.get("approval_reason"),
+        "signal_decimal_odds": record.get("signal_decimal_odds"),
+        "minimum_decimal_odds": record.get("minimum_decimal_odds"),
         "signal_id": record.get("id"),
         "buy_available": bool(
             saved_match
@@ -3821,7 +3825,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 ),
                 "preview_done": sum(1 for r in rows if r.get("status") in {"PREVIEW_DONE", "EXECUTOR_DONE"}),
                 "preview_failed": sum(1 for r in rows if r.get("status") in {"PREVIEW_FAILED", "EXECUTOR_FAILED"}),
-                "preview_queued": sum(1 for r in rows if r.get("status") in {"PREVIEW_QUEUED", "QUEUED"}),
+                "preview_queued": sum(1 for r in rows if r.get("status") in {"PREVIEW_QUEUED", "QUEUED", "WAITING_APPROVAL"}),
                 "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
                 "pregame": sum(
                     1 for r in rows
@@ -3834,7 +3838,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "closed": sum(1 for r in rows if r.get("status") == "EVENT_CLOSED"),
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
                 "all_items": _recent_all_items(rows, executions=executions),
-                "queued_items": _recent_status_items(rows, {"PREVIEW_QUEUED", "QUEUED"}, executions=executions),
+                "queued_items": _recent_status_items(rows, {"PREVIEW_QUEUED", "QUEUED", "WAITING_APPROVAL"}, executions=executions),
                 "done_items": _recent_status_items(rows, {"PREVIEW_DONE", "EXECUTOR_DONE"}, executions=executions),
                 "previewed_items": _recent_status_items(rows, {"PREVIEW_DONE", "EXECUTOR_DONE"}, executions=executions),
                 "retrying_items": _recent_status_items(rows, "RETRYING", executions=executions),
