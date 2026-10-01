@@ -1584,8 +1584,9 @@ def _prepare_pick(
     if best_ask is None:
         raise RuntimeError("No current ask is available")
     max_price = best_ask
-    if max_price > core.MAX_PRICE:
-        raise RuntimeError(f"Current best ask {max_price} exceeds MAX_PRICE={core.MAX_PRICE}")
+    # Above the unattended price ceiling is retained for explicit approval.
+    # remote._enqueue marks PRICE_LIMIT/MIN_ODDS and keeps it off the executor
+    # until the user clicks the live-price approval action.
     if spread > core.MAX_SPREAD:
         raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
 
