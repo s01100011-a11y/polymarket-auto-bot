@@ -690,6 +690,8 @@ def _install_performance_and_paper_ui() -> None:
     <div class="performance-card"><div class="label">Missed P/L · total</div><div class="performance-value" id="performanceMissedPnl">—</div><div class="performance-sub" id="performanceMissedCount">NFL + CFB untraded calls</div></div>
     <div class="performance-card"><div class="label">Last 7 days P/L</div><div class="performance-value" id="performancePnl7d">—</div><div class="performance-sub">realized</div></div>
     <div class="performance-card"><div class="label">Last 30 days P/L</div><div class="performance-value" id="performancePnl30d">—</div><div class="performance-sub">realized</div></div>
+    <div class="performance-card"><div class="label">Volume L7</div><div class="performance-value" id="performanceVolume7d">—</div><div class="performance-sub">executed stake</div></div>
+    <div class="performance-card"><div class="label">Volume L30</div><div class="performance-value" id="performanceVolume30d">—</div><div class="performance-sub">executed stake</div></div>
     <div class="performance-card"><div class="label">ROI · closed trades</div><div class="performance-value" id="performanceRoi">—</div></div>
     <div class="performance-card"><div class="label">Win / Loss</div><div class="performance-value" id="performanceWL">—</div><div class="performance-sub" id="performancePushes"></div></div>
     <div class="performance-card"><div class="label">Accuracy</div><div class="performance-value" id="performanceAccuracy">—</div><div class="performance-sub" id="performanceGraded"></div></div>
