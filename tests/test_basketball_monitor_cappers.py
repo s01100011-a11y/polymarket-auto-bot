@@ -110,3 +110,22 @@ def test_basketball_dashboard_counts_distinct_submitted_pw_calls():
     assert '"pw_calls_24h": last_24h' in source
     assert "<span>PW Calls</span>" in source
     assert "visiblePwCalls=capperLast24hOnly" in source
+
+
+def test_legacy_slack_pw_execution_is_inferred_into_wnba_monitor():
+    source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+
+    assert 'source != "slack_live" and not event_id.startswith("pwexport-")' in source
+    assert 'quote.get("requested_outcome")' in source
+    assert 'ingest._league_for_team' in source
+
+
+def test_pw_retry_hydrates_monitor_metadata_before_requeue():
+    source = Path("app/dashboard_live_control_v4.py").read_text(encoding="utf-8")
+
+    assert "def _hydrate_monitor_retry_payload" in source
+    assert 'hydrated["strategy_sport"] = sport' in source
+    assert 'f"{sport} Monitor - {sport}"' in source
+    assert 'hydrated["strategy_pick_id"]' in source
+    assert 'hydrated["strategy_selection"]' in source
+    assert "payload = _hydrate_monitor_retry_payload" in source
