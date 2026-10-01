@@ -591,7 +591,10 @@ def _authorize_order_for_handoff(
 def _enqueue(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not REMOTE_EXECUTION_ENABLED:
         raise HTTPException(status_code=409, detail="Remote execution is disabled")
-    if action in {"BUY", "COMBO_BUY"}:
+    approval_required = bool(
+        action == "BUY" and _buy_requires_min_odds_approval(payload)
+    )
+    if action in {"BUY", "COMBO_BUY"} and not approval_required:
         state = _state()
         last_seen = float(state.get("last_seen_unix") or 0)
 
@@ -612,9 +615,6 @@ def _enqueue(action: str, payload: dict[str, Any]) -> dict[str, Any]:
                 status_code=409,
                 detail="Termux executor is offline; BUY was not queued",
             )
-    approval_required = bool(
-        action == "BUY" and _buy_requires_min_odds_approval(payload)
-    )
     req_id = f"exec-{uuid.uuid4().hex[:14]}"
     record = {
         "id": req_id,
