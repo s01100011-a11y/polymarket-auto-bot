@@ -2339,5 +2339,11 @@ def test_cfb_sizing_controls_put_mode_buttons_left_of_inputs():
 
 def test_cfb_open_positions_label_stake_and_shares_consistently():
     source = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
-    assert "Stake $'+Number(cost||0).toFixed(2)+' · Shares '+shares" in source
+    assert "Stake +Number(cost||0).toFixed(2)+' · Shares '+shares" in source
     compile(source, "app/cfb_capper_preview.py", "exec")
+
+
+def test_cfb_sell_zero_balance_is_treated_as_already_sold_ui_state():
+    source = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
+    assert "CLOB outcome-token balance became zero before SELL" in source
+    assert "No second SELL was submitted" in source
