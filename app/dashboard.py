@@ -374,7 +374,7 @@ a{color:#8bc4ff;text-decoration:none}.wrap{max-width:1260px;margin:auto;padding:
 <script>
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=v=>v===null||v===undefined||v===''?'—':'$'+Number(v).toFixed(2);
-const price=v=>v===null||v===undefined||v===''?'—':Number(v).toFixed(3);
+const price=v=>{if(v===null||v===undefined||v==='')return '—';const p=Number(v);if(!Number.isFinite(p)||p<=0||p>=1)return '—';const cents=p*100,ct=Math.abs(cents-Math.round(cents))<0.05?String(Math.round(cents)):cents.toFixed(1);return (1/p).toFixed(2)+' ('+ct+'¢)'};
 const when=v=>v?new Date(v).toLocaleString():'—';
 function table(headers,rows){if(!rows.length)return '<div class="empty">Nothing here yet.</div>';return `<div class="table-wrap"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`}
 function link(url,label){return url?`<a href="${esc(url)}" target="_blank" rel="noreferrer">${esc(label||url)}</a>`:esc(label||'—')}
