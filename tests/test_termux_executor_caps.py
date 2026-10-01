@@ -198,6 +198,135 @@ class SlackFailedBuyRetryTests(unittest.TestCase):
         self.assertNotIn("manual_retry_request_id", store[original_id])
 
 
+    def test_interrupted_slack_buy_blocks_when_open_order_exists(self):
+        from app import dashboard_live_control_v4 as live_control
+
+        request_id = "exec-interrupted"
+        store = {
+            request_id: {
+                "id": request_id,
+                "action": "BUY",
+                "status": "FAILED",
+                "error": (
+                    "This trade request was interrupted after execution began. "
+                    "Automatic retry was blocked to prevent a duplicate order; "
+                    "reconcile the wallet position manually."
+                ),
+                "payload": {
+                    "source": "slack_live",
+                    "market_url": "https://polymarket.com/sports/wnba/test-event",
+                    "outcome": "Dallas Wings",
+                    "market_type": "moneyline",
+                    "max_price": "0.40",
+                    "budget_usdc": "10",
+                    "trade_id": "slack-live-test-retry",
+                },
+            }
+        }
+        order = type("OpenOrder", (), {"order_id": "live-order-1"})()
+        with (
+            patch.object(live_control.core, "bot_enabled", return_value=True),
+            patch.object(live_control.core, "live_trading_enabled", return_value=True),
+            patch.object(live_control.core, "auto_trading_enabled", return_value=True),
+            patch.object(live_control, "_executor_ready", return_value=(True, {})),
+            patch.object(live_control, "_retry_asset_id", return_value="asset-1"),
+            patch.object(live_control.remote, "_authoritative_position", return_value=None),
+            patch.object(live_control, "_open_orders_for_asset", return_value=[order]),
+            patch.object(live_control.remote, "_queue_load", return_value=store),
+        ):
+            result = live_control._retry_failed_slack_buy_once(request_id)
+
+        self.assertEqual(result["status"], "open_order_exists")
+        self.assertEqual(result["order_ids"], ["live-order-1"])
+        self.assertNotIn("manual_retry_request_id", store[request_id])
+
+    def test_interrupted_slack_buy_requeues_only_after_empty_reconciliation(self):
+        from app import dashboard_live_control_v4 as live_control
+
+        request_id = "exec-interrupted"
+        store = {
+            request_id: {
+                "id": request_id,
+                "action": "BUY",
+                "status": "FAILED",
+                "error": (
+                    "This trade request was interrupted after execution began. "
+                    "Automatic retry was blocked to prevent a duplicate order; "
+                    "reconcile the wallet position manually."
+                ),
+                "payload": {
+                    "source": "slack_live",
+                    "market_url": "https://polymarket.com/sports/wnba/test-event",
+                    "outcome": "Dallas Wings",
+                    "market_type": "moneyline",
+                    "max_price": "0.40",
+                    "budget_usdc": "10",
+                    "trade_id": "slack-live-test-retry",
+                },
+            }
+        }
+        with (
+            patch.object(live_control.core, "bot_enabled", return_value=True),
+            patch.object(live_control.core, "live_trading_enabled", return_value=True),
+            patch.object(live_control.core, "auto_trading_enabled", return_value=True),
+            patch.object(live_control, "_executor_ready", return_value=(True, {})),
+            patch.object(live_control, "_retry_asset_id", return_value="asset-1"),
+            patch.object(live_control.remote, "_authoritative_position", return_value=None),
+            patch.object(live_control, "_open_orders_for_asset", return_value=[]),
+            patch.object(live_control, "_active_or_pending", return_value=False),
+            patch.object(live_control.remote, "_queue_load", side_effect=lambda: store),
+            patch.object(live_control.remote, "_queue_save", side_effect=lambda data: store.update(data)),
+        ):
+            result = live_control._retry_failed_slack_buy_once(request_id)
+
+        self.assertEqual(result["status"], "queued")
+        queued = store[result["request_id"]]
+        self.assertEqual(
+            queued["payload"]["retry_reason"],
+            "manual_resend_after_interrupted_execution_reconciled",
+        )
+
+    def test_interrupted_slack_buy_fails_closed_when_open_order_check_errors(self):
+        from app import dashboard_live_control_v4 as live_control
+
+        request_id = "exec-interrupted"
+        store = {
+            request_id: {
+                "id": request_id,
+                "action": "BUY",
+                "status": "FAILED",
+                "error": "This trade request was interrupted after execution began.",
+                "payload": {
+                    "source": "slack_live",
+                    "market_url": "https://polymarket.com/sports/wnba/test-event",
+                    "outcome": "Dallas Wings",
+                    "market_type": "moneyline",
+                    "max_price": "0.40",
+                    "budget_usdc": "10",
+                    "trade_id": "slack-live-test-retry",
+                },
+            }
+        }
+        with (
+            patch.object(live_control.core, "bot_enabled", return_value=True),
+            patch.object(live_control.core, "live_trading_enabled", return_value=True),
+            patch.object(live_control.core, "auto_trading_enabled", return_value=True),
+            patch.object(live_control, "_executor_ready", return_value=(True, {})),
+            patch.object(live_control, "_retry_asset_id", return_value="asset-1"),
+            patch.object(live_control.remote, "_authoritative_position", return_value=None),
+            patch.object(
+                live_control,
+                "_open_orders_for_asset",
+                side_effect=RuntimeError("order query unavailable"),
+            ),
+            patch.object(live_control.remote, "_queue_load", return_value=store),
+        ):
+            result = live_control._retry_failed_slack_buy_once(request_id)
+
+        self.assertEqual(result["status"], "open_order_check_failed")
+        self.assertNotIn("manual_retry_request_id", store[request_id])
+
+
 class TermuxExecutorCapTests(unittest.TestCase):
     def test_budget_within_server_stamped_dashboard_cap_is_allowed(self):
         payload = {
