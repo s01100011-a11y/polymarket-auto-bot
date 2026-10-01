@@ -1,3 +1,11 @@
+## 2026-10-01 — Global 1.70 minimum-odds approval safeguard and 3% basketball units
+
+- Added a global single-BUY safeguard at **1.70 decimal odds**. Sports orders at 1.70 or higher follow the normal auto-trading path; anything below 1.70 is retained as `WAITING_APPROVAL` rather than rejected or executed unattended.
+- Added explicit approval metadata and dashboard **APPROVAL REQUIRED** actions for NFL, CFB, WNBA, and NBA. The existing approval queue now lists all sports BUYs and supports a common approve/reject endpoint.
+- Waiting approvals count toward reserved auto-budget exposure so multiple held orders cannot collectively bypass the daily budget guard.
+- Set both **WNBA Monitor - WNBA** and **NBA Monitor - NBA** to **3.00% of current portfolio per 1u target profit** via a one-time persisted policy migration; future manual sizing changes remain intact.
+- Added regression coverage for the odds threshold, implied decimal-odds metadata, basketball 3% policy, and approval UI.
+
 ## 2026-10-01 — Add rolling 7-day and 30-day volume to top stats
 
 - Added **Volume L7** and **Volume L30** cards under the main dashboard stats.
