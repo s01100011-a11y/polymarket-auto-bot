@@ -47,6 +47,7 @@ class TermuxExecutorBuyRetryTests(unittest.TestCase):
             "asset_id": "asset-1",
             "requested_shares": "10",
             "max_price": "0.50",
+            "limit_order_ttl_seconds": 0,
         }
 
     def test_buy_retries_connect_timeout_during_preflight(self):
@@ -137,6 +138,61 @@ class TermuxExecutorBuyRetryTests(unittest.TestCase):
             secure.return_value.__enter__.return_value.place_limit_order.call_count,
             1,
         )
+
+
+class SlackLiveRestingLimitTests(unittest.TestCase):
+    def test_slack_live_defaults_to_120_second_resting_limit(self):
+        self.assertEqual(
+            executor._limit_order_seconds({"source": "slack_live"}),
+            executor.SLACK_LIVE_LIMIT_ORDER_SECONDS,
+        )
+        self.assertEqual(executor.SLACK_LIVE_LIMIT_ORDER_SECONDS, 120)
+
+    def test_explicit_limit_ttl_is_bounded(self):
+        self.assertEqual(executor._limit_order_seconds({"limit_order_ttl_seconds": "120"}), 120)
+        self.assertEqual(executor._limit_order_seconds({"limit_order_ttl_seconds": "9999"}), 300)
+
+    def test_live_limit_can_rest_when_ask_is_above_target(self):
+        market = MagicMock()
+        market.question = "Test"
+        market.trading.minimum_order_size = "1"
+        market_type = patch.object(executor.core, "_market_type", return_value="moneyline")
+        public = MagicMock()
+        public.return_value.__enter__.return_value.get_price.return_value = "0.62"
+        public.return_value.__enter__.return_value.get_spread.return_value = "0.10"
+        book = type("Book", (), {"asks": [type("L", (), {"price": "0.62"})()]})()
+        public.return_value.__enter__.return_value.get_order_book.return_value = book
+        intent_market = patch.object(executor.core, "_select_market", return_value=market)
+        resolve = patch.object(executor.core, "_resolve_asset", return_value=("asset-1", None, "Dallas Wings"))
+        with (
+            patch.object(executor, "_geo", return_value={"blocked": False}),
+            patch.object(executor, "PublicClient", public),
+            market_type,
+            intent_market,
+            resolve,
+        ):
+            quote = executor._validate_buy({
+                "source": "slack_live",
+                "market_url": "https://polymarket.com/sports/wnba/test-event",
+                "outcome": "Dallas Wings",
+                "market_type": "moneyline",
+                "max_price": "0.40",
+                "budget_usdc": "10",
+                "max_spread": "0.08",
+                "max_price_global": "0.95",
+                "authorized_max_auto_trade_usdc": "25",
+                "limit_order_ttl_seconds": 120,
+            })
+        self.assertTrue(quote["will_rest_if_needed"])
+        self.assertEqual(quote["max_price"], "0.40")
+        self.assertEqual(quote["limit_order_ttl_seconds"], 120)
+
+    def test_live_limit_lease_covers_120_second_rest_window(self):
+        rec = {
+            "action": "BUY",
+            "payload": {"limit_order_ttl_seconds": 120},
+        }
+        self.assertGreaterEqual(remote._lease_seconds_for(rec), 240)
 
 
 class SlackFailedBuyRetryTests(unittest.TestCase):
@@ -351,6 +407,10 @@ class ExecutorLeaseTests(unittest.TestCase):
     def test_live_executor_lease_exceeds_single_buy_fill_window(self):
         self.assertGreaterEqual(remote.LEASE_SECONDS, 30)
         self.assertGreater(remote.LEASE_SECONDS, executor.FILL_WAIT_SECONDS)
+
+    def test_slack_live_lease_exceeds_resting_limit_window(self):
+        rec = {"action": "BUY", "payload": {"limit_order_ttl_seconds": 120}}
+        self.assertGreater(remote._lease_seconds_for(rec), 120)
 
 
 class TermuxExecutorCapTests(unittest.TestCase):
