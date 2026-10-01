@@ -167,3 +167,12 @@ def test_basketball_sell_zero_balance_is_treated_as_already_sold_ui_state():
     source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
     assert "CLOB outcome-token balance became zero before SELL" in source
     assert "No second SELL was submitted" in source
+
+def test_basketball_open_position_ui_uses_universal_position_format():
+    source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+    assert "function monitorOdds(v)" in source
+    assert "function monitorUnits(v)" in source
+    assert "Exact position:" in source
+    assert "To win $" in source
+    assert "unitTitle+' · OPEN" in source
+    assert "Entry odds '+entry+' · Live odds '+live" in source
