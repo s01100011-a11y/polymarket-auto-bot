@@ -727,9 +727,15 @@ setInterval(loadSlackTradingMode,5000);
 
 _install_slack_live_controls()
 
-if os.getenv("SLACK_RETRY_REQUEST_ID", "").strip():
+
+def _start_requested_retry_worker() -> None:
+    if not os.getenv("SLACK_RETRY_REQUEST_ID", "").strip():
+        return
     threading.Thread(
         target=_run_requested_retry_worker,
         name="slack-failed-buy-retry",
         daemon=True,
     ).start()
+
+
+app.add_event_handler("startup", _start_requested_retry_worker)
