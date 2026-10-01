@@ -28,6 +28,31 @@ class TermuxExecutorSingletonTests(unittest.TestCase):
                 third.close()
 
 
+class TermuxExecutorV2ForwardingTests(unittest.TestCase):
+    def test_v2_buy_forwards_provenance_arguments(self):
+        import termux_executor_v2 as executor_v2
+
+        payload = {"trade_id": "slack-live-test"}
+        expected = {"ok": True, "asset_id": ""}
+        with patch.object(executor_v2, "_original_buy", return_value=expected) as original:
+            result = executor_v2._buy(
+                payload,
+                "private-key",
+                "wallet",
+                request_id="exec-test",
+                executor_token="token-test",
+            )
+
+        self.assertEqual(result, expected)
+        original.assert_called_once_with(
+            payload,
+            "private-key",
+            "wallet",
+            request_id="exec-test",
+            executor_token="token-test",
+        )
+
+
 class TermuxExecutorSubmissionReceiptTests(unittest.TestCase):
     def test_journal_submission_persists_order_id(self):
         with tempfile.TemporaryDirectory() as tmp:
