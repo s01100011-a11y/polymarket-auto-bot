@@ -429,6 +429,85 @@ ingest._paper_trade_from_alert = _slack_trade_handler
 ingest.SLACK_PAPER_ONLY = not _mode()["auto_prepare_enabled"]
 
 
+def _hydrate_monitor_retry_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Restore WNBA/NBA monitor identity on an older PW retry before it is queued."""
+    hydrated = dict(payload)
+    event_id = str(
+        hydrated.get("strategy_pick_id")
+        or hydrated.get("slack_event_id")
+        or ""
+    ).strip()
+
+    alert = None
+    try:
+        alerts = core._load(ingest.SLACK_ALERTS_FILE)
+        if isinstance(alerts, dict):
+            direct = alerts.get(event_id)
+            if isinstance(direct, dict):
+                alert = direct
+            else:
+                for candidate in alerts.values():
+                    if not isinstance(candidate, dict):
+                        continue
+                    candidate_id = str(candidate.get("event_id") or "").strip()
+                    if candidate_id == event_id:
+                        alert = candidate
+                        break
+    except Exception:
+        alert = None
+
+    parsed = (alert or {}).get("parsed") or {}
+    meta = (alert or {}).get("pw_export_meta") or {}
+    alert_sport = str(
+        (alert or {}).get("monitor_sport")
+        or (alert or {}).get("pw_export_sport")
+        or meta.get("sport")
+        or ""
+    ).upper()
+
+    selection = str(
+        hydrated.get("strategy_selection")
+        or parsed.get("selection")
+        or meta.get("predicted_winner")
+        or hydrated.get("outcome")
+        or ""
+    ).strip()
+
+    sport = str(hydrated.get("strategy_sport") or alert_sport or "").upper()
+    if sport not in {"WNBA", "NBA"}:
+        inferred = str(ingest._league_for_team(selection) or "").upper()
+        sport = inferred if inferred in {"WNBA", "NBA"} else ""
+
+    if not sport:
+        return hydrated
+
+    hydrated["strategy_sport"] = sport
+    hydrated["strategy_source"] = (
+        hydrated.get("strategy_source")
+        or f"{sport} Monitor - {sport}"
+    )
+    if event_id:
+        hydrated["strategy_pick_id"] = (
+            hydrated.get("strategy_pick_id") or event_id
+        )
+    if selection:
+        hydrated["strategy_selection"] = (
+            hydrated.get("strategy_selection") or selection
+        )
+
+    pw = parsed.get("pw") or {}
+    posted_at = (
+        hydrated.get("strategy_posted_at")
+        or meta.get("event_ts")
+        or pw.get("event_ts")
+        or (alert or {}).get("received_at")
+    )
+    if posted_at:
+        hydrated["strategy_posted_at"] = posted_at
+
+    return hydrated
+
+
 def _retry_asset_id(payload: dict[str, Any]) -> str:
     intent = core.TradeIntent(
         market_url=str(payload.get("market_url") or ""),
@@ -490,7 +569,9 @@ def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any
             "trade_id": original.get("manual_retry_trade_id"),
         }
 
-    payload = dict(original.get("payload") or {})
+    payload = _hydrate_monitor_retry_payload(
+        dict(original.get("payload") or {})
+    )
     error = str(original.get("error") or "")
     interrupted_after_start = "interrupted after execution began" in error.lower()
     normalized_error = error.replace("-", "_").upper()
@@ -580,6 +661,9 @@ def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any
         latest = data.get(request_id)
         if not isinstance(latest, dict):
             return {"status": "missing_request"}
+        latest["payload"] = _hydrate_monitor_retry_payload(
+            dict(latest.get("payload") or {})
+        )
         if latest.get("manual_retry_request_id"):
             return {
                 "status": "already_retried",
