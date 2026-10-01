@@ -141,6 +141,58 @@ class TermuxExecutorBuyRetryTests(unittest.TestCase):
 
 
 class SlackLiveRestingLimitTests(unittest.TestCase):
+    def test_fast_slack_preflight_skips_public_network_validation(self):
+        payload = {
+            "source": "slack_live",
+            "server_fast_preflight": True,
+            "server_fast_preflight_unix": executor.time.time(),
+            "server_fast_preflight_max_age_seconds": 45,
+            "server_position_before": "0",
+            "market_url": "https://polymarket.com/sports/wnba/test-event",
+            "market_label": "Dallas Wings vs Test",
+            "outcome": "Dallas Wings",
+            "market_type": "moneyline",
+            "asset_id": "asset-1",
+            "max_price": "0.40",
+            "signal_buy_price": "0.40",
+            "signal_spread": "0.02",
+            "budget_usdc": "10",
+            "max_price_global": "0.95",
+            "authorized_max_auto_trade_usdc": "25",
+            "limit_order_ttl_seconds": 120,
+        }
+        with (
+            patch.object(executor, "_geo") as geo,
+            patch.object(executor, "PublicClient") as public,
+            patch.object(executor, "_position_size") as position,
+        ):
+            quote = executor._fast_slack_preflight(payload)
+        self.assertIsNotNone(quote)
+        self.assertEqual(quote["asset_id"], "asset-1")
+        self.assertEqual(quote["server_position_before"], "0")
+        geo.assert_not_called()
+        public.assert_not_called()
+        position.assert_not_called()
+
+    def test_fast_slack_preflight_rejects_stale_server_authorization(self):
+        payload = {
+            "source": "slack_live",
+            "server_fast_preflight": True,
+            "server_fast_preflight_unix": executor.time.time() - 90,
+            "server_fast_preflight_max_age_seconds": 45,
+            "market_url": "https://polymarket.com/sports/wnba/test-event",
+            "outcome": "Dallas Wings",
+            "market_type": "moneyline",
+            "asset_id": "asset-1",
+            "max_price": "0.40",
+            "budget_usdc": "10",
+            "max_price_global": "0.95",
+            "authorized_max_auto_trade_usdc": "25",
+            "limit_order_ttl_seconds": 120,
+        }
+        with self.assertRaisesRegex(RuntimeError, "stale"):
+            executor._fast_slack_preflight(payload)
+
     def test_slack_live_defaults_to_120_second_resting_limit(self):
         self.assertEqual(
             executor._limit_order_seconds({"source": "slack_live"}),
@@ -440,6 +492,86 @@ class SlackFailedBuyRetryTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "open_order_check_failed")
         self.assertNotIn("manual_retry_request_id", store[request_id])
+
+
+class SlackFastHandoffAuthorizationTests(unittest.TestCase):
+    def _rec(self):
+        return {
+            "id": "exec-live",
+            "action": "BUY",
+            "status": "PENDING",
+            "payload": {
+                "source": "slack_live",
+                "asset_id": "asset-1",
+                "budget_usdc": "10",
+                "limit_order_ttl_seconds": 120,
+            },
+        }
+
+    def test_handoff_stamps_fast_preflight_after_empty_reconciliation(self):
+        rec = self._rec()
+        with (
+            patch.object(remote.core, "MAX_AUTO_TRADE_USDC", Decimal("25")),
+            patch.object(
+                remote,
+                "_state",
+                return_value={
+                    "last_seen_unix": remote.time.time(),
+                    "geo_blocked": False,
+                },
+            ),
+            patch.object(remote, "_strict_position_size", return_value=Decimal("0")),
+            patch.object(remote, "_strict_open_orders_for_asset", return_value=[]),
+        ):
+            allowed = remote._authorize_order_for_handoff(rec)
+
+        self.assertTrue(allowed)
+        payload = rec["payload"]
+        self.assertTrue(payload["server_fast_preflight"])
+        self.assertEqual(payload["server_position_before"], "0")
+        self.assertEqual(payload["authorized_max_auto_trade_usdc"], "25")
+
+    def test_handoff_blocks_fast_preflight_when_position_exists(self):
+        rec = self._rec()
+        with (
+            patch.object(remote.core, "MAX_AUTO_TRADE_USDC", Decimal("25")),
+            patch.object(
+                remote,
+                "_state",
+                return_value={
+                    "last_seen_unix": remote.time.time(),
+                    "geo_blocked": False,
+                },
+            ),
+            patch.object(remote, "_strict_position_size", return_value=Decimal("5")),
+            patch.object(remote, "_strict_open_orders_for_asset", return_value=[]),
+        ):
+            allowed = remote._authorize_order_for_handoff(rec)
+
+        self.assertFalse(allowed)
+        self.assertEqual(rec["status"], "FAILED")
+        self.assertIn("already holds", rec["error"])
+
+    def test_handoff_blocks_fast_preflight_when_open_order_exists(self):
+        rec = self._rec()
+        with (
+            patch.object(remote.core, "MAX_AUTO_TRADE_USDC", Decimal("25")),
+            patch.object(
+                remote,
+                "_state",
+                return_value={
+                    "last_seen_unix": remote.time.time(),
+                    "geo_blocked": False,
+                },
+            ),
+            patch.object(remote, "_strict_position_size", return_value=Decimal("0")),
+            patch.object(remote, "_strict_open_orders_for_asset", return_value=[object()]),
+        ):
+            allowed = remote._authorize_order_for_handoff(rec)
+
+        self.assertFalse(allowed)
+        self.assertEqual(rec["status"], "FAILED")
+        self.assertIn("open order", rec["error"])
 
 
 class ExecutorLeaseTests(unittest.TestCase):
