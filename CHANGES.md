@@ -1,3 +1,10 @@
+## 2026-10-01 — Show stake and share count on basketball open positions
+
+- WNBA/NBA **Open positions** cards now display the tracked stake and current share holding.
+- The card shows **Stake $X.XX · Shares X.XX** above Entry/Live price and Live P/L.
+- Share count comes from the current live position mark, so partially sold positions display the remaining holding rather than the original quantity.
+- Stake uses the execution's actual cost when available, falling back to the original trade budget.
+
 ## 2026-10-01 — Make PW retries flow through the normal basketball monitor pipeline
 
 - Failed/replayed WNBA/NBA PW calls are now re-hydrated with normal monitor metadata before they are requeued: sport, monitor source, PW signal ID, selection, and posted timestamp when available.
