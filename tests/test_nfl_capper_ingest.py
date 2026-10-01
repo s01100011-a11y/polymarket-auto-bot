@@ -1595,3 +1595,25 @@ def test_nfl_sell_zero_balance_is_treated_as_already_sold_ui_state():
     source = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
     assert "CLOB outcome-token balance became zero before SELL" in source
     assert "No second SELL was submitted" in source
+
+def test_exact_position_label_prefers_executed_polymarket_total_line():
+    rec = {
+        "strategy_selection": "Under 38",
+        "strategy_executed_total_line": "38.5",
+    }
+    quote = {
+        "market_type": "total",
+        "resolved_outcome": "Under",
+        "market": "Game Total O/U 38.5",
+    }
+    assert capper._exact_position_label(rec, quote) == "Under 38.5"
+
+
+def test_open_position_ui_shows_units_to_win_exact_position_and_decimal_odds():
+    source = Path("app/nfl_capper_ingest.py").read_text(encoding="utf-8")
+    assert "function nflOdds(v)" in source
+    assert "function nflUnits(v)" in source
+    assert "Exact position:" in source
+    assert "To win $" in source
+    assert "unitTitle+' · OPEN" in source
+    assert "Entry odds '+entry+' · Live odds '+live" in source
