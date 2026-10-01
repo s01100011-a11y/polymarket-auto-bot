@@ -33,6 +33,21 @@ class ExecutorQueueSafetyTests(unittest.TestCase):
         )
         self.assertTrue(remote._effective_executor_result_ok("PREVIEW", True, {}))
 
+
+    def test_min_decimal_odds_gate_requires_approval_below_170(self):
+        below = {"max_price": "0.59"}
+        at_or_above = {"max_price": "0.588235"}
+
+        self.assertTrue(remote._buy_requires_min_odds_approval(below))
+        self.assertEqual(below["approval_reason"], "MIN_ODDS")
+        self.assertEqual(below["minimum_decimal_odds"], "1.70")
+        self.assertFalse(remote._buy_requires_min_odds_approval(at_or_above))
+
+    def test_min_odds_helper_records_implied_decimal_odds(self):
+        payload = {"signal_buy_price": "0.60", "max_price": "0.61"}
+        self.assertTrue(remote._buy_requires_min_odds_approval(payload))
+        self.assertEqual(payload["signal_decimal_odds"], "1.6667")
+
     def test_successful_single_buy_recording_does_not_reference_combo_pending_state(self):
         queue_rec = {
             "id": "exec-buy",
