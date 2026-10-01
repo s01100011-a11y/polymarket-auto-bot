@@ -495,37 +495,8 @@ def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any
     except Exception as exc:
         return {"status": "market_resolution_failed", "error": f"{type(exc).__name__}: {exc}"}
 
-    position = remote._authoritative_position(asset_id)
-    try:
-        position_size = Decimal(str(getattr(position, "current_size", "0") or "0")) if position is not None else Decimal("0")
-    except Exception:
-        position_size = Decimal("0")
-    if position_size > 0:
-        return {
-            "status": "position_exists",
-            "asset_id": asset_id,
-            "position_size": str(position_size),
-        }
-
-    try:
-        open_orders = _open_orders_for_asset(asset_id)
-    except Exception as exc:
-        return {
-            "status": "open_order_check_failed",
-            "asset_id": asset_id,
-            "error": f"{type(exc).__name__}: {exc}",
-        }
-    if open_orders:
-        return {
-            "status": "open_order_exists",
-            "asset_id": asset_id,
-            "open_order_count": len(open_orders),
-            "order_ids": [
-                str(getattr(order, "order_id", None) or getattr(order, "id", None) or "")
-                for order in open_orders
-            ][:10],
-        }
-
+    # Duplicate attribution must come from this bot's own execution/queue
+    # records, not from total wallet shares or manual/external open orders.
     if _active_or_pending(asset_id, market_url, outcome):
         return {"status": "duplicate_active", "asset_id": asset_id}
 
@@ -606,8 +577,6 @@ def _run_requested_retry_worker() -> None:
     terminal = {
         "queued",
         "already_retried",
-        "position_exists",
-        "open_order_exists",
         "duplicate_active",
         "missing_request",
         "not_retryable",
