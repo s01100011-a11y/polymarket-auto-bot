@@ -30,6 +30,10 @@ _QUEUE_LOCK = threading.Lock()
 PAIR_TTL_SECONDS = 1800
 LEASE_SECONDS = max(30, min(300, int(os.getenv("EXECUTOR_LEASE_SECONDS", "90"))))
 CONNECTED_SECONDS = 60
+SLACK_FAST_PREFLIGHT_MAX_AGE_SECONDS = max(
+    10,
+    min(60, int(os.getenv("SLACK_FAST_PREFLIGHT_MAX_AGE_SECONDS", "45"))),
+)
 EXECUTOR_BUY_TTL_SECONDS = max(
     30,
     int(
@@ -249,6 +253,34 @@ def _authoritative_position(asset_id: str):
     return None
 
 
+def _strict_position_size(asset_id: str) -> Decimal:
+    wallet = os.getenv("POLYMARKET_DEPOSIT_WALLET", "").strip()
+    if not wallet:
+        raise RuntimeError("Railway wallet is not configured")
+    with PublicClient() as client:
+        for position in client.list_positions(user=wallet, page_size=100).iter_items():
+            if str(getattr(position, "asset_id", "")) == str(asset_id):
+                return Decimal(str(getattr(position, "current_size", "0") or "0"))
+    return Decimal("0")
+
+
+def _strict_open_orders_for_asset(asset_id: str) -> list[Any]:
+    with live_trading._secure_client() as client:
+        try:
+            return list(client.list_open_orders(asset_id=asset_id).iter_items())
+        except TypeError:
+            orders = list(client.list_open_orders().iter_items())
+            return [
+                order
+                for order in orders
+                if str(
+                    getattr(order, "asset_id", None)
+                    or getattr(order, "token_id", None)
+                    or ""
+                ) == str(asset_id)
+            ]
+
+
 def _queue_load() -> dict[str, Any]:
     return core._load(EXECUTOR_QUEUE_FILE)
 
@@ -370,6 +402,77 @@ def _authorize_order_for_handoff(rec: dict[str, Any]) -> bool:
     # This value is server-stamped at handoff, not trusted from the original caller.
     # Termux requires it and independently verifies budget <= this current dashboard cap.
     payload["authorized_max_auto_trade_usdc"] = str(cap)
+
+    # Slack live resting limits use an exact asset resolved on Railway. Before
+    # allowing the phone to skip redundant public preflight calls, reconcile the
+    # authoritative wallet and authenticated open-order state here and require a
+    # recent explicit non-blocked heartbeat from that same executor.
+    if (
+        rec.get("action") == "BUY"
+        and str(payload.get("source") or "") == "slack_live"
+        and str(payload.get("asset_id") or "").strip()
+        and int(payload.get("limit_order_ttl_seconds") or 0) > 0
+    ):
+        state = _state()
+        last_seen = float(state.get("last_seen_unix") or 0)
+        heartbeat_age = time.time() - last_seen if last_seen else 10**9
+        if (
+            state.get("geo_blocked") is not False
+            or heartbeat_age > CONNECTED_SECONDS
+        ):
+            stamp = _now_iso()
+            rec["status"] = "FAILED"
+            rec["updated_at"] = stamp
+            rec["error"] = (
+                "Slack live BUY blocked at handoff: executor does not have a recent "
+                "explicit non-blocked geo heartbeat"
+            )
+            rec.pop("lease_until_unix", None)
+            return False
+
+        asset_id = str(payload.get("asset_id") or "").strip()
+        try:
+            position_before = _strict_position_size(asset_id)
+            open_orders = _strict_open_orders_for_asset(asset_id)
+        except Exception as exc:
+            stamp = _now_iso()
+            rec["status"] = "FAILED"
+            rec["updated_at"] = stamp
+            rec["error"] = (
+                "Slack live BUY blocked at handoff: authoritative duplicate "
+                f"reconciliation failed: {type(exc).__name__}: {exc}"
+            )
+            rec.pop("lease_until_unix", None)
+            return False
+
+        if position_before > 0:
+            stamp = _now_iso()
+            rec["status"] = "FAILED"
+            rec["updated_at"] = stamp
+            rec["error"] = (
+                f"Slack live BUY blocked at handoff: wallet already holds {position_before} "
+                "shares of this outcome"
+            )
+            rec.pop("lease_until_unix", None)
+            return False
+
+        if open_orders:
+            stamp = _now_iso()
+            rec["status"] = "FAILED"
+            rec["updated_at"] = stamp
+            rec["error"] = (
+                f"Slack live BUY blocked at handoff: {len(open_orders)} open order(s) "
+                "already exist for this outcome"
+            )
+            rec.pop("lease_until_unix", None)
+            return False
+
+        payload["server_fast_preflight"] = True
+        payload["server_fast_preflight_unix"] = time.time()
+        payload["server_position_before"] = str(position_before)
+        payload["server_geo_heartbeat_unix"] = last_seen
+        payload["server_fast_preflight_max_age_seconds"] = SLACK_FAST_PREFLIGHT_MAX_AGE_SECONDS
+
     rec["payload"] = payload
     return True
 
