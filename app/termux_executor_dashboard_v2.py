@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from decimal import Decimal
 from typing import Any
 
@@ -17,6 +19,29 @@ def _d(value: Any, default: str = "0") -> Decimal:
         return Decimal(str(value))
     except Exception:
         return Decimal(default)
+
+
+def _dashboard_exact_position(rec: dict, q: dict) -> str | None:
+    outcome = str(q.get("resolved_outcome") or q.get("requested_outcome") or "").strip()
+    market = str(q.get("market") or "").strip()
+    kind = str(q.get("market_type") or "").strip().lower()
+    line = rec.get("strategy_executed_total_line") if kind == "total" else rec.get("strategy_executed_spread_line") if kind == "spread" else None
+    if line in {None, ""} and kind == "total":
+        matches = re.findall(r"(?<![A-Za-z])([+-]?\d+(?:\.\d+)?)(?![A-Za-z])", market)
+        line = matches[-1] if matches else None
+    if line in {None, ""} and kind == "spread":
+        matches = re.findall(r"([+-]\d+(?:\.\d+)?)", market)
+        line = matches[-1] if matches else None
+    if line not in {None, ""}:
+        try:
+            number = Decimal(str(line))
+            line_text = format(number.normalize(), "f").rstrip("0").rstrip(".") if "." in format(number.normalize(), "f") else format(number.normalize(), "f")
+            if kind == "spread" and number > 0:
+                line_text = "+" + line_text
+            return f"{outcome} {line_text}".strip()
+        except Exception:
+            pass
+    return outcome or market or None
 
 
 def _estimate_pnl_live_v2(records: list[dict]) -> tuple[list[dict], Decimal]:
@@ -65,6 +90,13 @@ def _estimate_pnl_live_v2(records: list[dict]) -> tuple[list[dict], Decimal]:
                 "id": rec.get("id"),
                 "market": q.get("market") or (rec.get("intent") or {}).get("market_url"),
                 "market_url": q.get("market_url") or (rec.get("intent") or {}).get("market_url"),
+                "selection": rec.get("strategy_selection") or q.get("requested_outcome") or q.get("market"),
+                "exact_position": _dashboard_exact_position(rec, q),
+                "units": rec.get("strategy_units"),
+                "target_profit_usdc": rec.get("strategy_target_profit_usdc") or (
+                    str((_d(rec.get("strategy_units")) * _d(rec.get("strategy_unit_usdc"))).quantize(Decimal("0.01")))
+                    if _d(rec.get("strategy_units")) > 0 and _d(rec.get("strategy_unit_usdc")) > 0 else None
+                ),
                 "outcome": q.get("resolved_outcome") or q.get("requested_outcome"),
                 "side": pnl_base._trade_side(rec),
                 "entry_price": str(entry) if entry else None,
