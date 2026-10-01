@@ -161,3 +161,9 @@ def test_basketball_monitor_shows_min_odds_approval_action():
     assert "/api/executor/approve-buy/" in source
     assert "minimum_decimal_odds" in live
     assert "signal_decimal_odds" in live
+
+
+def test_basketball_sell_zero_balance_is_treated_as_already_sold_ui_state():
+    source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+    assert "CLOB outcome-token balance became zero before SELL" in source
+    assert "No second SELL was submitted" in source
