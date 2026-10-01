@@ -1,3 +1,9 @@
+## 2026-10-01 — Repair basketball dashboard source and guard syntax
+
+- Restored `app/basketball_monitor_capper.py` from the last known-good production revision after the first stake/shares UI patch corrupted the embedded JavaScript/Python boundary.
+- Re-applied the open-position **Stake $X.XX · Shares X.XX** display cleanly.
+- Added a regression test that compiles the dashboard Python source so malformed embedded-dashboard edits fail CI before deployment.
+
 ## 2026-10-01 — Show stake and share count on basketball open positions
 
 - WNBA/NBA **Open positions** cards now display the tracked stake and current share holding.
