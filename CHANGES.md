@@ -1,3 +1,13 @@
+## 2026-10-01 — NBA/WNBA live Slack orders rest at signal price for 120 seconds
+
+- NBA/WNBA `slack_live` BUY payloads now include the exact Polymarket asset ID and a 120-second limit-order lifetime.
+- The Termux executor no longer rejects these live limit orders merely because the current ask has moved above the signal price or the current spread widened; it submits the approved signal-price limit and lets it rest for a retrace.
+- The local executor watches the order for 120 seconds, records partial/full fills, then cancels any unfilled remainder.
+- A later exchange-side GTD expiration is attached as a safety backstop because the current SDK requires GTD expirations several minutes in the future.
+- Executor queue leases are extended dynamically for resting BUYs so Railway cannot reclaim a legitimate 120-second order while it is active.
+- Failed Slack BUY retries now carry the exact asset ID and the same 120-second limit behavior.
+- Added regression tests for 120-second defaults, non-crossing resting limits, TTL bounds, and lease coverage.
+
 ## 2026-10-01 — Safe supervisor retirement fix
 
 - Fixed the Termux cleanup path that could terminate the current launcher's process chain before the executor started.

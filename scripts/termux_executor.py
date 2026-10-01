@@ -27,6 +27,14 @@ BRIDGE_URL = os.getenv("EXECUTOR_BRIDGE_URL", "https://polymarket-auto-bot-produ
 WORKER_NAME = os.getenv("EXECUTOR_NAME", "termux-phone")
 WORKER_CAPABILITIES = ("PREVIEW", "BUY", "SELL", "COMBO_PREVIEW", "COMBO_BUY")
 FILL_WAIT_SECONDS = max(3, min(15, int(os.getenv("EXECUTOR_FILL_WAIT_SECONDS", "8"))))
+SLACK_LIVE_LIMIT_ORDER_SECONDS = max(
+    30,
+    min(300, int(os.getenv("SLACK_LIVE_LIMIT_ORDER_SECONDS", "120"))),
+)
+GTD_EXPIRY_BUFFER_SECONDS = max(
+    65,
+    min(180, int(os.getenv("EXECUTOR_GTD_EXPIRY_BUFFER_SECONDS", "70"))),
+)
 TOKEN_FILE = Path(os.getenv("EXECUTOR_TOKEN_FILE", str(Path.home() / ".config/polymarket-termux/executor_token"))).expanduser()
 JOURNAL_FILE = Path(os.getenv("EXECUTOR_JOURNAL_FILE", str(Path.home() / ".config/polymarket-termux/executor_journal.json"))).expanduser()
 WORKER_LOCK_FILE = Path(os.getenv("EXECUTOR_WORKER_LOCK_FILE", str(Path.home() / ".config/polymarket-termux/executor_worker.lock"))).expanduser()
@@ -262,6 +270,19 @@ def _retry_connect(stage: str, fn: Any) -> Any:
     raise RuntimeError(f"BUY_{stage}_CONNECT_TIMEOUT retry loop exhausted")
 
 
+def _limit_order_seconds(payload: dict[str, Any]) -> int:
+    raw = payload.get("limit_order_ttl_seconds")
+    if raw in (None, ""):
+        if str(payload.get("source") or "") == "slack_live":
+            return SLACK_LIVE_LIMIT_ORDER_SECONDS
+        return 0
+    try:
+        value = int(raw)
+    except Exception as exc:
+        raise RuntimeError("Invalid limit_order_ttl_seconds") from exc
+    return max(0, min(300, value))
+
+
 def _place_limit_order_with_connect_retry(
     private_key: str,
     wallet: str,
@@ -269,6 +290,7 @@ def _place_limit_order_with_connect_retry(
     asset_id: str,
     price: Decimal,
     shares: Decimal,
+    expiration: int | None = None,
 ) -> Any:
     """Retry a BUY only when connection establishment itself timed out."""
     attempts = BUY_CONNECT_RETRIES + 1
@@ -280,6 +302,7 @@ def _place_limit_order_with_connect_retry(
                     price=str(price),
                     size=str(shares),
                     side="BUY",
+                    expiration=expiration,
                 )
         except Exception as exc:
             if _is_connect_timeout(exc):
@@ -469,6 +492,7 @@ def _validate_budget_caps(payload: dict[str, Any]) -> Decimal:
 
 def _validate_buy(payload: dict[str, Any]) -> dict[str, Any]:
     market_type = _canonical_market_type(payload.get("market_type"))
+    limit_order_seconds = _limit_order_seconds(payload)
     if market_type not in {"moneyline", "spread", "total"}:
         raise RuntimeError("Executor supports only moneyline, spread, and total game markets")
 
@@ -517,24 +541,38 @@ def _validate_buy(payload: dict[str, Any]) -> dict[str, Any]:
                 )
             asset_id, _, outcome_label = core._resolve_asset(market, outcome)
 
-        buy_price = Decimal(str(client.get_price(asset_id=asset_id, side="BUY")))
-        spread = Decimal(str(client.get_spread(asset_id=asset_id)))
-        book = client.get_order_book(asset_id=asset_id)
         min_size = Decimal(
             str(getattr(getattr(market, "trading", None), "minimum_order_size", "0") or "0")
         )
 
-    if buy_price <= 0 or buy_price >= 1:
-        raise RuntimeError(f"Invalid current BUY price {buy_price}")
-    if buy_price > max_price:
-        raise RuntimeError(f"Current BUY price {buy_price} exceeds your maximum price {max_price}")
-    if spread > max_spread:
-        raise RuntimeError(f"Current spread {spread} exceeds maximum spread {max_spread}")
+        if limit_order_seconds > 0 and expected_asset_id:
+            # Railway already resolved the exact token at signal time. For a
+            # resting limit, re-fetching price/spread/book only creates latency
+            # and can incorrectly reject an order whose whole purpose is to wait
+            # for the market to return to max_price.
+            buy_price = Decimal(str(payload.get("signal_buy_price") or max_price))
+            spread = Decimal(str(payload.get("signal_spread") or "0"))
+            best_ask = None
+        else:
+            buy_price = Decimal(str(client.get_price(asset_id=asset_id, side="BUY")))
+            spread = Decimal(str(client.get_spread(asset_id=asset_id)))
+            book = client.get_order_book(asset_id=asset_id)
+            asks = getattr(book, "asks", None) or []
+            best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
 
-    asks = getattr(book, "asks", None) or []
-    best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
-    if best_ask is None or best_ask > max_price:
-        raise RuntimeError("Selected limit would not cross the current best ask")
+    if buy_price <= 0 or buy_price >= 1:
+        raise RuntimeError(f"Invalid BUY reference price {buy_price}")
+
+    # Immediate BUYs keep the old crossing/spread checks. Time-limited live
+    # limit orders intentionally do not: if price has moved above the signal
+    # price, the order should rest at max_price and wait for a retrace.
+    if limit_order_seconds <= 0:
+        if buy_price > max_price:
+            raise RuntimeError(f"Current BUY price {buy_price} exceeds your maximum price {max_price}")
+        if spread > max_spread:
+            raise RuntimeError(f"Current spread {spread} exceeds maximum spread {max_spread}")
+        if best_ask is None or best_ask > max_price:
+            raise RuntimeError("Selected limit would not cross the current best ask")
 
     shares = (budget / max_price).quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
     if min_size > 0 and shares < min_size:
@@ -550,6 +588,8 @@ def _validate_buy(payload: dict[str, Any]) -> dict[str, Any]:
         "requested_shares": str(shares),
         "budget_usdc": str(budget),
         "max_price": str(max_price),
+        "limit_order_ttl_seconds": limit_order_seconds,
+        "will_rest_if_needed": bool(limit_order_seconds > 0),
     }
 
 
@@ -725,6 +765,7 @@ def _buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, An
     asset_id = quote["asset_id"]
     shares = Decimal(quote["requested_shares"])
     max_price = Decimal(quote["max_price"])
+    limit_order_seconds = int(quote.get("limit_order_ttl_seconds") or 0)
 
     print(f"BUY_STAGE trade={trade_id or '-'} stage=POSITION_BEFORE status=START", flush=True)
     before = _retry_connect(
@@ -732,66 +773,145 @@ def _buy(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, An
         lambda: _position_size(wallet, asset_id),
     )
 
-    print(f"BUY_STAGE trade={trade_id or '-'} stage=SUBMISSION status=START", flush=True)
+    # The current SDK requires GTD expirations several minutes in the future.
+    # We still enforce the user's shorter 120s policy locally, while the later
+    # GTD expiry acts as a hard exchange-side fallback if the phone cannot cancel.
+    expiration = None
+    if limit_order_seconds > 0:
+        expiration = int(time.time()) + limit_order_seconds + GTD_EXPIRY_BUFFER_SECONDS
+
+    print(
+        f"BUY_STAGE trade={trade_id or '-'} stage=SUBMISSION status=START "
+        f"limit_price={max_price} rest_seconds={limit_order_seconds or 0}",
+        flush=True,
+    )
     response = _place_limit_order_with_connect_retry(
         private_key,
         wallet,
         asset_id=asset_id,
         price=max_price,
         shares=shares,
+        expiration=expiration,
     )
     order_id = str(getattr(response, "order_id", "") or "")
     print(
-        f"BUY_STAGE trade={trade_id or '-'} stage=SUBMISSION status=ACCEPTED order_id={order_id or '-'}",
+        f"BUY_STAGE trade={trade_id or '-'} stage=SUBMISSION status=ACCEPTED "
+        f"order_id={order_id or '-'}",
         flush=True,
     )
 
     # Once place_limit_order returns, never submit a second BUY for this request.
-    # Reconciliation/cancellation may be retried, but another order cannot be
-    # created from this execution path.
+    # For Slack live orders, allow the limit to rest for the requested window.
     after = before
-    deadline = time.time() + FILL_WAIT_SECONDS
-    reconcile_error: Exception | None = None
+    wait_seconds = limit_order_seconds if limit_order_seconds > 0 else FILL_WAIT_SECONDS
+    deadline = time.time() + wait_seconds
+    reconcile_errors = 0
+    last_reconcile_error: Exception | None = None
+
     while time.time() < deadline:
         time.sleep(0.75)
         try:
             after = _position_size_after_submission(wallet, asset_id, before)
-            reconcile_error = None
+            last_reconcile_error = None
+            reconcile_errors = 0
         except Exception as exc:
-            reconcile_error = exc
-            break
-        if after > before:
+            last_reconcile_error = exc
+            reconcile_errors += 1
+            print(
+                f"BUY_RECONCILE_WAIT trade={trade_id or '-'} "
+                f"error_count={reconcile_errors} error={type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            # Preserve the old fail-fast behavior for immediate orders. Resting
+            # Slack limits keep their already-submitted order alive and retry
+            # position reconciliation without ever submitting another BUY.
+            if limit_order_seconds <= 0:
+                break
+            continue
+
+        filled_so_far = max(Decimal("0"), after - before)
+        if filled_so_far >= shares - Decimal("0.0001"):
             break
 
-    with _secure(private_key, wallet) as client:
-        _cancel_quietly(client, order_id)
+    cancel_confirmed = True
+    filled_before_cancel = max(Decimal("0"), after - before)
+    if order_id and filled_before_cancel < shares - Decimal("0.0001"):
+        attempts = BUY_CONNECT_RETRIES + 1
+        cancel_confirmed = False
+        for attempt in range(1, attempts + 1):
+            try:
+                with _secure(private_key, wallet) as client:
+                    client.cancel_order(order_id=order_id)
+                cancel_confirmed = True
+                break
+            except Exception as exc:
+                if _is_connect_timeout(exc) and attempt < attempts:
+                    print(
+                        f"BUY_RETRY stage=CANCEL attempt={attempt}/{attempts} "
+                        f"error={type(exc).__name__}: {exc}",
+                        flush=True,
+                    )
+                    time.sleep(BUY_CONNECT_RETRY_DELAY_SECONDS)
+                    continue
+                print(
+                    f"BUY_CANCEL_UNCONFIRMED trade={trade_id or '-'} "
+                    f"order_id={order_id} error={type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                break
 
-    if reconcile_error is not None:
-        raise RuntimeError(
-            f"{reconcile_error}; submitted order_id={order_id or 'unknown'} was not re-submitted"
-        ) from reconcile_error
+    # One final position reconciliation after cancel/expiry window.
+    try:
+        final_after = _retry_connect(
+            "POSITION_FINAL",
+            lambda: _position_size(wallet, asset_id),
+        )
+        after = max(after, final_after)
+    except Exception as exc:
+        if last_reconcile_error is None:
+            last_reconcile_error = exc
 
     filled = max(Decimal("0"), after - before)
     result = dict(quote)
     result.update({
         "ok": filled > 0,
-        "status": "ORDER_SUBMITTED" if filled > 0 else "TEST_BUY_UNFILLED_CANCELED",
+        "status": (
+            "ORDER_SUBMITTED"
+            if filled > 0
+            else ("LIMIT_EXPIRED_CANCELED" if cancel_confirmed else "LIMIT_CANCEL_UNCONFIRMED")
+        ),
         "order_id": order_id,
         "filled_shares": str(filled),
         "position_before": str(before),
         "position_after": str(after),
         "entry_price": str(max_price),
-        "canceled_remainder": True,
+        "limit_order_ttl_seconds": limit_order_seconds,
+        "exchange_expiration": expiration,
+        "canceled_remainder": bool(cancel_confirmed),
+        "cancel_confirmed": bool(cancel_confirmed),
         "trade_id": payload.get("trade_id"),
         "executor": WORKER_NAME,
     })
+
+    if not cancel_confirmed and filled <= 0:
+        raise RuntimeError(
+            f"BUY_LIMIT_CANCEL_UNCONFIRMED: order_id={order_id or 'unknown'} may still be open; "
+            "automatic retry blocked"
+        )
+
+    if last_reconcile_error is not None and filled <= 0:
+        raise RuntimeError(
+            "BUY_POST_SUBMISSION_RECONCILE_FAILED: order was submitted and not re-submitted; "
+            f"order_id={order_id or 'unknown'} cancel_confirmed={cancel_confirmed}; "
+            f"last error: {type(last_reconcile_error).__name__}: {last_reconcile_error}"
+        ) from last_reconcile_error
+
     print(
         f"BUY_STAGE trade={trade_id or '-'} stage=COMPLETE status={result['status']} "
-        f"filled_shares={filled}",
+        f"filled_shares={filled} cancel_confirmed={cancel_confirmed}",
         flush=True,
     )
     return result
-
 
 def _sell(payload: dict[str, Any], private_key: str, wallet: str) -> dict[str, Any]:
     _geo()
