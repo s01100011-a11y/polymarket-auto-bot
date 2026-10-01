@@ -343,7 +343,9 @@ def _slack_trade_handler(
         "market_url": market_url,
         "outcome": outcome_label,
         "market_type": "moneyline",
+        "asset_id": asset_id,
         "max_price": str(buy_price),
+        "limit_order_ttl_seconds": 120,
         "budget_usdc": str(stake),
         "trade_id": trade_id,
         "max_spread": str(core.MAX_SPREAD),
@@ -517,6 +519,8 @@ def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any
     retry_payload = dict(payload)
     retry_payload.update({
         "trade_id": new_trade_id,
+        "asset_id": asset_id,
+        "limit_order_ttl_seconds": 120,
         "retry_of_request_id": request_id,
         "retry_reason": (
             "manual_resend_after_interrupted_execution_reconciled"
