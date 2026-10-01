@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 import uuid
@@ -738,4 +739,9 @@ def _start_requested_retry_worker() -> None:
     ).start()
 
 
-app.router.on_startup.append(_start_requested_retry_worker)
+# This application stack uses a custom lifespan and does not execute router
+# on_startup callbacks reliably. Start the one-shot retry worker at runtime
+# module import instead, while explicitly suppressing it under the Railway
+# pre-deploy unittest process so tests can never enqueue a live BUY.
+if "unittest" not in sys.modules:
+    _start_requested_retry_worker()
