@@ -216,11 +216,16 @@ def _prepare_remote_buy(payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(
                 "Termux executor is offline; live BUY was not queued"
             )
+    odds_approval_required = bool(remote._buy_requires_min_odds_approval(payload))
     req_id = f"exec-{uuid.uuid4().hex[:14]}"
     record = {
         "id": req_id,
         "action": "BUY",
-        "status": "PENDING" if core.auto_trading_enabled() else "WAITING_APPROVAL",
+        "status": (
+            "WAITING_APPROVAL"
+            if odds_approval_required or not core.auto_trading_enabled()
+            else "PENDING"
+        ),
         "payload": payload,
         "created_at": ingest._now_iso(),
         "created_unix": time.time(),
@@ -403,10 +408,13 @@ def _slack_trade_handler(
         "id": trade_id,
         "trade_id": trade_id,
         "paper": False,
-        "queued": bool(core.auto_trading_enabled()),
+        "queued": queued.get("status") == "PENDING",
         "prepared": True,
-        "requires_approval": not bool(core.auto_trading_enabled()),
+        "requires_approval": queued.get("status") == "WAITING_APPROVAL",
         "request_id": queued["id"],
+        "approval_reason": payload.get("approval_reason"),
+        "signal_decimal_odds": payload.get("signal_decimal_odds"),
+        "minimum_decimal_odds": payload.get("minimum_decimal_odds"),
         "source": "slack_live",
         "market": str(getattr(market, "question", None) or getattr(event, "title", f"{league.upper()} moneyline")),
         "market_url": market_url,
@@ -766,7 +774,7 @@ def slack_pending_live():
     rows = []
     for rec in queue.values():
         payload = rec.get("payload") or {}
-        if rec.get("action") != "BUY" or rec.get("status") != "WAITING_APPROVAL" or payload.get("source") != "slack_live":
+        if rec.get("action") != "BUY" or rec.get("status") != "WAITING_APPROVAL":
             continue
         rows.append({
             "request_id": rec.get("id"),
@@ -776,13 +784,20 @@ def slack_pending_live():
             "max_price": payload.get("max_price"),
             "budget_usdc": payload.get("budget_usdc"),
             "slack_event_id": payload.get("slack_event_id"),
+            "source": payload.get("source"),
+            "strategy_source": payload.get("strategy_source"),
+            "strategy_sport": payload.get("strategy_sport"),
+            "strategy_selection": payload.get("strategy_selection"),
+            "approval_reason": payload.get("approval_reason"),
+            "approval_message": payload.get("approval_message"),
+            "signal_decimal_odds": payload.get("signal_decimal_odds"),
+            "minimum_decimal_odds": payload.get("minimum_decimal_odds"),
         })
     rows.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return {"pending": rows[:50]}
 
 
-@app.post("/api/slack/approve-live/{request_id}", dependencies=[Depends(dashboard._auth)])
-def slack_approve_live(request_id: str):
+def _approve_waiting_buy(request_id: str) -> dict[str, Any]:
     ready, state = _executor_ready()
     if not ready:
         if state.get("geo_blocked"):
@@ -792,7 +807,7 @@ def slack_approve_live(request_id: str):
         queue = remote._queue_load()
         rec = queue.get(request_id)
         if not rec or rec.get("action") != "BUY" or rec.get("status") != "WAITING_APPROVAL":
-            raise HTTPException(status_code=404, detail="Prepared Slack order is not awaiting approval")
+            raise HTTPException(status_code=404, detail="Prepared BUY is not awaiting approval")
         rec["status"] = "PENDING"
         rec["approved_at"] = ingest._now_iso()
         rec["updated_at"] = ingest._now_iso()
@@ -801,19 +816,38 @@ def slack_approve_live(request_id: str):
     return {"ok": True, "request_id": request_id, "status": "PENDING"}
 
 
-@app.post("/api/slack/reject-live/{request_id}", dependencies=[Depends(dashboard._auth)])
-def slack_reject_live(request_id: str):
+def _reject_waiting_buy(request_id: str) -> dict[str, Any]:
     with remote._QUEUE_LOCK:
         queue = remote._queue_load()
         rec = queue.get(request_id)
         if not rec or rec.get("action") != "BUY" or rec.get("status") != "WAITING_APPROVAL":
-            raise HTTPException(status_code=404, detail="Prepared Slack order is not awaiting approval")
+            raise HTTPException(status_code=404, detail="Prepared BUY is not awaiting approval")
         rec["status"] = "CANCELLED"
         rec["rejected_at"] = ingest._now_iso()
         rec["updated_at"] = ingest._now_iso()
         queue[request_id] = rec
         remote._queue_save(queue)
     return {"ok": True, "request_id": request_id, "status": "CANCELLED"}
+
+
+@app.post("/api/executor/approve-buy/{request_id}", dependencies=[Depends(dashboard._auth)])
+def approve_waiting_buy(request_id: str):
+    return _approve_waiting_buy(request_id)
+
+
+@app.post("/api/executor/reject-buy/{request_id}", dependencies=[Depends(dashboard._auth)])
+def reject_waiting_buy(request_id: str):
+    return _reject_waiting_buy(request_id)
+
+
+@app.post("/api/slack/approve-live/{request_id}", dependencies=[Depends(dashboard._auth)])
+def slack_approve_live(request_id: str):
+    return _approve_waiting_buy(request_id)
+
+
+@app.post("/api/slack/reject-live/{request_id}", dependencies=[Depends(dashboard._auth)])
+def slack_reject_live(request_id: str):
+    return _reject_waiting_buy(request_id)
 
 
 @app.put("/api/slack/trading-mode", dependencies=[Depends(dashboard._auth)])
@@ -870,7 +904,7 @@ async function loadSlackTradingMode(){
   mode.textContent=d.railway_override?'LIVE AUTO · RAILWAY OVERRIDE':(live?'LIVE AUTO-PREPARE · APPROVAL REQUIRED':'PAPER ONLY');
   mode.className='slack-mode-value '+(live?'red':'green');
   state.textContent=(d.executor_connected?'Termux connected':'Termux offline')+(d.executor_geo_blocked?' · BLOCKED':'')+(d.executor_country?' · '+d.executor_country+'/'+(d.executor_region||''):'');
-  try{const pr=await fetch('/api/slack/pending-live',{cache:'no-store'}),pd=await pr.json();const box=document.getElementById('slackPendingApprovals');const rows=(pd.pending||[]);box.innerHTML=rows.length?'<div class="label" style="margin-bottom:5px">Awaiting approval</div>'+rows.map(x=>`<div class="slack-pending-row"><div><b>${x.outcome||'Order'}</b><div class="muted">${Number(x.budget_usdc||0).toFixed(2)} · max ${Number(x.max_price||0).toFixed(3)}</div></div><div class="slack-pending-actions"><button class="slack-approve-btn" data-slack-approve="${x.request_id}">APPROVE</button><button class="slack-reject-btn" data-slack-reject="${x.request_id}">REJECT</button></div></div>`).join(''):''}catch(_e){}
+  try{const pr=await fetch('/api/slack/pending-live',{cache:'no-store'}),pd=await pr.json();const box=document.getElementById('slackPendingApprovals');const rows=(pd.pending||[]);box.innerHTML=rows.length?'<div class="label" style="margin-bottom:5px">Awaiting approval</div>'+rows.map(x=>{const who=x.strategy_source||x.strategy_sport||x.source||'Sports bot';const pick=x.strategy_selection||x.outcome||'Order';const odds=x.signal_decimal_odds?(' · odds '+Number(x.signal_decimal_odds).toFixed(2)):'';const gate=x.approval_reason==='MIN_ODDS'?(' · MIN '+Number(x.minimum_decimal_odds||1.70).toFixed(2)):'';return `<div class="slack-pending-row"><div><b>${who} · ${pick}</b><div class="muted">${Number(x.budget_usdc||0).toFixed(2)} · max ${Number(x.max_price||0).toFixed(3)}${odds}${gate}</div></div><div class="slack-pending-actions"><button class="slack-approve-btn" data-slack-approve="${x.request_id}">APPROVE</button><button class="slack-reject-btn" data-slack-reject="${x.request_id}">REJECT</button></div></div>`}).join(''):''}catch(_e){}
   if(stake&&!stake.dataset.dirty)stake.value=d.stake_usdc;
   document.getElementById('slackStakeMax').textContent='$'+Number(d.max_stake_usdc).toFixed(2);
   document.getElementById('slackPaperBtn').classList.toggle('active',!live);
