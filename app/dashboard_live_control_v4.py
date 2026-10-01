@@ -151,7 +151,23 @@ def _executor_ready() -> tuple[bool, dict[str, Any]]:
     return ready, state
 
 
-def _active_or_pending(asset_id: str, market_url: str, outcome: str) -> bool:
+def _pw_signal_key(payload: dict[str, Any]) -> str:
+    return str(
+        payload.get("slack_event_id")
+        or payload.get("strategy_pick_id")
+        or ""
+    ).strip()
+
+
+def _active_or_pending(
+    asset_id: str,
+    market_url: str,
+    outcome: str,
+    *,
+    signal_key: str | None = None,
+) -> bool:
+    """Block duplicates for the same PW/Slack signal, not every call on the same side."""
+    signal_key = str(signal_key or "").strip()
     remote._expire_stale_buys_persisted()
     executions = core._load(core.EXECUTIONS_FILE)
     for rec in executions.values():
@@ -160,8 +176,13 @@ def _active_or_pending(asset_id: str, market_url: str, outcome: str) -> bool:
         if rec.get("status") not in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}:
             continue
         q = rec.get("quote") or {}
-        if str(q.get("asset_id") or "") == asset_id:
-            return True
+        if str(q.get("asset_id") or "") != asset_id:
+            continue
+        if signal_key:
+            rec_key = str(rec.get("slack_event_id") or rec.get("strategy_pick_id") or "").strip()
+            if rec_key != signal_key:
+                continue
+        return True
 
     queue = remote._queue_load()
     for rec in queue.values():
@@ -171,10 +192,13 @@ def _active_or_pending(asset_id: str, market_url: str, outcome: str) -> bool:
         if payload.get("source") != "slack_live":
             continue
         if (
-            str(payload.get("market_url") or "") == market_url
-            and str(payload.get("outcome") or "").casefold() == outcome.casefold()
+            str(payload.get("market_url") or "") != market_url
+            or str(payload.get("outcome") or "").casefold() != outcome.casefold()
         ):
-            return True
+            continue
+        if signal_key and _pw_signal_key(payload) != signal_key:
+            continue
+        return True
     return False
 
 
@@ -316,8 +340,13 @@ def _slack_trade_handler(
         raise ValueError("Could not determine NBA/WNBA league for predicted winner")
     market_url = f"https://polymarket.com/sports/{league}/{event_slug}"
 
-    if _active_or_pending(asset_id, market_url, outcome_label):
-        raise ValueError("An open or pending LIVE position already exists for this selection")
+    if _active_or_pending(
+        asset_id,
+        market_url,
+        outcome_label,
+        signal_key=slack_event_id,
+    ):
+        raise ValueError("This PW/Slack signal already has an open or pending LIVE position")
 
     unit_config = None
     unit_usdc = None
@@ -508,8 +537,18 @@ def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any
 
     # Duplicate attribution must come from this bot's own execution/queue
     # records, not from total wallet shares or manual/external open orders.
-    if _active_or_pending(asset_id, market_url, outcome):
-        return {"status": "duplicate_active", "asset_id": asset_id}
+    signal_key = _pw_signal_key(payload)
+    if _active_or_pending(
+        asset_id,
+        market_url,
+        outcome,
+        signal_key=signal_key or None,
+    ):
+        return {
+            "status": "duplicate_active",
+            "asset_id": asset_id,
+            "signal_key": signal_key or None,
+        }
 
     new_trade_id = f"{payload.get('trade_id') or 'slack-live'}-retry-{uuid.uuid4().hex[:6]}"
     new_request_id = f"exec-{uuid.uuid4().hex[:14]}"
@@ -549,14 +588,21 @@ def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any
             }
         for existing in data.values():
             ep = existing.get("payload") or {}
-            if (
+            if not (
                 existing.get("action") == "BUY"
                 and existing.get("status") in {"PENDING", "LEASED"}
                 and ep.get("source") == "slack_live"
                 and str(ep.get("market_url") or "") == market_url
                 and str(ep.get("outcome") or "").casefold() == outcome.casefold()
             ):
-                return {"status": "duplicate_active", "request_id": existing.get("id")}
+                continue
+            if signal_key and _pw_signal_key(ep) != signal_key:
+                continue
+            return {
+                "status": "duplicate_active",
+                "request_id": existing.get("id"),
+                "signal_key": signal_key or None,
+            }
 
         data[new_request_id] = record
         latest["manual_retry_request_id"] = new_request_id
