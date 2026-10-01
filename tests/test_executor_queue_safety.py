@@ -33,6 +33,35 @@ class ExecutorQueueSafetyTests(unittest.TestCase):
         )
         self.assertTrue(remote._effective_executor_result_ok("PREVIEW", True, {}))
 
+
+    def test_min_decimal_odds_gate_requires_approval_below_170(self):
+        below = {"max_price": "0.59"}
+        at_or_above = {"max_price": "0.588235"}
+
+        self.assertTrue(remote._buy_requires_min_odds_approval(below))
+        self.assertEqual(below["approval_reason"], "MIN_ODDS")
+        self.assertEqual(below["minimum_decimal_odds"], "1.70")
+        self.assertFalse(remote._buy_requires_min_odds_approval(at_or_above))
+
+    def test_min_odds_helper_records_implied_decimal_odds(self):
+        payload = {"signal_buy_price": "0.60", "max_price": "0.61"}
+        self.assertTrue(remote._buy_requires_min_odds_approval(payload))
+        self.assertEqual(payload["signal_decimal_odds"], "1.6667")
+
+    def test_sub_170_buy_is_held_for_approval_even_when_executor_is_offline(self):
+        saved = {}
+        with (
+            patch.object(remote, "REMOTE_EXECUTION_ENABLED", True),
+            patch.object(remote, "_state", return_value={}),
+            patch.object(remote, "_queue_load", return_value={}),
+            patch.object(remote, "_queue_save", side_effect=lambda data: saved.update(data)),
+        ):
+            record = remote._enqueue("BUY", {"max_price": "0.60", "budget_usdc": "10"})
+
+        self.assertEqual(record["status"], "WAITING_APPROVAL")
+        self.assertEqual(record["payload"]["approval_reason"], "MIN_ODDS")
+        self.assertIn(record["id"], saved)
+
     def test_successful_single_buy_recording_does_not_reference_combo_pending_state(self):
         queue_rec = {
             "id": "exec-buy",

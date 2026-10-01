@@ -22,6 +22,20 @@ SPORTS = {
 }
 
 DEFAULT_UNIT_USDC = Decimal("10")
+BASKETBALL_3PCT_POLICY_KEY = "__basketball_3pct_policy_2026_10_01__"
+
+
+def _ensure_basketball_3pct_sizing(core: Any, nfl: Any) -> None:
+    """Apply the user's 3% portfolio sizing request once, then preserve later manual changes."""
+    settings = nfl._load_capper_unit_settings(core)
+    if settings.get(BASKETBALL_3PCT_POLICY_KEY):
+        return
+    for spec in SPORTS.values():
+        label = str(spec["label"])
+        settings[f"{label}::portfolio_pct"] = "3.00"
+        settings[f"{label}::mode"] = "portfolio_pct"
+    settings[BASKETBALL_3PCT_POLICY_KEY] = datetime.now(timezone.utc).isoformat()
+    core._save(nfl._capper_unit_settings_path(core), settings)
 
 
 def _parse_dt(value: Any) -> datetime | None:
@@ -246,6 +260,11 @@ def _signal_items(
                 "score": meta.get("score_at_alert") or parsed.get("score"),
                 "status": raw.get("status"),
                 "error": raw.get("error"),
+                "request_id": raw.get("executor_request_id") or (raw.get("live_trade") or {}).get("request_id"),
+                "approval_required": bool((raw.get("live_trade") or {}).get("requires_approval")),
+                "approval_reason": (raw.get("live_trade") or {}).get("approval_reason"),
+                "signal_decimal_odds": (raw.get("live_trade") or {}).get("signal_decimal_odds"),
+                "minimum_decimal_odds": (raw.get("live_trade") or {}).get("minimum_decimal_odds"),
                 "strategy_action": decision.get("action"),
                 "strategy_reason": decision.get("reason"),
                 "matched_strategies": decision.get("matched_strategies") or [],
@@ -267,6 +286,7 @@ def install(*, app: Any, dashboard: Any, core: Any, ingest: Any, nfl: Any) -> No
     if _INSTALLED:
         return
     _INSTALLED = True
+    _ensure_basketball_3pct_sizing(core, nfl)
 
     @app.get("/api/basketball-monitor/status", dependencies=[Depends(dashboard._auth)])
     def basketball_monitor_status():
@@ -509,10 +529,14 @@ function monitorSignals(x){
   if(item.bk_ml!==null&&item.bk_ml!==undefined)meta.push('BK ML '+(Number(item.bk_ml)>0?'+':'')+Number(item.bk_ml));
   if(item.score)meta.push('Score '+monitorEsc(item.score));
   if(item.status)meta.push('status '+monitorEsc(item.status));
+  if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
+  if(item.approval_reason==='MIN_ODDS')meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
   const action=item.strategy_action?item.strategy_action+(item.strategy_reason?' · '+item.strategy_reason:''):(item.error||'');
   let trade='';
   if(item.trade_executed){
    trade='<div class="monitor-action '+monitorPnlClass(item.trade_pnl_usdc)+'">Trade '+monitorEsc(item.trade_status||'tracked')+(item.trade_result?' · '+monitorEsc(item.trade_result):'')+(item.trade_pnl_usdc!==null&&item.trade_pnl_usdc!==undefined?' · P/L '+monitorMoney(item.trade_pnl_usdc):'')+'</div>';
+  }else if(item.approval_required&&item.request_id){
+   trade='<div class="monitor-action flat"><span class="capper-event-badge" style="color:#8a5b00">APPROVAL REQUIRED</span> <button type="button" data-request-id="'+monitorEsc(item.request_id)+'" onclick="monitorApproveBuy(this.dataset.requestId,this)">APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2)+'</button></div>';
   }else if(item.status==='NO_TRADE'||item.strategy_action==='PASS'){
    trade='<div class="monitor-action flat">NOT TRADED</div>';
   }
@@ -521,6 +545,17 @@ function monitorSignals(x){
  return '<div style="margin-top:12px"><span class="capper-section-badge">Signals'+(capperLast24hOnly?' · last 24h':'')+'</span>'+rows+'</div>';
 }
 
+async function monitorApproveBuy(requestId,btn){
+ if(!confirm('Approve this below-minimum-odds BUY for execution?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='APPROVING…';
+ try{
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
 async function monitorSetUnitSize(sportKey,btn){
  const input=document.getElementById('monitorUnitSize-'+sportKey);
  const value=Number(input&&input.value);

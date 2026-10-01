@@ -2185,12 +2185,6 @@ def _prepare_pick(
     if not core.auto_trading_enabled():
         raise RuntimeError("AUTO_TRADING is disabled")
 
-    ready, executor_state = live_control._executor_ready()
-    if not ready:
-        if executor_state.get("geo_blocked"):
-            raise RuntimeError("Termux executor is geoblocked")
-        raise RuntimeError("Termux executor is offline")
-
     units = _units_for_pick(pick)
     target_profit = nfl._target_profit_for_pick(pick, unit_usdc)
 
@@ -2243,9 +2237,14 @@ def _prepare_pick(
         "strategy_telegram_source": pick.get("source"),
     }
     queued = remote._enqueue("BUY", payload)
+    waiting_approval = str(queued.get("status") or "").upper() == "WAITING_APPROVAL"
     return {
-        "status": "QUEUED",
+        "status": "WAITING_APPROVAL" if waiting_approval else "QUEUED",
         "request_id": queued["id"],
+        "approval_required": waiting_approval,
+        "approval_reason": payload.get("approval_reason"),
+        "signal_decimal_odds": payload.get("signal_decimal_odds"),
+        "minimum_decimal_odds": payload.get("minimum_decimal_odds"),
         "trade_id": trade_id,
         "strategy_source": source_label,
         **match,
@@ -2486,6 +2485,10 @@ def _status_pick_item(
         "reason": record.get("reason"),
         "last_error": record.get("last_error"),
         "request_id": record.get("request_id"),
+        "approval_required": record.get("approval_required"),
+        "approval_reason": record.get("approval_reason"),
+        "signal_decimal_odds": record.get("signal_decimal_odds"),
+        "minimum_decimal_odds": record.get("minimum_decimal_odds"),
         "signal_id": record.get("id"),
         "buy_available": bool(
             saved_match
@@ -2636,6 +2639,13 @@ function cfbPhaseVisual(item){
  const status=String(item.status||'').toUpperCase();
  const result=String(item.trade_result||item.pick_result||'').toUpperCase();
  const label=cfbEventBadgeLabel(item);
+ if(status==='WAITING_APPROVAL'){
+  return {
+   label:'APPROVAL REQUIRED',
+   row:'background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.42);border-left:4px solid #f59e0b;',
+   badge:'color:#8a5b00;'
+  };
+ }
  if(phase==='CLOSED'&&result==='WIN'){
   return {
    label,
@@ -2715,17 +2725,21 @@ function cfbPickList(title,items,kind){
   if(item.event_phase!=='CLOSED'&&item.live_quote_error)meta.push('live odds unavailable');
   if(item.final_score)meta.push('Final '+cfbEsc(item.final_score));
   if(item.status)meta.push('status '+cfbEsc(item.status));
+  if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
+  if(item.approval_reason==='MIN_ODDS')meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
   if(item.reason&&['pregame','live','closed','unsupported','failed','signals'].includes(kind))meta.push(cfbEsc(item.reason));
   if(item.last_error&&['retrying','failed','signals'].includes(kind))meta.push(cfbEsc(item.last_error));
   if(!item.buy_available&&!['MATCHED','ALTERNATE_AVAILABLE'].includes(String(item.match_status||'')))meta.push('Polymarket match pending');
   if(item.manual_buy_status)meta.push('manual BUY '+cfbEsc(item.manual_buy_status));
   if(item.manual_buy_error)meta.push(cfbEsc(item.manual_buy_error));
   const state=String(item.manual_buy_status||'').toUpperCase();
+  const waitingApproval=String(item.status||'').toUpperCase()==='WAITING_APPROVAL';
   const locked=['PENDING','LEASED','DONE'].includes(state);
   const label=state==='DONE'?'BOUGHT':(state==='PENDING'||state==='LEASED'?'BUY '+state:'BUY LIVE');
-  const buyAction=(item.signal_id&&item.buy_available)?'<button type="button" style="margin-top:6px" data-signal-id="'+cfbEsc(item.signal_id)+'" onclick="cfbManualBuy(this.dataset.signalId,this)"'+(locked?' disabled':'')+'>'+label+'</button>':'';
+  const approveAction=(waitingApproval&&item.request_id)?'<button type="button" style="margin-top:6px;margin-right:6px" data-request-id="'+cfbEsc(item.request_id)+'" onclick="cfbApproveBuy(this.dataset.requestId,this)">APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2)+'</button>':'';
+  const buyAction=(item.signal_id&&item.buy_available&&!waitingApproval)?'<button type="button" style="margin-top:6px" data-signal-id="'+cfbEsc(item.signal_id)+'" onclick="cfbManualBuy(this.dataset.signalId,this)"'+(locked?' disabled':'')+'>'+label+'</button>':'';
   const alternatives=Array.isArray(item.live_alternatives)?item.live_alternatives:[];
-  const altActions=alternatives.map(alt=>{
+  const altActions=waitingApproval?'':alternatives.map(alt=>{
    const cents=(Number(alt.best_ask)*100).toFixed(1).replace(/\.0$/,'');
    const relative=alt.relative_to_original==='BETTER'?' BETTER LINE':(alt.relative_to_original==='WORSE'?' WORSE LINE':'');
    const odds=alt.live_odds_american?' ('+cfbEsc(alt.live_odds_american)+')':'';
@@ -2733,7 +2747,7 @@ function cfbPickList(title,items,kind){
   }).join('');
   const sellAction=(item.trade_id&&item.sell_available)?'<button type="button" style="margin-top:6px;margin-left:6px" data-trade-id="'+cfbEsc(item.trade_id)+'" onclick="cfbSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
   const marketAction=(item.event_phase!=='CLOSED'&&String(item.match_status||'')!=='INVALID_FUTURE_MATCH'&&item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+cfbEsc(item.market_url)+'">OPEN MARKET</a>':'';
-  const action=buyAction+altActions+sellAction+marketAction;
+  const action=approveAction+buyAction+altActions+sellAction+marketAction;
   const visual=cfbPhaseVisual(item);
   const badge=visual.label?'<span class="capper-event-badge" style="'+visual.badge+'">'+visual.label+'</span>':'';
   let pnlLine='';
@@ -2750,6 +2764,17 @@ function cfbPickList(title,items,kind){
   return '<div class="monitor-signal"><b>'+cfbEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<div class="monitor-meta">'+meta.join(' · ')+'</div>':'')+pnlLine+(action?'<div class="monitor-signal-actions">'+action+'</div>':'')+'</div>';
  }).join('');
  return '<div style="margin-top:8px"><span class="capper-section-badge">'+cfbEsc(title)+'</span>'+rows+'</div>';
+}
+async function cfbApproveBuy(requestId,btn){
+ if(!confirm('Approve this below-minimum-odds BUY for execution?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='APPROVING…';
+ try{
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED';
+  await loadCfbCapperStats();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
 }
 async function cfbManualBuy(signalId,btn){
  const original=btn.textContent;
@@ -3794,7 +3819,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 ),
                 "preview_done": sum(1 for r in rows if r.get("status") in {"PREVIEW_DONE", "EXECUTOR_DONE"}),
                 "preview_failed": sum(1 for r in rows if r.get("status") in {"PREVIEW_FAILED", "EXECUTOR_FAILED"}),
-                "preview_queued": sum(1 for r in rows if r.get("status") in {"PREVIEW_QUEUED", "QUEUED"}),
+                "preview_queued": sum(1 for r in rows if r.get("status") in {"PREVIEW_QUEUED", "QUEUED", "WAITING_APPROVAL"}),
                 "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
                 "pregame": sum(
                     1 for r in rows
@@ -3807,7 +3832,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "closed": sum(1 for r in rows if r.get("status") == "EVENT_CLOSED"),
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
                 "all_items": _recent_all_items(rows, executions=executions),
-                "queued_items": _recent_status_items(rows, {"PREVIEW_QUEUED", "QUEUED"}, executions=executions),
+                "queued_items": _recent_status_items(rows, {"PREVIEW_QUEUED", "QUEUED", "WAITING_APPROVAL"}, executions=executions),
                 "done_items": _recent_status_items(rows, {"PREVIEW_DONE", "EXECUTOR_DONE"}, executions=executions),
                 "previewed_items": _recent_status_items(rows, {"PREVIEW_DONE", "EXECUTOR_DONE"}, executions=executions),
                 "retrying_items": _recent_status_items(rows, "RETRYING", executions=executions),

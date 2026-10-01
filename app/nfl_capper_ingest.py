@@ -1420,7 +1420,7 @@ def _pending_auto_budget(remote: Any) -> Decimal:
     except Exception:
         return total
     for rec in queue.values():
-        if rec.get("action") != "BUY" or rec.get("status") not in {"PENDING", "LEASED"}:
+        if rec.get("action") != "BUY" or rec.get("status") not in {"WAITING_APPROVAL", "PENDING", "LEASED"}:
             continue
         try:
             total += Decimal(str((rec.get("payload") or {}).get("budget_usdc") or "0"))
@@ -1445,12 +1445,6 @@ def _prepare_pick(
 
     if not core.auto_trading_enabled():
         raise RuntimeError("AUTO_TRADING is disabled")
-
-    ready, executor_state = live_control._executor_ready()
-    if not ready:
-        if executor_state.get("geo_blocked"):
-            raise RuntimeError("Termux executor is geoblocked")
-        raise RuntimeError("Termux executor is offline")
 
     units = _units_for_pick(pick)
     target_profit = _target_profit_for_pick(pick, unit_usdc)
@@ -1581,9 +1575,14 @@ def _prepare_pick(
         "strategy_alternate_total_fallback": alternate_total_fallback,
     }
     queued = remote._enqueue("BUY", payload)
+    waiting_approval = str(queued.get("status") or "").upper() == "WAITING_APPROVAL"
     return {
-        "status": "QUEUED",
+        "status": "WAITING_APPROVAL" if waiting_approval else "QUEUED",
         "request_id": queued["id"],
+        "approval_required": waiting_approval,
+        "approval_reason": payload.get("approval_reason"),
+        "signal_decimal_odds": payload.get("signal_decimal_odds"),
+        "minimum_decimal_odds": payload.get("minimum_decimal_odds"),
         "trade_id": trade_id,
         "strategy_source": source_label,
         "market_type": kind,
@@ -2022,6 +2021,10 @@ def _nfl_signal_dashboard_item(
         "reason": record.get("reason"),
         "last_error": record.get("last_error"),
         "request_id": record.get("request_id"),
+        "approval_required": record.get("approval_required"),
+        "approval_reason": record.get("approval_reason"),
+        "signal_decimal_odds": record.get("signal_decimal_odds"),
+        "minimum_decimal_odds": record.get("minimum_decimal_odds"),
         "signal_id": record.get("id"),
         "pick_result": record.get("pick_result"),
         "trade_executed": execution is not None,
@@ -2731,7 +2734,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
 
             stats[label].update({
                 "signals": len(rows),
-                "queued": sum(1 for r in rows if r.get("status") == "QUEUED"),
+                "queued": sum(1 for r in rows if r.get("status") in {"QUEUED", "WAITING_APPROVAL"}),
                 "done": sum(1 for r in rows if r.get("status") == "EXECUTOR_DONE"),
                 "failed": sum(1 for r in rows if r.get("status") == "EXECUTOR_FAILED"),
                 "retrying": sum(1 for r in rows if r.get("status") == "RETRYING"),
@@ -2740,7 +2743,7 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "closed": sum(1 for item in items if item.get("event_phase") == "CLOSED"),
                 "unsupported": sum(1 for r in rows if r.get("status") == "IGNORED_UNSUPPORTED"),
                 "all_items": items[:60],
-                "queued_items": status_items("QUEUED"),
+                "queued_items": status_items("QUEUED", "WAITING_APPROVAL"),
                 "done_items": status_items("EXECUTOR_DONE"),
                 "failed_items": status_items("EXECUTOR_FAILED"),
                 "retrying_items": status_items("RETRYING"),
@@ -2934,6 +2937,7 @@ function nflPhaseVisual(item){
  const status=String(item.status||'').toUpperCase();
  const result=String(item.trade_result||item.pick_result||'').toUpperCase();
  const label=nflEventBadgeLabel(item);
+ if(status==='WAITING_APPROVAL')return {label:'APPROVAL REQUIRED',row:'background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.42);border-left:4px solid #f59e0b;',badge:'color:#8a5b00;'};
  if(phase==='CLOSED'&&result==='WIN')return {label,row:'background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.42);border-left:4px solid #22c55e;',badge:'color:#008000;'};
  if(phase==='CLOSED'&&result==='LOSS')return {label,row:'background:rgba(239,68,68,.11);border:1px solid rgba(239,68,68,.42);border-left:4px solid #ef4444;',badge:'color:#b00000;'};
  if(phase==='CLOSED'&&result==='PUSH')return {label,row:'background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.38);border-left:4px solid #f59e0b;',badge:'color:#8a5b00;'};
@@ -3152,8 +3156,11 @@ function nflPickList(title,items,kind){
   else if(item.event_start_at)meta.push('starts '+nflPickTime(item.event_start_at));
   if(item.final_score)meta.push('Final '+nflEsc(item.final_score));
   if(item.status)meta.push('status '+nflEsc(item.status));
+  if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
+  if(item.approval_reason==='MIN_ODDS')meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
   if(item.reason&&['pregame','live','closed','unsupported','failed','signals'].includes(kind))meta.push(nflEsc(item.reason));
   if(item.last_error&&['retrying','failed','signals'].includes(kind))meta.push(nflEsc(item.last_error));
+  const approveAction=(String(item.status||'').toUpperCase()==='WAITING_APPROVAL'&&item.request_id)?'<button type="button" style="margin-top:6px" data-request-id="'+nflEsc(item.request_id)+'" onclick="nflApproveBuy(this.dataset.requestId,this)">APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2)+'</button>':'';
   const sellAction=(item.trade_id&&item.sell_available)?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
   const marketAction=(String(item.event_phase||'').toUpperCase()!=='CLOSED'&&item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+nflEsc(item.market_url)+'">OPEN MARKET</a>':'';
   const visual=nflPhaseVisual(item);
@@ -3168,13 +3175,24 @@ function nflPickList(title,items,kind){
    }else{
     pnlLine='<div class="monitor-action flat">Trade P/L — · NOT TRADED</div>';
    }
-  }else if(!item.trade_executed&&String(item.status||'').toUpperCase()!=='QUEUED'){
+  }else if(!item.trade_executed&&!['QUEUED','WAITING_APPROVAL'].includes(String(item.status||'').toUpperCase())){
    pnlLine='<div class="monitor-action flat">NOT TRADED</div>';
   }
-  const action=sellAction+marketAction;
+  const action=approveAction+sellAction+marketAction;
   return '<div class="monitor-signal"><b>'+nflEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<div class="monitor-meta">'+meta.join(' · ')+'</div>':'')+pnlLine+(action?'<div class="monitor-signal-actions">'+action+'</div>':'')+'</div>';
  }).join('');
  return '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(title)+'</span>'+rows+'</div>';
+}
+async function nflApproveBuy(requestId,btn){
+ if(!confirm('Approve this below-minimum-odds BUY for execution?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='APPROVING…';
+ try{
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED';
+  await loadNflCapperStats();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
 }
 async function nflSetUnitSize(sourceKey,btn){
  const input=document.getElementById('nflUnitSize-'+sourceKey);

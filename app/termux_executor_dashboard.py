@@ -44,6 +44,40 @@ EXECUTOR_BUY_TTL_SECONDS = max(
     ),
 )
 MAX_QUEUE_ITEMS = 500
+MIN_DECIMAL_ODDS = Decimal(os.getenv("MIN_DECIMAL_ODDS", "1.70"))
+
+
+def _decimal_odds_from_price(price: Any) -> Decimal | None:
+    """Translate a Polymarket YES-token price into decimal odds."""
+    try:
+        p = Decimal(str(price))
+    except Exception:
+        return None
+    if p <= 0 or p >= 1:
+        return None
+    return (Decimal("1") / p).quantize(Decimal("0.0001"))
+
+
+def _buy_requires_min_odds_approval(payload: dict[str, Any]) -> bool:
+    """Mark sub-threshold sports BUYs for explicit user approval instead of rejecting them."""
+    raw_price = payload.get("signal_buy_price")
+    if raw_price in {None, ""}:
+        raw_price = payload.get("max_price")
+    decimal_odds = _decimal_odds_from_price(raw_price)
+    if decimal_odds is None:
+        return False
+
+    payload["signal_decimal_odds"] = str(decimal_odds)
+    payload["minimum_decimal_odds"] = str(MIN_DECIMAL_ODDS)
+    if decimal_odds < MIN_DECIMAL_ODDS:
+        payload["approval_required"] = True
+        payload["approval_reason"] = "MIN_ODDS"
+        payload["approval_message"] = (
+            f"Decimal odds {decimal_odds} are below the {MIN_DECIMAL_ODDS} minimum; "
+            "explicit approval is required."
+        )
+        return True
+    return False
 
 
 def _now_iso() -> str:
@@ -557,7 +591,10 @@ def _authorize_order_for_handoff(
 def _enqueue(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not REMOTE_EXECUTION_ENABLED:
         raise HTTPException(status_code=409, detail="Remote execution is disabled")
-    if action in {"BUY", "COMBO_BUY"}:
+    approval_required = bool(
+        action == "BUY" and _buy_requires_min_odds_approval(payload)
+    )
+    if action in {"BUY", "COMBO_BUY"} and not approval_required:
         state = _state()
         last_seen = float(state.get("last_seen_unix") or 0)
 
@@ -582,7 +619,7 @@ def _enqueue(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     record = {
         "id": req_id,
         "action": action,
-        "status": "PENDING",
+        "status": "WAITING_APPROVAL" if approval_required else "PENDING",
         "payload": payload,
         "created_at": _now_iso(),
         "created_unix": time.time(),

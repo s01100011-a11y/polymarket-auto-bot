@@ -142,3 +142,22 @@ def test_basketball_open_positions_show_stake_and_shares():
 def test_basketball_monitor_python_source_compiles():
     source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
     compile(source, "app/basketball_monitor_capper.py", "exec")
+
+
+def test_basketball_default_policy_sets_both_monitors_to_three_percent():
+    source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+
+    assert 'settings[f"{label}::portfolio_pct"] = "3.00"' in source
+    assert 'settings[f"{label}::mode"] = "portfolio_pct"' in source
+    assert "BASKETBALL_3PCT_POLICY_KEY" in source
+
+
+def test_basketball_monitor_shows_min_odds_approval_action():
+    source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+    live = Path("app/dashboard_live_control_v4.py").read_text(encoding="utf-8")
+
+    assert "APPROVAL REQUIRED" in source
+    assert "monitorApproveBuy" in source
+    assert "/api/executor/approve-buy/" in source
+    assert "minimum_decimal_odds" in live
+    assert "signal_decimal_odds" in live
