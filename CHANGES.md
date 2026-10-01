@@ -1,3 +1,9 @@
+## 2026-10-01 — Allow explicit resend after pre-submission v2 wrapper TypeError
+
+- The one-shot manual Slack BUY resend path now recognizes the known pre-submission v2 wrapper signature failure (`_buy() got an unexpected keyword argument 'request_id'`) as safely retryable.
+- This is limited to explicit manual resend requests and still passes through the bot-owned duplicate/provenance checks before handoff.
+- Added regression coverage for this exact historical wrapper failure.
+
 ## 2026-10-01 — Forward BUY provenance through Termux v2 wrapper
 
 - Updated `scripts/termux_executor_v2.py` so its BUY wrapper accepts and forwards `request_id` and `executor_token` to the base executor.
