@@ -1,3 +1,13 @@
+## 2026-10-01 — Count distinct submitted PW calls on WNBA/NBA dashboard
+
+- Added a separate **PW Calls** metric to the WNBA and NBA monitor cards.
+- PW Calls counts distinct accepted bot order submissions by PW/Slack signal ID, so repeated calls on the same team count separately.
+- Retries of the same signal are deduplicated and count once.
+- A submitted order that fills 0 shares and is later canceled after the 120-second window still counts as a PW call because it reached Polymarket.
+- **Bets**, W/L, stake, ROI, and P/L remain execution/fill based, so an unfilled canceled submission does not become a fake bet or alter performance.
+- The Last 24h dashboard filter applies to PW Calls as well.
+- This makes the two separately submitted Dallas Wings PW calls visible as two calls while preserving correct fill/performance accounting.
+
 ## 2026-10-01 — Colorize live trade activity in Termux
 
 - Added bold ANSI trade-status colors to the phone executor so order activity stands out from queue polling noise.
