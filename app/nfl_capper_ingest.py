@@ -3424,6 +3424,302 @@ function nflPickList(title,items,kind){
   if(item.final_score)meta.push('Final '+nflEsc(item.final_score));
   if(item.status)meta.push('status '+nflEsc(item.status));
   if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
+  if(String(item.approval_reason||'').includes('MIN_ODDS'))meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
+  if(String(item.approval_reason||'').includes('PRICE_LIMIT'))meta.push('above automatic price limit · approval required');
+  if(item.reason&&['pregame','live','closed','unsupported','failed','signals'].includes(kind))meta.push(nflEsc(item.reason));
+  if(item.last_error&&['retrying','failed','signals'].includes(kind))meta.push(nflEsc(item.last_error));
+  const approvalPx=item.best_ask||item.current_buy_price;
+  const approvalText=approvalPx?('BUY LIVE '+nflOdds(approvalPx)):('APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2));
+  const approveAction=(String(item.status||'').toUpperCase()==='WAITING_APPROVAL'&&item.request_id)?'<button type="button" style="margin-top:6px" data-request-id="'+nflEsc(item.request_id)+'" onclick="nflApproveBuy(this.dataset.requestId,this)">'+approvalText+'</button>':'';
+  const sellAction=(item.trade_id&&item.sell_available)?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  const marketAction=(String(item.event_phase||'').toUpperCase()!=='CLOSED'&&item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+nflEsc(item.market_url)+'">OPEN MARKET</a>':'';
+  const visual=nflPhaseVisual(item);
+  const badge=visual.label?'<span class="capper-event-badge" style="'+visual.badge+'">'+visual.label+'</span>':'';
+  let pnlLine='';
+  if(String(item.event_phase||'').toUpperCase()==='CLOSED'){
+   if(item.trade_executed){
+    const raw=item.trade_pnl_usdc===null||item.trade_pnl_usdc===undefined?null:Number(item.trade_pnl_usdc);
+    const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
+    const text=raw===null?'pending':(raw>0?'+':'')+'$'+raw.toFixed(2);
+    pnlLine='<div class="monitor-action '+cls+'">Trade P/L '+text+'</div>';
+   }else{
+    pnlLine='<div class="monitor-action flat">Trade P/L — · NOT TRADED</div>';
+   }
+  }else if(!item.trade_executed&&!['QUEUED','WAITING_APPROVAL'].includes(String(item.status||'').toUpperCase())){
+   pnlLine='<div class="monitor-action flat">NOT TRADED</div>';
+  }
+  const action=approveAction+sellAction+marketAction;
+  return '<div class="monitor-signal"><b>'+nflEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<div class="monitor-meta">'+meta.join(' · ')+'</div>':'')+pnlLine+(action?'<div class="monitor-signal-actions">'+action+'</div>':'')+'</div>';
+ }).join('');
+ return '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(title)+'</span>'+rows+'</div>';
+}
+async function nflApproveBuy(requestId,btn){
+ const original=btn.textContent;btn.disabled=true;btn.textContent='REFRESHING LIVE PRICE…';
+ try{
+  const qr=await fetch('/api/executor/approval-quote/'+encodeURIComponent(requestId),{cache:'no-store'}),q=await qr.json();
+  if(!qr.ok)throw new Error(q.detail||'Live quote refresh failed');
+  const live=nflOdds(q.polymarket_price), units=nflUnits(q.units);
+  btn.textContent='BUY LIVE '+live;
+  const target=q.target_profit_usdc?(' · To win 
+async function nflSetUnitSize(sourceKey,btn){
+ const input=document.getElementById('nflUnitSize-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-size/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflSetPortfolioPct(sourceKey,btn){
+ const input=document.getElementById('nflPortfolioPct-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-percent/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflCapperLine(x,sourceKey){
+ if(!x)return 'No tracked signals yet';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const winPct=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const rawPnl=x.realized_pnl_usdc===null||x.realized_pnl_usdc===undefined?null:Number(x.realized_pnl_usdc);
+ const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'$'+rawPnl.toFixed(2);
+ const pnlClass=rawPnl===null||rawPnl===0?'flat':(rawPnl>0?'positive':'negative');
+ const missedRaw=Number(x.missed_pnl_usdc||0);
+ const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
+ const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
+ const liveRaw=Number(x.total_live_pnl_usdc||0);
+ const livePnl=(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
+ const liveClass=liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
+ const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
+ const pnl7Raw=Number(x.realized_pnl_7d_usdc||0);
+ const pnl30Raw=Number(x.realized_pnl_30d_usdc||0);
+ const pnl7=(pnl7Raw>0?'+':'')+'$'+pnl7Raw.toFixed(2);
+ const pnl30=(pnl30Raw>0?'+':'')+'$'+pnl30Raw.toFixed(2);
+ const pnl7Class=pnl7Raw===0?'flat':(pnl7Raw>0?'positive':'negative');
+ const pnl30Class=pnl30Raw===0?'flat':(pnl30Raw>0?'positive':'negative');
+ const metrics='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>Bets</span><b>'+(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+winPct+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+pnlClass+'">'+pnl+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+liveClass+'">'+livePnl+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="capper-pnl '+pnl7Class+'">'+pnl7+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="capper-pnl '+pnl30Class+'">'+pnl30+'</b></div>'
+  +'<div class="capper-metric"><span>Open value</span><b>'+openValue+'</b></div>'
+  +'<div class="capper-metric"><span>Missed P/L</span><b class="capper-pnl '+missedClass+'">'+missedPnl+' <small>('+Number(x.missed_graded||0)+')</small></b></div>'
+  +'</div>';
+ const active=nflActiveTabs[sourceKey]||'signals';
+ const specs=nflTabSpec(x);
+ const tabs='<div class="capper-tabs">'+specs.map(s=>'<button type="button" class="'+(s[0]===active?'active':'')+'" aria-pressed="'+(s[0]===active?'true':'false')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')"><span>'+nflEsc(s[1])+'</span><b>'+s[2]+'</b></button>').join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const body=(spec[3]||[]).length
+  ? nflPickList(spec[1],spec[3],spec[4])
+  : '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(spec[1])+'</span><div style="margin-top:7px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div></div>';
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk varies by odds · auto recalculates before new/retried orders</span></div>'
+  +'</div>';
+ return unitControl+metrics+nflPositionList(x)+tabs+body;
+}
+async function loadNflCapperStats(){
+ try{
+  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
+  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(!d.sport_enabled?'ENABLED · AUTO OFF':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF'));
+  nflSyncSportPower(d.sport_enabled);
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  nflLastCappers=d.cappers||{};
+  nflRenderCappers();
+  nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++Number(item.current_value_usdc).toFixed(2);
+  const units=nflUnits(item.units), unitTitle=units?' · '+units:'';
+  const exact=item.exact_position?'<div><b>Exact position:</b> '+nflEsc(item.exact_position)+'</div>':'';
+  const toWin=item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!==''?'<div><b>To win  };
+ const renderSettled=item=>{
+  const result=String(item.result||'').toUpperCase();
+  const awaiting=!result&&String(item.status||'').toUpperCase()==='CLOSED_RECONCILED';
+  const cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
+  const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
+  const pnl=raw===null?'':('<div class="nfl-position-pnl '+(raw>0?'positive':raw<0?'negative':'')+'">Realized P/L '+(raw>0?'+':'')+'$'+raw.toFixed(2)+'</div>');
+  const stake=item.stake_usdc===null||item.stake_usdc===undefined?'':' · Stake $'+Number(item.stake_usdc).toFixed(2);
+  const statusLabel=result?(' · '+nflEsc(result)):(awaiting?' · AWAITING SETTLEMENT':'');
+  const manual=awaiting&&item.trade_id
+   ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px"><button type="button" data-result="WIN" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE WIN</button><button type="button" data-result="LOSS" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE LOSS</button><button type="button" data-result="PUSH" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE PUSH</button></div>'
+   : '';
+  return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+statusLabel+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+manual+'</div>';
+ };
+ let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+(open.length?open.map(renderOpen).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>')+'</div>';
+ if(!nflHideFinished&&(settled.length||capperLast24hOnly)){
+  html+='<div style="margin-top:12px"><span class="capper-section-badge">Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</span>'+(settled.length?settled.map(renderSettled).join(''):'<div style="margin-top:7px;opacity:.7">No settled positions in the last 24 hours.</div>')+'</div>';
+ }
+ return html;
+}
+async function nflSellPosition(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'});
+  const q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'});
+   const sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){
+    btn.textContent='SOLD';
+    await loadNflCapperStats();
+    return;
+   }
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     btn.textContent='SOLD';
+     await loadNflCapperStats();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
+  }
+  throw new Error('SELL timed out waiting for Termux');
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflManualSettle(tradeId,result,btn){
+ const choice=String(result||'').toUpperCase();
+ if(!['WIN','LOSS','PUSH'].includes(choice))return;
+ if(!confirm('Manually settle this position as '+choice+'? This writes the final result and realized P/L and cannot be undone from this button.'))return;
+ const group=btn.parentElement;
+ const buttons=group?Array.from(group.querySelectorAll('button')):[btn];
+ buttons.forEach(b=>b.disabled=true);
+ const original=btn.textContent;
+ btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(choice),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  btn.textContent='SETTLED '+choice;
+  await loadNflCapperStats();
+ }catch(e){
+  buttons.forEach(b=>b.disabled=false);
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflTabSpec(x){
+ return [
+  ['signals','Signals',Number(x.signals||0),x.all_items||[],'signals'],
+  ['queued','Queued',Number(x.queued||0),x.queued_items||[],'queued'],
+  ['done','Done',Number(x.done||0),x.done_items||[],'done'],
+  ['failed','Failed',Number(x.failed||0),x.failed_items||[],'failed'],
+  ['retrying','Retrying',Number(x.retrying||0),x.retrying_items||[],'retrying'],
+  ['pregame','Pregame',Number(x.pregame||0),x.pregame_items||[],'pregame'],
+  ['live','Live',Number(x.live||0),x.live_items||[],'live'],
+  ['closed','Closed',Number(x.closed||0),x.closed_items||[],'closed'],
+  ['unsupported','Unsupported',Number(x.unsupported||0),x.unsupported_items||[],'unsupported']
+ ];
+}
+function nflSetTab(sourceKey,tab){
+ nflActiveTabs[sourceKey]=tab;
+ const x=nflLastCappers[sourceKey==='slam'?'Slam - NFL':'Syndicate - NFL'];
+ const el=document.getElementById(sourceKey==='slam'?'nflCapperSlam':'nflCapperSyndicate');
+ if(el&&x)el.innerHTML=nflCapperLine(x,sourceKey);
+}
+function nflPickList(title,items,kind){
+ if(!Array.isArray(items)||!items.length)return '';
+ const scoped=capperLast24hOnly&&kind==='signals'
+  ? items.filter(item=>capperWithin24h(item.posted_at||item.updated_at))
+  : items;
+ const visible=nflHideFinished?scoped.filter(item=>String(item.event_phase||'').toUpperCase()!=='CLOSED'):scoped;
+ if(!visible.length){
+  if(capperLast24hOnly&&kind==='signals')return '<div style="margin-top:8px;opacity:.7">No signals in the last 24 hours.</div>';
+  return '<div style="margin-top:8px;opacity:.7">'+(nflHideFinished?'Finished games hidden.':'No signals.')+'</div>';
+ }
+ const rows=visible.map(item=>{
+  const meta=[];
+  if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(nflEsc(item.units)+'u');
+  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('risk $'+Number(item.stake_usdc).toFixed(2));
+  if(item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!=='')meta.push('to win $'+Number(item.target_profit_usdc).toFixed(2));
+  if(item.posted_at)meta.push('signal '+nflPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+nflAge(item.signal_age_seconds):''));
+  if(item.updated_at)meta.push('last update '+nflPickTime(item.updated_at));
+  if(item.matchup)meta.push('Match: '+nflEsc(item.matchup));
+  if(item.exact_position)meta.push('POSITION HELD: '+nflEsc(item.exact_position));
+  if(item.market)meta.push('Market: '+nflEsc(item.market));
+  if(item.result_event_title)meta.push('Game '+nflEsc(item.result_event_title));
+  if(item.event_phase==='LIVE'){
+   meta.push('GAME LIVE');
+   if(item.espn_score)meta.push('ESPN '+nflEsc(item.espn_score)+(item.espn_status?' · '+nflEsc(item.espn_status):''));
+  }else if(item.event_phase==='CLOSED')meta.push('GAME FINISHED');
+  else if(item.event_start_at)meta.push('starts '+nflPickTime(item.event_start_at));
+  if(item.final_score)meta.push('Final '+nflEsc(item.final_score));
+  if(item.status)meta.push('status '+nflEsc(item.status));
+  if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
   if(item.approval_reason==='MIN_ODDS')meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
   if(item.reason&&['pregame','live','closed','unsupported','failed','signals'].includes(kind))meta.push(nflEsc(item.reason));
   if(item.last_error&&['retrying','failed','signals'].includes(kind))meta.push(nflEsc(item.last_error));
@@ -3458,6 +3754,1748 @@ async function nflApproveBuy(requestId,btn){
   const d=await r.json();
   if(!r.ok)throw new Error(d.detail||'Approval failed');
   btn.textContent='APPROVED';
+  await loadNflCapperStats();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function nflSetUnitSize(sourceKey,btn){
+ const input=document.getElementById('nflUnitSize-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-size/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflSetPortfolioPct(sourceKey,btn){
+ const input=document.getElementById('nflPortfolioPct-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-percent/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflCapperLine(x,sourceKey){
+ if(!x)return 'No tracked signals yet';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const winPct=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const rawPnl=x.realized_pnl_usdc===null||x.realized_pnl_usdc===undefined?null:Number(x.realized_pnl_usdc);
+ const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'$'+rawPnl.toFixed(2);
+ const pnlClass=rawPnl===null||rawPnl===0?'flat':(rawPnl>0?'positive':'negative');
+ const missedRaw=Number(x.missed_pnl_usdc||0);
+ const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
+ const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
+ const liveRaw=Number(x.total_live_pnl_usdc||0);
+ const livePnl=(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
+ const liveClass=liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
+ const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
+ const pnl7Raw=Number(x.realized_pnl_7d_usdc||0);
+ const pnl30Raw=Number(x.realized_pnl_30d_usdc||0);
+ const pnl7=(pnl7Raw>0?'+':'')+'$'+pnl7Raw.toFixed(2);
+ const pnl30=(pnl30Raw>0?'+':'')+'$'+pnl30Raw.toFixed(2);
+ const pnl7Class=pnl7Raw===0?'flat':(pnl7Raw>0?'positive':'negative');
+ const pnl30Class=pnl30Raw===0?'flat':(pnl30Raw>0?'positive':'negative');
+ const metrics='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>Bets</span><b>'+(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+winPct+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+pnlClass+'">'+pnl+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+liveClass+'">'+livePnl+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="capper-pnl '+pnl7Class+'">'+pnl7+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="capper-pnl '+pnl30Class+'">'+pnl30+'</b></div>'
+  +'<div class="capper-metric"><span>Open value</span><b>'+openValue+'</b></div>'
+  +'<div class="capper-metric"><span>Missed P/L</span><b class="capper-pnl '+missedClass+'">'+missedPnl+' <small>('+Number(x.missed_graded||0)+')</small></b></div>'
+  +'</div>';
+ const active=nflActiveTabs[sourceKey]||'signals';
+ const specs=nflTabSpec(x);
+ const tabs='<div class="capper-tabs">'+specs.map(s=>'<button type="button" class="'+(s[0]===active?'active':'')+'" aria-pressed="'+(s[0]===active?'true':'false')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')"><span>'+nflEsc(s[1])+'</span><b>'+s[2]+'</b></button>').join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const body=(spec[3]||[]).length
+  ? nflPickList(spec[1],spec[3],spec[4])
+  : '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(spec[1])+'</span><div style="margin-top:7px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div></div>';
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk varies by odds · auto recalculates before new/retried orders</span></div>'
+  +'</div>';
+ return unitControl+metrics+nflPositionList(x)+tabs+body;
+}
+async function loadNflCapperStats(){
+ try{
+  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
+  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(!d.sport_enabled?'ENABLED · AUTO OFF':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF'));
+  nflSyncSportPower(d.sport_enabled);
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  nflLastCappers=d.cappers||{};
+  nflRenderCappers();
+  nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++Number(item.target_profit_usdc).toFixed(2)+'</b>'+(units?' ('+units+')':'')+'</div>':'';
+  const sell=item.trade_id?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  return '<div class="nfl-position-row open"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+unitTitle+' · OPEN</div>'+exact+toWin+'<div>'+nflEsc(item.outcome||'')+' · Stake  };
+ const renderSettled=item=>{
+  const result=String(item.result||'').toUpperCase();
+  const awaiting=!result&&String(item.status||'').toUpperCase()==='CLOSED_RECONCILED';
+  const cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
+  const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
+  const pnl=raw===null?'':('<div class="nfl-position-pnl '+(raw>0?'positive':raw<0?'negative':'')+'">Realized P/L '+(raw>0?'+':'')+'$'+raw.toFixed(2)+'</div>');
+  const stake=item.stake_usdc===null||item.stake_usdc===undefined?'':' · Stake $'+Number(item.stake_usdc).toFixed(2);
+  const statusLabel=result?(' · '+nflEsc(result)):(awaiting?' · AWAITING SETTLEMENT':'');
+  const manual=awaiting&&item.trade_id
+   ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px"><button type="button" data-result="WIN" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE WIN</button><button type="button" data-result="LOSS" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE LOSS</button><button type="button" data-result="PUSH" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE PUSH</button></div>'
+   : '';
+  return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+statusLabel+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+manual+'</div>';
+ };
+ let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+(open.length?open.map(renderOpen).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>')+'</div>';
+ if(!nflHideFinished&&(settled.length||capperLast24hOnly)){
+  html+='<div style="margin-top:12px"><span class="capper-section-badge">Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</span>'+(settled.length?settled.map(renderSettled).join(''):'<div style="margin-top:7px;opacity:.7">No settled positions in the last 24 hours.</div>')+'</div>';
+ }
+ return html;
+}
+async function nflSellPosition(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'});
+  const q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'});
+   const sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){
+    btn.textContent='SOLD';
+    await loadNflCapperStats();
+    return;
+   }
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     btn.textContent='SOLD';
+     await loadNflCapperStats();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
+  }
+  throw new Error('SELL timed out waiting for Termux');
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflManualSettle(tradeId,result,btn){
+ const choice=String(result||'').toUpperCase();
+ if(!['WIN','LOSS','PUSH'].includes(choice))return;
+ if(!confirm('Manually settle this position as '+choice+'? This writes the final result and realized P/L and cannot be undone from this button.'))return;
+ const group=btn.parentElement;
+ const buttons=group?Array.from(group.querySelectorAll('button')):[btn];
+ buttons.forEach(b=>b.disabled=true);
+ const original=btn.textContent;
+ btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(choice),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  btn.textContent='SETTLED '+choice;
+  await loadNflCapperStats();
+ }catch(e){
+  buttons.forEach(b=>b.disabled=false);
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflTabSpec(x){
+ return [
+  ['signals','Signals',Number(x.signals||0),x.all_items||[],'signals'],
+  ['queued','Queued',Number(x.queued||0),x.queued_items||[],'queued'],
+  ['done','Done',Number(x.done||0),x.done_items||[],'done'],
+  ['failed','Failed',Number(x.failed||0),x.failed_items||[],'failed'],
+  ['retrying','Retrying',Number(x.retrying||0),x.retrying_items||[],'retrying'],
+  ['pregame','Pregame',Number(x.pregame||0),x.pregame_items||[],'pregame'],
+  ['live','Live',Number(x.live||0),x.live_items||[],'live'],
+  ['closed','Closed',Number(x.closed||0),x.closed_items||[],'closed'],
+  ['unsupported','Unsupported',Number(x.unsupported||0),x.unsupported_items||[],'unsupported']
+ ];
+}
+function nflSetTab(sourceKey,tab){
+ nflActiveTabs[sourceKey]=tab;
+ const x=nflLastCappers[sourceKey==='slam'?'Slam - NFL':'Syndicate - NFL'];
+ const el=document.getElementById(sourceKey==='slam'?'nflCapperSlam':'nflCapperSyndicate');
+ if(el&&x)el.innerHTML=nflCapperLine(x,sourceKey);
+}
+function nflPickList(title,items,kind){
+ if(!Array.isArray(items)||!items.length)return '';
+ const scoped=capperLast24hOnly&&kind==='signals'
+  ? items.filter(item=>capperWithin24h(item.posted_at||item.updated_at))
+  : items;
+ const visible=nflHideFinished?scoped.filter(item=>String(item.event_phase||'').toUpperCase()!=='CLOSED'):scoped;
+ if(!visible.length){
+  if(capperLast24hOnly&&kind==='signals')return '<div style="margin-top:8px;opacity:.7">No signals in the last 24 hours.</div>';
+  return '<div style="margin-top:8px;opacity:.7">'+(nflHideFinished?'Finished games hidden.':'No signals.')+'</div>';
+ }
+ const rows=visible.map(item=>{
+  const meta=[];
+  if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(nflEsc(item.units)+'u');
+  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('risk $'+Number(item.stake_usdc).toFixed(2));
+  if(item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!=='')meta.push('to win $'+Number(item.target_profit_usdc).toFixed(2));
+  if(item.posted_at)meta.push('signal '+nflPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+nflAge(item.signal_age_seconds):''));
+  if(item.updated_at)meta.push('last update '+nflPickTime(item.updated_at));
+  if(item.matchup)meta.push('Match: '+nflEsc(item.matchup));
+  if(item.exact_position)meta.push('POSITION HELD: '+nflEsc(item.exact_position));
+  if(item.market)meta.push('Market: '+nflEsc(item.market));
+  if(item.result_event_title)meta.push('Game '+nflEsc(item.result_event_title));
+  if(item.event_phase==='LIVE'){
+   meta.push('GAME LIVE');
+   if(item.espn_score)meta.push('ESPN '+nflEsc(item.espn_score)+(item.espn_status?' · '+nflEsc(item.espn_status):''));
+  }else if(item.event_phase==='CLOSED')meta.push('GAME FINISHED');
+  else if(item.event_start_at)meta.push('starts '+nflPickTime(item.event_start_at));
+  if(item.final_score)meta.push('Final '+nflEsc(item.final_score));
+  if(item.status)meta.push('status '+nflEsc(item.status));
+  if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
+  if(item.approval_reason==='MIN_ODDS')meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
+  if(item.reason&&['pregame','live','closed','unsupported','failed','signals'].includes(kind))meta.push(nflEsc(item.reason));
+  if(item.last_error&&['retrying','failed','signals'].includes(kind))meta.push(nflEsc(item.last_error));
+  const approveAction=(String(item.status||'').toUpperCase()==='WAITING_APPROVAL'&&item.request_id)?'<button type="button" style="margin-top:6px" data-request-id="'+nflEsc(item.request_id)+'" onclick="nflApproveBuy(this.dataset.requestId,this)">APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2)+'</button>':'';
+  const sellAction=(item.trade_id&&item.sell_available)?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  const marketAction=(String(item.event_phase||'').toUpperCase()!=='CLOSED'&&item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+nflEsc(item.market_url)+'">OPEN MARKET</a>':'';
+  const visual=nflPhaseVisual(item);
+  const badge=visual.label?'<span class="capper-event-badge" style="'+visual.badge+'">'+visual.label+'</span>':'';
+  let pnlLine='';
+  if(String(item.event_phase||'').toUpperCase()==='CLOSED'){
+   if(item.trade_executed){
+    const raw=item.trade_pnl_usdc===null||item.trade_pnl_usdc===undefined?null:Number(item.trade_pnl_usdc);
+    const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
+    const text=raw===null?'pending':(raw>0?'+':'')+'$'+raw.toFixed(2);
+    pnlLine='<div class="monitor-action '+cls+'">Trade P/L '+text+'</div>';
+   }else{
+    pnlLine='<div class="monitor-action flat">Trade P/L — · NOT TRADED</div>';
+   }
+  }else if(!item.trade_executed&&!['QUEUED','WAITING_APPROVAL'].includes(String(item.status||'').toUpperCase())){
+   pnlLine='<div class="monitor-action flat">NOT TRADED</div>';
+  }
+  const action=approveAction+sellAction+marketAction;
+  return '<div class="monitor-signal"><b>'+nflEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<div class="monitor-meta">'+meta.join(' · ')+'</div>':'')+pnlLine+(action?'<div class="monitor-signal-actions">'+action+'</div>':'')+'</div>';
+ }).join('');
+ return '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(title)+'</span>'+rows+'</div>';
+}
+async function nflApproveBuy(requestId,btn){
+ if(!confirm('Approve this below-minimum-odds BUY for execution?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='APPROVING…';
+ try{
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED';
+  await loadNflCapperStats();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function nflSetUnitSize(sourceKey,btn){
+ const input=document.getElementById('nflUnitSize-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-size/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflSetPortfolioPct(sourceKey,btn){
+ const input=document.getElementById('nflPortfolioPct-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-percent/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflCapperLine(x,sourceKey){
+ if(!x)return 'No tracked signals yet';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const winPct=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const rawPnl=x.realized_pnl_usdc===null||x.realized_pnl_usdc===undefined?null:Number(x.realized_pnl_usdc);
+ const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'$'+rawPnl.toFixed(2);
+ const pnlClass=rawPnl===null||rawPnl===0?'flat':(rawPnl>0?'positive':'negative');
+ const missedRaw=Number(x.missed_pnl_usdc||0);
+ const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
+ const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
+ const liveRaw=Number(x.total_live_pnl_usdc||0);
+ const livePnl=(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
+ const liveClass=liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
+ const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
+ const pnl7Raw=Number(x.realized_pnl_7d_usdc||0);
+ const pnl30Raw=Number(x.realized_pnl_30d_usdc||0);
+ const pnl7=(pnl7Raw>0?'+':'')+'$'+pnl7Raw.toFixed(2);
+ const pnl30=(pnl30Raw>0?'+':'')+'$'+pnl30Raw.toFixed(2);
+ const pnl7Class=pnl7Raw===0?'flat':(pnl7Raw>0?'positive':'negative');
+ const pnl30Class=pnl30Raw===0?'flat':(pnl30Raw>0?'positive':'negative');
+ const metrics='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>Bets</span><b>'+(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+winPct+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+pnlClass+'">'+pnl+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+liveClass+'">'+livePnl+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="capper-pnl '+pnl7Class+'">'+pnl7+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="capper-pnl '+pnl30Class+'">'+pnl30+'</b></div>'
+  +'<div class="capper-metric"><span>Open value</span><b>'+openValue+'</b></div>'
+  +'<div class="capper-metric"><span>Missed P/L</span><b class="capper-pnl '+missedClass+'">'+missedPnl+' <small>('+Number(x.missed_graded||0)+')</small></b></div>'
+  +'</div>';
+ const active=nflActiveTabs[sourceKey]||'signals';
+ const specs=nflTabSpec(x);
+ const tabs='<div class="capper-tabs">'+specs.map(s=>'<button type="button" class="'+(s[0]===active?'active':'')+'" aria-pressed="'+(s[0]===active?'true':'false')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')"><span>'+nflEsc(s[1])+'</span><b>'+s[2]+'</b></button>').join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const body=(spec[3]||[]).length
+  ? nflPickList(spec[1],spec[3],spec[4])
+  : '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(spec[1])+'</span><div style="margin-top:7px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div></div>';
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk varies by odds · auto recalculates before new/retried orders</span></div>'
+  +'</div>';
+ return unitControl+metrics+nflPositionList(x)+tabs+body;
+}
+async function loadNflCapperStats(){
+ try{
+  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
+  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(!d.sport_enabled?'ENABLED · AUTO OFF':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF'));
+  nflSyncSportPower(d.sport_enabled);
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  nflLastCappers=d.cappers||{};
+  nflRenderCappers();
+  nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++Number(cost||0).toFixed(2)+' · Shares '+shares+'</div><div>Entry odds '+entry+' · Live odds '+live+' · Value '+value+'</div><div class="nfl-position-pnl '+pnlClass+'">Live P/L '+pnlText+'</div>'+sell+'</div>';
+ };
+ const renderSettled=item=>{
+  const result=String(item.result||'').toUpperCase();
+  const awaiting=!result&&String(item.status||'').toUpperCase()==='CLOSED_RECONCILED';
+  const cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
+  const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
+  const pnl=raw===null?'':('<div class="nfl-position-pnl '+(raw>0?'positive':raw<0?'negative':'')+'">Realized P/L '+(raw>0?'+':'')+'$'+raw.toFixed(2)+'</div>');
+  const stake=item.stake_usdc===null||item.stake_usdc===undefined?'':' · Stake $'+Number(item.stake_usdc).toFixed(2);
+  const statusLabel=result?(' · '+nflEsc(result)):(awaiting?' · AWAITING SETTLEMENT':'');
+  const manual=awaiting&&item.trade_id
+   ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px"><button type="button" data-result="WIN" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE WIN</button><button type="button" data-result="LOSS" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE LOSS</button><button type="button" data-result="PUSH" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE PUSH</button></div>'
+   : '';
+  return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+statusLabel+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+manual+'</div>';
+ };
+ let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+(open.length?open.map(renderOpen).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>')+'</div>';
+ if(!nflHideFinished&&(settled.length||capperLast24hOnly)){
+  html+='<div style="margin-top:12px"><span class="capper-section-badge">Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</span>'+(settled.length?settled.map(renderSettled).join(''):'<div style="margin-top:7px;opacity:.7">No settled positions in the last 24 hours.</div>')+'</div>';
+ }
+ return html;
+}
+async function nflSellPosition(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'});
+  const q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'});
+   const sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){
+    btn.textContent='SOLD';
+    await loadNflCapperStats();
+    return;
+   }
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     btn.textContent='SOLD';
+     await loadNflCapperStats();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
+  }
+  throw new Error('SELL timed out waiting for Termux');
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflManualSettle(tradeId,result,btn){
+ const choice=String(result||'').toUpperCase();
+ if(!['WIN','LOSS','PUSH'].includes(choice))return;
+ if(!confirm('Manually settle this position as '+choice+'? This writes the final result and realized P/L and cannot be undone from this button.'))return;
+ const group=btn.parentElement;
+ const buttons=group?Array.from(group.querySelectorAll('button')):[btn];
+ buttons.forEach(b=>b.disabled=true);
+ const original=btn.textContent;
+ btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(choice),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  btn.textContent='SETTLED '+choice;
+  await loadNflCapperStats();
+ }catch(e){
+  buttons.forEach(b=>b.disabled=false);
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflTabSpec(x){
+ return [
+  ['signals','Signals',Number(x.signals||0),x.all_items||[],'signals'],
+  ['queued','Queued',Number(x.queued||0),x.queued_items||[],'queued'],
+  ['done','Done',Number(x.done||0),x.done_items||[],'done'],
+  ['failed','Failed',Number(x.failed||0),x.failed_items||[],'failed'],
+  ['retrying','Retrying',Number(x.retrying||0),x.retrying_items||[],'retrying'],
+  ['pregame','Pregame',Number(x.pregame||0),x.pregame_items||[],'pregame'],
+  ['live','Live',Number(x.live||0),x.live_items||[],'live'],
+  ['closed','Closed',Number(x.closed||0),x.closed_items||[],'closed'],
+  ['unsupported','Unsupported',Number(x.unsupported||0),x.unsupported_items||[],'unsupported']
+ ];
+}
+function nflSetTab(sourceKey,tab){
+ nflActiveTabs[sourceKey]=tab;
+ const x=nflLastCappers[sourceKey==='slam'?'Slam - NFL':'Syndicate - NFL'];
+ const el=document.getElementById(sourceKey==='slam'?'nflCapperSlam':'nflCapperSyndicate');
+ if(el&&x)el.innerHTML=nflCapperLine(x,sourceKey);
+}
+function nflPickList(title,items,kind){
+ if(!Array.isArray(items)||!items.length)return '';
+ const scoped=capperLast24hOnly&&kind==='signals'
+  ? items.filter(item=>capperWithin24h(item.posted_at||item.updated_at))
+  : items;
+ const visible=nflHideFinished?scoped.filter(item=>String(item.event_phase||'').toUpperCase()!=='CLOSED'):scoped;
+ if(!visible.length){
+  if(capperLast24hOnly&&kind==='signals')return '<div style="margin-top:8px;opacity:.7">No signals in the last 24 hours.</div>';
+  return '<div style="margin-top:8px;opacity:.7">'+(nflHideFinished?'Finished games hidden.':'No signals.')+'</div>';
+ }
+ const rows=visible.map(item=>{
+  const meta=[];
+  if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(nflEsc(item.units)+'u');
+  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('risk $'+Number(item.stake_usdc).toFixed(2));
+  if(item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!=='')meta.push('to win $'+Number(item.target_profit_usdc).toFixed(2));
+  if(item.posted_at)meta.push('signal '+nflPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+nflAge(item.signal_age_seconds):''));
+  if(item.updated_at)meta.push('last update '+nflPickTime(item.updated_at));
+  if(item.matchup)meta.push('Match: '+nflEsc(item.matchup));
+  if(item.exact_position)meta.push('POSITION HELD: '+nflEsc(item.exact_position));
+  if(item.market)meta.push('Market: '+nflEsc(item.market));
+  if(item.result_event_title)meta.push('Game '+nflEsc(item.result_event_title));
+  if(item.event_phase==='LIVE'){
+   meta.push('GAME LIVE');
+   if(item.espn_score)meta.push('ESPN '+nflEsc(item.espn_score)+(item.espn_status?' · '+nflEsc(item.espn_status):''));
+  }else if(item.event_phase==='CLOSED')meta.push('GAME FINISHED');
+  else if(item.event_start_at)meta.push('starts '+nflPickTime(item.event_start_at));
+  if(item.final_score)meta.push('Final '+nflEsc(item.final_score));
+  if(item.status)meta.push('status '+nflEsc(item.status));
+  if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
+  if(item.approval_reason==='MIN_ODDS')meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
+  if(item.reason&&['pregame','live','closed','unsupported','failed','signals'].includes(kind))meta.push(nflEsc(item.reason));
+  if(item.last_error&&['retrying','failed','signals'].includes(kind))meta.push(nflEsc(item.last_error));
+  const approveAction=(String(item.status||'').toUpperCase()==='WAITING_APPROVAL'&&item.request_id)?'<button type="button" style="margin-top:6px" data-request-id="'+nflEsc(item.request_id)+'" onclick="nflApproveBuy(this.dataset.requestId,this)">APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2)+'</button>':'';
+  const sellAction=(item.trade_id&&item.sell_available)?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  const marketAction=(String(item.event_phase||'').toUpperCase()!=='CLOSED'&&item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+nflEsc(item.market_url)+'">OPEN MARKET</a>':'';
+  const visual=nflPhaseVisual(item);
+  const badge=visual.label?'<span class="capper-event-badge" style="'+visual.badge+'">'+visual.label+'</span>':'';
+  let pnlLine='';
+  if(String(item.event_phase||'').toUpperCase()==='CLOSED'){
+   if(item.trade_executed){
+    const raw=item.trade_pnl_usdc===null||item.trade_pnl_usdc===undefined?null:Number(item.trade_pnl_usdc);
+    const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
+    const text=raw===null?'pending':(raw>0?'+':'')+'$'+raw.toFixed(2);
+    pnlLine='<div class="monitor-action '+cls+'">Trade P/L '+text+'</div>';
+   }else{
+    pnlLine='<div class="monitor-action flat">Trade P/L — · NOT TRADED</div>';
+   }
+  }else if(!item.trade_executed&&!['QUEUED','WAITING_APPROVAL'].includes(String(item.status||'').toUpperCase())){
+   pnlLine='<div class="monitor-action flat">NOT TRADED</div>';
+  }
+  const action=approveAction+sellAction+marketAction;
+  return '<div class="monitor-signal"><b>'+nflEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<div class="monitor-meta">'+meta.join(' · ')+'</div>':'')+pnlLine+(action?'<div class="monitor-signal-actions">'+action+'</div>':'')+'</div>';
+ }).join('');
+ return '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(title)+'</span>'+rows+'</div>';
+}
+async function nflApproveBuy(requestId,btn){
+ if(!confirm('Approve this below-minimum-odds BUY for execution?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='APPROVING…';
+ try{
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED';
+  await loadNflCapperStats();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function nflSetUnitSize(sourceKey,btn){
+ const input=document.getElementById('nflUnitSize-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-size/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflSetPortfolioPct(sourceKey,btn){
+ const input=document.getElementById('nflPortfolioPct-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-percent/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflCapperLine(x,sourceKey){
+ if(!x)return 'No tracked signals yet';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const winPct=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const rawPnl=x.realized_pnl_usdc===null||x.realized_pnl_usdc===undefined?null:Number(x.realized_pnl_usdc);
+ const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'$'+rawPnl.toFixed(2);
+ const pnlClass=rawPnl===null||rawPnl===0?'flat':(rawPnl>0?'positive':'negative');
+ const missedRaw=Number(x.missed_pnl_usdc||0);
+ const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
+ const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
+ const liveRaw=Number(x.total_live_pnl_usdc||0);
+ const livePnl=(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
+ const liveClass=liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
+ const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
+ const pnl7Raw=Number(x.realized_pnl_7d_usdc||0);
+ const pnl30Raw=Number(x.realized_pnl_30d_usdc||0);
+ const pnl7=(pnl7Raw>0?'+':'')+'$'+pnl7Raw.toFixed(2);
+ const pnl30=(pnl30Raw>0?'+':'')+'$'+pnl30Raw.toFixed(2);
+ const pnl7Class=pnl7Raw===0?'flat':(pnl7Raw>0?'positive':'negative');
+ const pnl30Class=pnl30Raw===0?'flat':(pnl30Raw>0?'positive':'negative');
+ const metrics='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>Bets</span><b>'+(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+winPct+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+pnlClass+'">'+pnl+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+liveClass+'">'+livePnl+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="capper-pnl '+pnl7Class+'">'+pnl7+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="capper-pnl '+pnl30Class+'">'+pnl30+'</b></div>'
+  +'<div class="capper-metric"><span>Open value</span><b>'+openValue+'</b></div>'
+  +'<div class="capper-metric"><span>Missed P/L</span><b class="capper-pnl '+missedClass+'">'+missedPnl+' <small>('+Number(x.missed_graded||0)+')</small></b></div>'
+  +'</div>';
+ const active=nflActiveTabs[sourceKey]||'signals';
+ const specs=nflTabSpec(x);
+ const tabs='<div class="capper-tabs">'+specs.map(s=>'<button type="button" class="'+(s[0]===active?'active':'')+'" aria-pressed="'+(s[0]===active?'true':'false')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')"><span>'+nflEsc(s[1])+'</span><b>'+s[2]+'</b></button>').join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const body=(spec[3]||[]).length
+  ? nflPickList(spec[1],spec[3],spec[4])
+  : '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(spec[1])+'</span><div style="margin-top:7px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div></div>';
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk varies by odds · auto recalculates before new/retried orders</span></div>'
+  +'</div>';
+ return unitControl+metrics+nflPositionList(x)+tabs+body;
+}
+async function loadNflCapperStats(){
+ try{
+  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
+  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(!d.sport_enabled?'ENABLED · AUTO OFF':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF'));
+  nflSyncSportPower(d.sport_enabled);
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  nflLastCappers=d.cappers||{};
+  nflRenderCappers();
+  nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++Number(q.target_profit_usdc).toFixed(2)+(units?' ('+units+')':'')) : '';
+  if(!confirm('Approve BUY at current '+live+'? Risk 
+async function nflSetUnitSize(sourceKey,btn){
+ const input=document.getElementById('nflUnitSize-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-size/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflSetPortfolioPct(sourceKey,btn){
+ const input=document.getElementById('nflPortfolioPct-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-percent/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflCapperLine(x,sourceKey){
+ if(!x)return 'No tracked signals yet';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const winPct=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const rawPnl=x.realized_pnl_usdc===null||x.realized_pnl_usdc===undefined?null:Number(x.realized_pnl_usdc);
+ const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'$'+rawPnl.toFixed(2);
+ const pnlClass=rawPnl===null||rawPnl===0?'flat':(rawPnl>0?'positive':'negative');
+ const missedRaw=Number(x.missed_pnl_usdc||0);
+ const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
+ const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
+ const liveRaw=Number(x.total_live_pnl_usdc||0);
+ const livePnl=(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
+ const liveClass=liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
+ const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
+ const pnl7Raw=Number(x.realized_pnl_7d_usdc||0);
+ const pnl30Raw=Number(x.realized_pnl_30d_usdc||0);
+ const pnl7=(pnl7Raw>0?'+':'')+'$'+pnl7Raw.toFixed(2);
+ const pnl30=(pnl30Raw>0?'+':'')+'$'+pnl30Raw.toFixed(2);
+ const pnl7Class=pnl7Raw===0?'flat':(pnl7Raw>0?'positive':'negative');
+ const pnl30Class=pnl30Raw===0?'flat':(pnl30Raw>0?'positive':'negative');
+ const metrics='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>Bets</span><b>'+(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+winPct+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+pnlClass+'">'+pnl+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+liveClass+'">'+livePnl+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="capper-pnl '+pnl7Class+'">'+pnl7+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="capper-pnl '+pnl30Class+'">'+pnl30+'</b></div>'
+  +'<div class="capper-metric"><span>Open value</span><b>'+openValue+'</b></div>'
+  +'<div class="capper-metric"><span>Missed P/L</span><b class="capper-pnl '+missedClass+'">'+missedPnl+' <small>('+Number(x.missed_graded||0)+')</small></b></div>'
+  +'</div>';
+ const active=nflActiveTabs[sourceKey]||'signals';
+ const specs=nflTabSpec(x);
+ const tabs='<div class="capper-tabs">'+specs.map(s=>'<button type="button" class="'+(s[0]===active?'active':'')+'" aria-pressed="'+(s[0]===active?'true':'false')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')"><span>'+nflEsc(s[1])+'</span><b>'+s[2]+'</b></button>').join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const body=(spec[3]||[]).length
+  ? nflPickList(spec[1],spec[3],spec[4])
+  : '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(spec[1])+'</span><div style="margin-top:7px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div></div>';
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk varies by odds · auto recalculates before new/retried orders</span></div>'
+  +'</div>';
+ return unitControl+metrics+nflPositionList(x)+tabs+body;
+}
+async function loadNflCapperStats(){
+ try{
+  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
+  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(!d.sport_enabled?'ENABLED · AUTO OFF':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF'));
+  nflSyncSportPower(d.sport_enabled);
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  nflLastCappers=d.cappers||{};
+  nflRenderCappers();
+  nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++Number(item.current_value_usdc).toFixed(2);
+  const units=nflUnits(item.units), unitTitle=units?' · '+units:'';
+  const exact=item.exact_position?'<div><b>Exact position:</b> '+nflEsc(item.exact_position)+'</div>':'';
+  const toWin=item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!==''?'<div><b>To win  };
+ const renderSettled=item=>{
+  const result=String(item.result||'').toUpperCase();
+  const awaiting=!result&&String(item.status||'').toUpperCase()==='CLOSED_RECONCILED';
+  const cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
+  const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
+  const pnl=raw===null?'':('<div class="nfl-position-pnl '+(raw>0?'positive':raw<0?'negative':'')+'">Realized P/L '+(raw>0?'+':'')+'$'+raw.toFixed(2)+'</div>');
+  const stake=item.stake_usdc===null||item.stake_usdc===undefined?'':' · Stake $'+Number(item.stake_usdc).toFixed(2);
+  const statusLabel=result?(' · '+nflEsc(result)):(awaiting?' · AWAITING SETTLEMENT':'');
+  const manual=awaiting&&item.trade_id
+   ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px"><button type="button" data-result="WIN" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE WIN</button><button type="button" data-result="LOSS" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE LOSS</button><button type="button" data-result="PUSH" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE PUSH</button></div>'
+   : '';
+  return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+statusLabel+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+manual+'</div>';
+ };
+ let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+(open.length?open.map(renderOpen).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>')+'</div>';
+ if(!nflHideFinished&&(settled.length||capperLast24hOnly)){
+  html+='<div style="margin-top:12px"><span class="capper-section-badge">Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</span>'+(settled.length?settled.map(renderSettled).join(''):'<div style="margin-top:7px;opacity:.7">No settled positions in the last 24 hours.</div>')+'</div>';
+ }
+ return html;
+}
+async function nflSellPosition(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'});
+  const q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'});
+   const sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){
+    btn.textContent='SOLD';
+    await loadNflCapperStats();
+    return;
+   }
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     btn.textContent='SOLD';
+     await loadNflCapperStats();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
+  }
+  throw new Error('SELL timed out waiting for Termux');
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflManualSettle(tradeId,result,btn){
+ const choice=String(result||'').toUpperCase();
+ if(!['WIN','LOSS','PUSH'].includes(choice))return;
+ if(!confirm('Manually settle this position as '+choice+'? This writes the final result and realized P/L and cannot be undone from this button.'))return;
+ const group=btn.parentElement;
+ const buttons=group?Array.from(group.querySelectorAll('button')):[btn];
+ buttons.forEach(b=>b.disabled=true);
+ const original=btn.textContent;
+ btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(choice),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  btn.textContent='SETTLED '+choice;
+  await loadNflCapperStats();
+ }catch(e){
+  buttons.forEach(b=>b.disabled=false);
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflTabSpec(x){
+ return [
+  ['signals','Signals',Number(x.signals||0),x.all_items||[],'signals'],
+  ['queued','Queued',Number(x.queued||0),x.queued_items||[],'queued'],
+  ['done','Done',Number(x.done||0),x.done_items||[],'done'],
+  ['failed','Failed',Number(x.failed||0),x.failed_items||[],'failed'],
+  ['retrying','Retrying',Number(x.retrying||0),x.retrying_items||[],'retrying'],
+  ['pregame','Pregame',Number(x.pregame||0),x.pregame_items||[],'pregame'],
+  ['live','Live',Number(x.live||0),x.live_items||[],'live'],
+  ['closed','Closed',Number(x.closed||0),x.closed_items||[],'closed'],
+  ['unsupported','Unsupported',Number(x.unsupported||0),x.unsupported_items||[],'unsupported']
+ ];
+}
+function nflSetTab(sourceKey,tab){
+ nflActiveTabs[sourceKey]=tab;
+ const x=nflLastCappers[sourceKey==='slam'?'Slam - NFL':'Syndicate - NFL'];
+ const el=document.getElementById(sourceKey==='slam'?'nflCapperSlam':'nflCapperSyndicate');
+ if(el&&x)el.innerHTML=nflCapperLine(x,sourceKey);
+}
+function nflPickList(title,items,kind){
+ if(!Array.isArray(items)||!items.length)return '';
+ const scoped=capperLast24hOnly&&kind==='signals'
+  ? items.filter(item=>capperWithin24h(item.posted_at||item.updated_at))
+  : items;
+ const visible=nflHideFinished?scoped.filter(item=>String(item.event_phase||'').toUpperCase()!=='CLOSED'):scoped;
+ if(!visible.length){
+  if(capperLast24hOnly&&kind==='signals')return '<div style="margin-top:8px;opacity:.7">No signals in the last 24 hours.</div>';
+  return '<div style="margin-top:8px;opacity:.7">'+(nflHideFinished?'Finished games hidden.':'No signals.')+'</div>';
+ }
+ const rows=visible.map(item=>{
+  const meta=[];
+  if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(nflEsc(item.units)+'u');
+  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('risk $'+Number(item.stake_usdc).toFixed(2));
+  if(item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!=='')meta.push('to win $'+Number(item.target_profit_usdc).toFixed(2));
+  if(item.posted_at)meta.push('signal '+nflPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+nflAge(item.signal_age_seconds):''));
+  if(item.updated_at)meta.push('last update '+nflPickTime(item.updated_at));
+  if(item.matchup)meta.push('Match: '+nflEsc(item.matchup));
+  if(item.exact_position)meta.push('POSITION HELD: '+nflEsc(item.exact_position));
+  if(item.market)meta.push('Market: '+nflEsc(item.market));
+  if(item.result_event_title)meta.push('Game '+nflEsc(item.result_event_title));
+  if(item.event_phase==='LIVE'){
+   meta.push('GAME LIVE');
+   if(item.espn_score)meta.push('ESPN '+nflEsc(item.espn_score)+(item.espn_status?' · '+nflEsc(item.espn_status):''));
+  }else if(item.event_phase==='CLOSED')meta.push('GAME FINISHED');
+  else if(item.event_start_at)meta.push('starts '+nflPickTime(item.event_start_at));
+  if(item.final_score)meta.push('Final '+nflEsc(item.final_score));
+  if(item.status)meta.push('status '+nflEsc(item.status));
+  if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
+  if(item.approval_reason==='MIN_ODDS')meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
+  if(item.reason&&['pregame','live','closed','unsupported','failed','signals'].includes(kind))meta.push(nflEsc(item.reason));
+  if(item.last_error&&['retrying','failed','signals'].includes(kind))meta.push(nflEsc(item.last_error));
+  const approveAction=(String(item.status||'').toUpperCase()==='WAITING_APPROVAL'&&item.request_id)?'<button type="button" style="margin-top:6px" data-request-id="'+nflEsc(item.request_id)+'" onclick="nflApproveBuy(this.dataset.requestId,this)">APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2)+'</button>':'';
+  const sellAction=(item.trade_id&&item.sell_available)?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  const marketAction=(String(item.event_phase||'').toUpperCase()!=='CLOSED'&&item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+nflEsc(item.market_url)+'">OPEN MARKET</a>':'';
+  const visual=nflPhaseVisual(item);
+  const badge=visual.label?'<span class="capper-event-badge" style="'+visual.badge+'">'+visual.label+'</span>':'';
+  let pnlLine='';
+  if(String(item.event_phase||'').toUpperCase()==='CLOSED'){
+   if(item.trade_executed){
+    const raw=item.trade_pnl_usdc===null||item.trade_pnl_usdc===undefined?null:Number(item.trade_pnl_usdc);
+    const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
+    const text=raw===null?'pending':(raw>0?'+':'')+'$'+raw.toFixed(2);
+    pnlLine='<div class="monitor-action '+cls+'">Trade P/L '+text+'</div>';
+   }else{
+    pnlLine='<div class="monitor-action flat">Trade P/L — · NOT TRADED</div>';
+   }
+  }else if(!item.trade_executed&&!['QUEUED','WAITING_APPROVAL'].includes(String(item.status||'').toUpperCase())){
+   pnlLine='<div class="monitor-action flat">NOT TRADED</div>';
+  }
+  const action=approveAction+sellAction+marketAction;
+  return '<div class="monitor-signal"><b>'+nflEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<div class="monitor-meta">'+meta.join(' · ')+'</div>':'')+pnlLine+(action?'<div class="monitor-signal-actions">'+action+'</div>':'')+'</div>';
+ }).join('');
+ return '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(title)+'</span>'+rows+'</div>';
+}
+async function nflApproveBuy(requestId,btn){
+ if(!confirm('Approve this below-minimum-odds BUY for execution?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='APPROVING…';
+ try{
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED';
+  await loadNflCapperStats();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function nflSetUnitSize(sourceKey,btn){
+ const input=document.getElementById('nflUnitSize-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-size/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflSetPortfolioPct(sourceKey,btn){
+ const input=document.getElementById('nflPortfolioPct-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-percent/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflCapperLine(x,sourceKey){
+ if(!x)return 'No tracked signals yet';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const winPct=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const rawPnl=x.realized_pnl_usdc===null||x.realized_pnl_usdc===undefined?null:Number(x.realized_pnl_usdc);
+ const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'$'+rawPnl.toFixed(2);
+ const pnlClass=rawPnl===null||rawPnl===0?'flat':(rawPnl>0?'positive':'negative');
+ const missedRaw=Number(x.missed_pnl_usdc||0);
+ const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
+ const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
+ const liveRaw=Number(x.total_live_pnl_usdc||0);
+ const livePnl=(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
+ const liveClass=liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
+ const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
+ const pnl7Raw=Number(x.realized_pnl_7d_usdc||0);
+ const pnl30Raw=Number(x.realized_pnl_30d_usdc||0);
+ const pnl7=(pnl7Raw>0?'+':'')+'$'+pnl7Raw.toFixed(2);
+ const pnl30=(pnl30Raw>0?'+':'')+'$'+pnl30Raw.toFixed(2);
+ const pnl7Class=pnl7Raw===0?'flat':(pnl7Raw>0?'positive':'negative');
+ const pnl30Class=pnl30Raw===0?'flat':(pnl30Raw>0?'positive':'negative');
+ const metrics='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>Bets</span><b>'+(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+winPct+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+pnlClass+'">'+pnl+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+liveClass+'">'+livePnl+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="capper-pnl '+pnl7Class+'">'+pnl7+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="capper-pnl '+pnl30Class+'">'+pnl30+'</b></div>'
+  +'<div class="capper-metric"><span>Open value</span><b>'+openValue+'</b></div>'
+  +'<div class="capper-metric"><span>Missed P/L</span><b class="capper-pnl '+missedClass+'">'+missedPnl+' <small>('+Number(x.missed_graded||0)+')</small></b></div>'
+  +'</div>';
+ const active=nflActiveTabs[sourceKey]||'signals';
+ const specs=nflTabSpec(x);
+ const tabs='<div class="capper-tabs">'+specs.map(s=>'<button type="button" class="'+(s[0]===active?'active':'')+'" aria-pressed="'+(s[0]===active?'true':'false')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')"><span>'+nflEsc(s[1])+'</span><b>'+s[2]+'</b></button>').join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const body=(spec[3]||[]).length
+  ? nflPickList(spec[1],spec[3],spec[4])
+  : '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(spec[1])+'</span><div style="margin-top:7px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div></div>';
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk varies by odds · auto recalculates before new/retried orders</span></div>'
+  +'</div>';
+ return unitControl+metrics+nflPositionList(x)+tabs+body;
+}
+async function loadNflCapperStats(){
+ try{
+  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
+  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(!d.sport_enabled?'ENABLED · AUTO OFF':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF'));
+  nflSyncSportPower(d.sport_enabled);
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  nflLastCappers=d.cappers||{};
+  nflRenderCappers();
+  nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++Number(item.target_profit_usdc).toFixed(2)+'</b>'+(units?' ('+units+')':'')+'</div>':'';
+  const sell=item.trade_id?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  return '<div class="nfl-position-row open"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+unitTitle+' · OPEN</div>'+exact+toWin+'<div>'+nflEsc(item.outcome||'')+' · Stake  };
+ const renderSettled=item=>{
+  const result=String(item.result||'').toUpperCase();
+  const awaiting=!result&&String(item.status||'').toUpperCase()==='CLOSED_RECONCILED';
+  const cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
+  const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
+  const pnl=raw===null?'':('<div class="nfl-position-pnl '+(raw>0?'positive':raw<0?'negative':'')+'">Realized P/L '+(raw>0?'+':'')+'$'+raw.toFixed(2)+'</div>');
+  const stake=item.stake_usdc===null||item.stake_usdc===undefined?'':' · Stake $'+Number(item.stake_usdc).toFixed(2);
+  const statusLabel=result?(' · '+nflEsc(result)):(awaiting?' · AWAITING SETTLEMENT':'');
+  const manual=awaiting&&item.trade_id
+   ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px"><button type="button" data-result="WIN" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE WIN</button><button type="button" data-result="LOSS" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE LOSS</button><button type="button" data-result="PUSH" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE PUSH</button></div>'
+   : '';
+  return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+statusLabel+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+manual+'</div>';
+ };
+ let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+(open.length?open.map(renderOpen).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>')+'</div>';
+ if(!nflHideFinished&&(settled.length||capperLast24hOnly)){
+  html+='<div style="margin-top:12px"><span class="capper-section-badge">Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</span>'+(settled.length?settled.map(renderSettled).join(''):'<div style="margin-top:7px;opacity:.7">No settled positions in the last 24 hours.</div>')+'</div>';
+ }
+ return html;
+}
+async function nflSellPosition(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'});
+  const q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'});
+   const sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){
+    btn.textContent='SOLD';
+    await loadNflCapperStats();
+    return;
+   }
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     btn.textContent='SOLD';
+     await loadNflCapperStats();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
+  }
+  throw new Error('SELL timed out waiting for Termux');
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflManualSettle(tradeId,result,btn){
+ const choice=String(result||'').toUpperCase();
+ if(!['WIN','LOSS','PUSH'].includes(choice))return;
+ if(!confirm('Manually settle this position as '+choice+'? This writes the final result and realized P/L and cannot be undone from this button.'))return;
+ const group=btn.parentElement;
+ const buttons=group?Array.from(group.querySelectorAll('button')):[btn];
+ buttons.forEach(b=>b.disabled=true);
+ const original=btn.textContent;
+ btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(choice),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  btn.textContent='SETTLED '+choice;
+  await loadNflCapperStats();
+ }catch(e){
+  buttons.forEach(b=>b.disabled=false);
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflTabSpec(x){
+ return [
+  ['signals','Signals',Number(x.signals||0),x.all_items||[],'signals'],
+  ['queued','Queued',Number(x.queued||0),x.queued_items||[],'queued'],
+  ['done','Done',Number(x.done||0),x.done_items||[],'done'],
+  ['failed','Failed',Number(x.failed||0),x.failed_items||[],'failed'],
+  ['retrying','Retrying',Number(x.retrying||0),x.retrying_items||[],'retrying'],
+  ['pregame','Pregame',Number(x.pregame||0),x.pregame_items||[],'pregame'],
+  ['live','Live',Number(x.live||0),x.live_items||[],'live'],
+  ['closed','Closed',Number(x.closed||0),x.closed_items||[],'closed'],
+  ['unsupported','Unsupported',Number(x.unsupported||0),x.unsupported_items||[],'unsupported']
+ ];
+}
+function nflSetTab(sourceKey,tab){
+ nflActiveTabs[sourceKey]=tab;
+ const x=nflLastCappers[sourceKey==='slam'?'Slam - NFL':'Syndicate - NFL'];
+ const el=document.getElementById(sourceKey==='slam'?'nflCapperSlam':'nflCapperSyndicate');
+ if(el&&x)el.innerHTML=nflCapperLine(x,sourceKey);
+}
+function nflPickList(title,items,kind){
+ if(!Array.isArray(items)||!items.length)return '';
+ const scoped=capperLast24hOnly&&kind==='signals'
+  ? items.filter(item=>capperWithin24h(item.posted_at||item.updated_at))
+  : items;
+ const visible=nflHideFinished?scoped.filter(item=>String(item.event_phase||'').toUpperCase()!=='CLOSED'):scoped;
+ if(!visible.length){
+  if(capperLast24hOnly&&kind==='signals')return '<div style="margin-top:8px;opacity:.7">No signals in the last 24 hours.</div>';
+  return '<div style="margin-top:8px;opacity:.7">'+(nflHideFinished?'Finished games hidden.':'No signals.')+'</div>';
+ }
+ const rows=visible.map(item=>{
+  const meta=[];
+  if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(nflEsc(item.units)+'u');
+  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('risk $'+Number(item.stake_usdc).toFixed(2));
+  if(item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!=='')meta.push('to win $'+Number(item.target_profit_usdc).toFixed(2));
+  if(item.posted_at)meta.push('signal '+nflPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+nflAge(item.signal_age_seconds):''));
+  if(item.updated_at)meta.push('last update '+nflPickTime(item.updated_at));
+  if(item.matchup)meta.push('Match: '+nflEsc(item.matchup));
+  if(item.exact_position)meta.push('POSITION HELD: '+nflEsc(item.exact_position));
+  if(item.market)meta.push('Market: '+nflEsc(item.market));
+  if(item.result_event_title)meta.push('Game '+nflEsc(item.result_event_title));
+  if(item.event_phase==='LIVE'){
+   meta.push('GAME LIVE');
+   if(item.espn_score)meta.push('ESPN '+nflEsc(item.espn_score)+(item.espn_status?' · '+nflEsc(item.espn_status):''));
+  }else if(item.event_phase==='CLOSED')meta.push('GAME FINISHED');
+  else if(item.event_start_at)meta.push('starts '+nflPickTime(item.event_start_at));
+  if(item.final_score)meta.push('Final '+nflEsc(item.final_score));
+  if(item.status)meta.push('status '+nflEsc(item.status));
+  if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
+  if(item.approval_reason==='MIN_ODDS')meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
+  if(item.reason&&['pregame','live','closed','unsupported','failed','signals'].includes(kind))meta.push(nflEsc(item.reason));
+  if(item.last_error&&['retrying','failed','signals'].includes(kind))meta.push(nflEsc(item.last_error));
+  const approveAction=(String(item.status||'').toUpperCase()==='WAITING_APPROVAL'&&item.request_id)?'<button type="button" style="margin-top:6px" data-request-id="'+nflEsc(item.request_id)+'" onclick="nflApproveBuy(this.dataset.requestId,this)">APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2)+'</button>':'';
+  const sellAction=(item.trade_id&&item.sell_available)?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  const marketAction=(String(item.event_phase||'').toUpperCase()!=='CLOSED'&&item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+nflEsc(item.market_url)+'">OPEN MARKET</a>':'';
+  const visual=nflPhaseVisual(item);
+  const badge=visual.label?'<span class="capper-event-badge" style="'+visual.badge+'">'+visual.label+'</span>':'';
+  let pnlLine='';
+  if(String(item.event_phase||'').toUpperCase()==='CLOSED'){
+   if(item.trade_executed){
+    const raw=item.trade_pnl_usdc===null||item.trade_pnl_usdc===undefined?null:Number(item.trade_pnl_usdc);
+    const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
+    const text=raw===null?'pending':(raw>0?'+':'')+'$'+raw.toFixed(2);
+    pnlLine='<div class="monitor-action '+cls+'">Trade P/L '+text+'</div>';
+   }else{
+    pnlLine='<div class="monitor-action flat">Trade P/L — · NOT TRADED</div>';
+   }
+  }else if(!item.trade_executed&&!['QUEUED','WAITING_APPROVAL'].includes(String(item.status||'').toUpperCase())){
+   pnlLine='<div class="monitor-action flat">NOT TRADED</div>';
+  }
+  const action=approveAction+sellAction+marketAction;
+  return '<div class="monitor-signal"><b>'+nflEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<div class="monitor-meta">'+meta.join(' · ')+'</div>':'')+pnlLine+(action?'<div class="monitor-signal-actions">'+action+'</div>':'')+'</div>';
+ }).join('');
+ return '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(title)+'</span>'+rows+'</div>';
+}
+async function nflApproveBuy(requestId,btn){
+ if(!confirm('Approve this below-minimum-odds BUY for execution?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='APPROVING…';
+ try{
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED';
+  await loadNflCapperStats();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function nflSetUnitSize(sourceKey,btn){
+ const input=document.getElementById('nflUnitSize-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-size/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflSetPortfolioPct(sourceKey,btn){
+ const input=document.getElementById('nflPortfolioPct-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-percent/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflCapperLine(x,sourceKey){
+ if(!x)return 'No tracked signals yet';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const winPct=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const rawPnl=x.realized_pnl_usdc===null||x.realized_pnl_usdc===undefined?null:Number(x.realized_pnl_usdc);
+ const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'$'+rawPnl.toFixed(2);
+ const pnlClass=rawPnl===null||rawPnl===0?'flat':(rawPnl>0?'positive':'negative');
+ const missedRaw=Number(x.missed_pnl_usdc||0);
+ const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
+ const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
+ const liveRaw=Number(x.total_live_pnl_usdc||0);
+ const livePnl=(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
+ const liveClass=liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
+ const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
+ const pnl7Raw=Number(x.realized_pnl_7d_usdc||0);
+ const pnl30Raw=Number(x.realized_pnl_30d_usdc||0);
+ const pnl7=(pnl7Raw>0?'+':'')+'$'+pnl7Raw.toFixed(2);
+ const pnl30=(pnl30Raw>0?'+':'')+'$'+pnl30Raw.toFixed(2);
+ const pnl7Class=pnl7Raw===0?'flat':(pnl7Raw>0?'positive':'negative');
+ const pnl30Class=pnl30Raw===0?'flat':(pnl30Raw>0?'positive':'negative');
+ const metrics='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>Bets</span><b>'+(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+winPct+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+pnlClass+'">'+pnl+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+liveClass+'">'+livePnl+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="capper-pnl '+pnl7Class+'">'+pnl7+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="capper-pnl '+pnl30Class+'">'+pnl30+'</b></div>'
+  +'<div class="capper-metric"><span>Open value</span><b>'+openValue+'</b></div>'
+  +'<div class="capper-metric"><span>Missed P/L</span><b class="capper-pnl '+missedClass+'">'+missedPnl+' <small>('+Number(x.missed_graded||0)+')</small></b></div>'
+  +'</div>';
+ const active=nflActiveTabs[sourceKey]||'signals';
+ const specs=nflTabSpec(x);
+ const tabs='<div class="capper-tabs">'+specs.map(s=>'<button type="button" class="'+(s[0]===active?'active':'')+'" aria-pressed="'+(s[0]===active?'true':'false')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')"><span>'+nflEsc(s[1])+'</span><b>'+s[2]+'</b></button>').join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const body=(spec[3]||[]).length
+  ? nflPickList(spec[1],spec[3],spec[4])
+  : '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(spec[1])+'</span><div style="margin-top:7px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div></div>';
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk varies by odds · auto recalculates before new/retried orders</span></div>'
+  +'</div>';
+ return unitControl+metrics+nflPositionList(x)+tabs+body;
+}
+async function loadNflCapperStats(){
+ try{
+  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
+  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(!d.sport_enabled?'ENABLED · AUTO OFF':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF'));
+  nflSyncSportPower(d.sport_enabled);
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  nflLastCappers=d.cappers||{};
+  nflRenderCappers();
+  nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++Number(cost||0).toFixed(2)+' · Shares '+shares+'</div><div>Entry odds '+entry+' · Live odds '+live+' · Value '+value+'</div><div class="nfl-position-pnl '+pnlClass+'">Live P/L '+pnlText+'</div>'+sell+'</div>';
+ };
+ const renderSettled=item=>{
+  const result=String(item.result||'').toUpperCase();
+  const awaiting=!result&&String(item.status||'').toUpperCase()==='CLOSED_RECONCILED';
+  const cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
+  const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
+  const pnl=raw===null?'':('<div class="nfl-position-pnl '+(raw>0?'positive':raw<0?'negative':'')+'">Realized P/L '+(raw>0?'+':'')+'$'+raw.toFixed(2)+'</div>');
+  const stake=item.stake_usdc===null||item.stake_usdc===undefined?'':' · Stake $'+Number(item.stake_usdc).toFixed(2);
+  const statusLabel=result?(' · '+nflEsc(result)):(awaiting?' · AWAITING SETTLEMENT':'');
+  const manual=awaiting&&item.trade_id
+   ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px"><button type="button" data-result="WIN" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE WIN</button><button type="button" data-result="LOSS" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE LOSS</button><button type="button" data-result="PUSH" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflManualSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE PUSH</button></div>'
+   : '';
+  return '<div class="nfl-position-row '+cls+'"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+statusLabel+'</div><div>'+nflEsc(item.outcome||'')+stake+'</div>'+pnl+manual+'</div>';
+ };
+ let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+(open.length?open.map(renderOpen).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>')+'</div>';
+ if(!nflHideFinished&&(settled.length||capperLast24hOnly)){
+  html+='<div style="margin-top:12px"><span class="capper-section-badge">Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</span>'+(settled.length?settled.map(renderSettled).join(''):'<div style="margin-top:7px;opacity:.7">No settled positions in the last 24 hours.</div>')+'</div>';
+ }
+ return html;
+}
+async function nflSellPosition(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'});
+  const q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'});
+   const sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){
+    btn.textContent='SOLD';
+    await loadNflCapperStats();
+    return;
+   }
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     btn.textContent='SOLD';
+     await loadNflCapperStats();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
+  }
+  throw new Error('SELL timed out waiting for Termux');
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflManualSettle(tradeId,result,btn){
+ const choice=String(result||'').toUpperCase();
+ if(!['WIN','LOSS','PUSH'].includes(choice))return;
+ if(!confirm('Manually settle this position as '+choice+'? This writes the final result and realized P/L and cannot be undone from this button.'))return;
+ const group=btn.parentElement;
+ const buttons=group?Array.from(group.querySelectorAll('button')):[btn];
+ buttons.forEach(b=>b.disabled=true);
+ const original=btn.textContent;
+ btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(choice),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  btn.textContent='SETTLED '+choice;
+  await loadNflCapperStats();
+ }catch(e){
+  buttons.forEach(b=>b.disabled=false);
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflTabSpec(x){
+ return [
+  ['signals','Signals',Number(x.signals||0),x.all_items||[],'signals'],
+  ['queued','Queued',Number(x.queued||0),x.queued_items||[],'queued'],
+  ['done','Done',Number(x.done||0),x.done_items||[],'done'],
+  ['failed','Failed',Number(x.failed||0),x.failed_items||[],'failed'],
+  ['retrying','Retrying',Number(x.retrying||0),x.retrying_items||[],'retrying'],
+  ['pregame','Pregame',Number(x.pregame||0),x.pregame_items||[],'pregame'],
+  ['live','Live',Number(x.live||0),x.live_items||[],'live'],
+  ['closed','Closed',Number(x.closed||0),x.closed_items||[],'closed'],
+  ['unsupported','Unsupported',Number(x.unsupported||0),x.unsupported_items||[],'unsupported']
+ ];
+}
+function nflSetTab(sourceKey,tab){
+ nflActiveTabs[sourceKey]=tab;
+ const x=nflLastCappers[sourceKey==='slam'?'Slam - NFL':'Syndicate - NFL'];
+ const el=document.getElementById(sourceKey==='slam'?'nflCapperSlam':'nflCapperSyndicate');
+ if(el&&x)el.innerHTML=nflCapperLine(x,sourceKey);
+}
+function nflPickList(title,items,kind){
+ if(!Array.isArray(items)||!items.length)return '';
+ const scoped=capperLast24hOnly&&kind==='signals'
+  ? items.filter(item=>capperWithin24h(item.posted_at||item.updated_at))
+  : items;
+ const visible=nflHideFinished?scoped.filter(item=>String(item.event_phase||'').toUpperCase()!=='CLOSED'):scoped;
+ if(!visible.length){
+  if(capperLast24hOnly&&kind==='signals')return '<div style="margin-top:8px;opacity:.7">No signals in the last 24 hours.</div>';
+  return '<div style="margin-top:8px;opacity:.7">'+(nflHideFinished?'Finished games hidden.':'No signals.')+'</div>';
+ }
+ const rows=visible.map(item=>{
+  const meta=[];
+  if(item.units!==null&&item.units!==undefined&&item.units!=='')meta.push(nflEsc(item.units)+'u');
+  if(item.stake_usdc!==null&&item.stake_usdc!==undefined&&item.stake_usdc!=='')meta.push('risk $'+Number(item.stake_usdc).toFixed(2));
+  if(item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!=='')meta.push('to win $'+Number(item.target_profit_usdc).toFixed(2));
+  if(item.posted_at)meta.push('signal '+nflPickTime(item.posted_at)+(item.signal_age_seconds!==null&&item.signal_age_seconds!==undefined?' · age '+nflAge(item.signal_age_seconds):''));
+  if(item.updated_at)meta.push('last update '+nflPickTime(item.updated_at));
+  if(item.matchup)meta.push('Match: '+nflEsc(item.matchup));
+  if(item.exact_position)meta.push('POSITION HELD: '+nflEsc(item.exact_position));
+  if(item.market)meta.push('Market: '+nflEsc(item.market));
+  if(item.result_event_title)meta.push('Game '+nflEsc(item.result_event_title));
+  if(item.event_phase==='LIVE'){
+   meta.push('GAME LIVE');
+   if(item.espn_score)meta.push('ESPN '+nflEsc(item.espn_score)+(item.espn_status?' · '+nflEsc(item.espn_status):''));
+  }else if(item.event_phase==='CLOSED')meta.push('GAME FINISHED');
+  else if(item.event_start_at)meta.push('starts '+nflPickTime(item.event_start_at));
+  if(item.final_score)meta.push('Final '+nflEsc(item.final_score));
+  if(item.status)meta.push('status '+nflEsc(item.status));
+  if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
+  if(item.approval_reason==='MIN_ODDS')meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
+  if(item.reason&&['pregame','live','closed','unsupported','failed','signals'].includes(kind))meta.push(nflEsc(item.reason));
+  if(item.last_error&&['retrying','failed','signals'].includes(kind))meta.push(nflEsc(item.last_error));
+  const approveAction=(String(item.status||'').toUpperCase()==='WAITING_APPROVAL'&&item.request_id)?'<button type="button" style="margin-top:6px" data-request-id="'+nflEsc(item.request_id)+'" onclick="nflApproveBuy(this.dataset.requestId,this)">APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2)+'</button>':'';
+  const sellAction=(item.trade_id&&item.sell_available)?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  const marketAction=(String(item.event_phase||'').toUpperCase()!=='CLOSED'&&item.market_url&&String(item.market_url).startsWith('https://polymarket.com/'))?'<a style="display:inline-block;margin:6px 0 0 8px" target="_blank" rel="noopener noreferrer" href="'+nflEsc(item.market_url)+'">OPEN MARKET</a>':'';
+  const visual=nflPhaseVisual(item);
+  const badge=visual.label?'<span class="capper-event-badge" style="'+visual.badge+'">'+visual.label+'</span>':'';
+  let pnlLine='';
+  if(String(item.event_phase||'').toUpperCase()==='CLOSED'){
+   if(item.trade_executed){
+    const raw=item.trade_pnl_usdc===null||item.trade_pnl_usdc===undefined?null:Number(item.trade_pnl_usdc);
+    const cls=raw===null||raw===0?'flat':(raw>0?'positive':'negative');
+    const text=raw===null?'pending':(raw>0?'+':'')+'$'+raw.toFixed(2);
+    pnlLine='<div class="monitor-action '+cls+'">Trade P/L '+text+'</div>';
+   }else{
+    pnlLine='<div class="monitor-action flat">Trade P/L — · NOT TRADED</div>';
+   }
+  }else if(!item.trade_executed&&!['QUEUED','WAITING_APPROVAL'].includes(String(item.status||'').toUpperCase())){
+   pnlLine='<div class="monitor-action flat">NOT TRADED</div>';
+  }
+  const action=approveAction+sellAction+marketAction;
+  return '<div class="monitor-signal"><b>'+nflEsc(item.selection||'Unknown selection')+'</b>'+badge+(meta.length?'<div class="monitor-meta">'+meta.join(' · ')+'</div>':'')+pnlLine+(action?'<div class="monitor-signal-actions">'+action+'</div>':'')+'</div>';
+ }).join('');
+ return '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(title)+'</span>'+rows+'</div>';
+}
+async function nflApproveBuy(requestId,btn){
+ if(!confirm('Approve this below-minimum-odds BUY for execution?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='APPROVING…';
+ try{
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED';
+  await loadNflCapperStats();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function nflSetUnitSize(sourceKey,btn){
+ const input=document.getElementById('nflUnitSize-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-size/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+async function nflSetPortfolioPct(sourceKey,btn){
+ const input=document.getElementById('nflPortfolioPct-'+sourceKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;
+ btn.disabled=true;
+ btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/nfl-cappers/unit-percent/'+encodeURIComponent(sourceKey),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadNflCapperStats();
+ }catch(e){
+  btn.disabled=false;
+  btn.textContent=original;
+  alert(String(e.message||e));
+ }
+}
+function nflCapperLine(x,sourceKey){
+ if(!x)return 'No tracked signals yet';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const winPct=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const rawPnl=x.realized_pnl_usdc===null||x.realized_pnl_usdc===undefined?null:Number(x.realized_pnl_usdc);
+ const pnl=rawPnl===null?'—':(rawPnl>0?'+':'')+'$'+rawPnl.toFixed(2);
+ const pnlClass=rawPnl===null||rawPnl===0?'flat':(rawPnl>0?'positive':'negative');
+ const missedRaw=Number(x.missed_pnl_usdc||0);
+ const missedPnl=(missedRaw>0?'+':'')+'$'+missedRaw.toFixed(2);
+ const missedClass=missedRaw===0?'flat':(missedRaw>0?'positive':'negative');
+ const liveRaw=Number(x.total_live_pnl_usdc||0);
+ const livePnl=(liveRaw>0?'+':'')+'$'+liveRaw.toFixed(2);
+ const liveClass=liveRaw===0?'flat':(liveRaw>0?'positive':'negative');
+ const openValue=x.open_value_usdc===null||x.open_value_usdc===undefined?'—':'$'+Number(x.open_value_usdc).toFixed(2);
+ const pnl7Raw=Number(x.realized_pnl_7d_usdc||0);
+ const pnl30Raw=Number(x.realized_pnl_30d_usdc||0);
+ const pnl7=(pnl7Raw>0?'+':'')+'$'+pnl7Raw.toFixed(2);
+ const pnl30=(pnl30Raw>0?'+':'')+'$'+pnl30Raw.toFixed(2);
+ const pnl7Class=pnl7Raw===0?'flat':(pnl7Raw>0?'positive':'negative');
+ const pnl30Class=pnl30Raw===0?'flat':(pnl30Raw>0?'positive':'negative');
+ const metrics='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>Bets</span><b>'+(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+(x.wins||0)+'-'+(x.losses||0)+'-'+(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+winPct+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+pnlClass+'">'+pnl+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+liveClass+'">'+livePnl+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="capper-pnl '+pnl7Class+'">'+pnl7+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="capper-pnl '+pnl30Class+'">'+pnl30+'</b></div>'
+  +'<div class="capper-metric"><span>Open value</span><b>'+openValue+'</b></div>'
+  +'<div class="capper-metric"><span>Missed P/L</span><b class="capper-pnl '+missedClass+'">'+missedPnl+' <small>('+Number(x.missed_graded||0)+')</small></b></div>'
+  +'</div>';
+ const active=nflActiveTabs[sourceKey]||'signals';
+ const specs=nflTabSpec(x);
+ const tabs='<div class="capper-tabs">'+specs.map(s=>'<button type="button" class="'+(s[0]===active?'active':'')+'" aria-pressed="'+(s[0]===active?'true':'false')+'" onclick="nflSetTab(\''+sourceKey+'\',\''+s[0]+'\')"><span>'+nflEsc(s[1])+'</span><b>'+s[2]+'</b></button>').join('')+'</div>';
+ const spec=specs.find(s=>s[0]===active)||specs[0];
+ const body=(spec[3]||[]).length
+  ? nflPickList(spec[1],spec[3],spec[4])
+  : '<div style="margin-top:8px"><span class="capper-section-badge">'+nflEsc(spec[1])+'</span><div style="margin-top:7px;opacity:.7">No '+nflEsc(spec[1].toLowerCase())+' signals.</div></div>';
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+nflEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="nflSetUnitSize(\''+sourceKey+'\',this)">SET 1U</button><input id="nflUnitSize-'+sourceKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="nflSetPortfolioPct(\''+sourceKey+'\',this)">AUTO %</button><input id="nflPortfolioPct-'+sourceKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk varies by odds · auto recalculates before new/retried orders</span></div>'
+  +'</div>';
+ return unitControl+metrics+nflPositionList(x)+tabs+body;
+}
+async function loadNflCapperStats(){
+ try{
+  const r=await fetch('/api/nfl-cappers/stats',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'NFL capper stats failed');
+  const state=document.getElementById('nflCapperState'),meta=document.getElementById('nflCapperMeta');
+  if(state)state.textContent=!d.enabled?'DISABLED':(!d.sport_enabled?'ENABLED · AUTO OFF':(d.auto_live?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF'));
+  nflSyncSportPower(d.sport_enabled);
+  if(meta)meta.textContent='Sizing: TO WIN posted units · default 1u win $'+Number(d.unit_usdc||10).toFixed(2)+' · fresh ≤ '+(d.max_pick_age_seconds||0)+'s · scan '+Math.round(Number(d.feed_window_minutes||0)/60)+'h · poll '+(d.poll_seconds||0)+'s';
+  nflLastCappers=d.cappers||{};
+  nflRenderCappers();
+  nflUpdateFinishedToggle();
+ }catch(e){
+  const state=document.getElementById('nflCapperState');if(state)state.textContent='Stats unavailable: '+String(e);
+ }
+}
+loadNflCapperStats();setInterval(loadNflCapperStats,10000);
+"""
+        html = html.replace("</script>", js + "\n</script>", 1)
+        dashboard.DASHBOARD_HTML = html
++Number(q.budget_usdc||0).toFixed(2)+target)){btn.disabled=false;btn.textContent=original;return}
+  btn.textContent='APPROVING '+live+'…';
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED '+nflOdds(d.polymarket_price);
   await loadNflCapperStats();
  }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
 }
