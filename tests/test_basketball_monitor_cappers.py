@@ -98,3 +98,15 @@ def test_basketball_sizing_controls_match_nfl_cfb_layout():
     assert auto < auto_input
     assert '<span>$</span>' not in source
     assert '<span>%</span>' not in source
+
+
+def test_basketball_dashboard_counts_distinct_submitted_pw_calls():
+    source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+
+    assert "def _submitted_pw_call_counts" in source
+    assert 'submission.get("order_id")' in source
+    assert 'payload.get("strategy_pick_id") or payload.get("slack_event_id")' in source
+    assert '"pw_calls": len(submitted_at_by_signal)' in source
+    assert '"pw_calls_24h": last_24h' in source
+    assert "<span>PW Calls</span>" in source
+    assert "visiblePwCalls=capperLast24hOnly" in source

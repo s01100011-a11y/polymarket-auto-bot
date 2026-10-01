@@ -85,6 +85,94 @@ def _execution_sport(rec: dict[str, Any], ingest: Any) -> str | None:
     return str(league or "").upper() if str(league or "").upper() in SPORTS else None
 
 
+def _payload_sport(payload: dict[str, Any], ingest: Any) -> str | None:
+    direct = str(payload.get("strategy_sport") or "").strip().upper()
+    if direct in SPORTS:
+        return direct
+
+    market_url = str(payload.get("market_url") or "").lower()
+    if "/wnba/" in market_url:
+        return "WNBA"
+    if "/nba/" in market_url:
+        return "NBA"
+
+    selection = payload.get("strategy_selection") or payload.get("outcome")
+    league = ingest._league_for_team(str(selection or ""))
+    sport = str(league or "").upper()
+    return sport if sport in SPORTS else None
+
+
+def _submitted_pw_call_counts(
+    executions: dict[str, Any],
+    queue: dict[str, Any],
+    *,
+    sport: str,
+    ingest: Any,
+) -> dict[str, int]:
+    """Count distinct PW signals that reached an accepted bot order submission."""
+    submitted_at_by_signal: dict[str, datetime | None] = {}
+
+    for rec in executions.values():
+        if not isinstance(rec, dict) or rec.get("paper") or rec.get("source") != "slack_live":
+            continue
+        if _execution_sport(rec, ingest) != sport:
+            continue
+        signal_id = str(rec.get("strategy_pick_id") or rec.get("slack_event_id") or "").strip()
+        if not signal_id:
+            continue
+        execution = rec.get("execution") or {}
+        if not (
+            execution.get("placed")
+            or execution.get("order_id")
+            or str(rec.get("status") or "").upper()
+            in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED", "CLOSED", "CLOSED_RECONCILED"}
+        ):
+            continue
+        submitted_at_by_signal.setdefault(
+            signal_id,
+            _parse_dt(rec.get("submitted_at") or rec.get("created_at")),
+        )
+
+    for rec in queue.values():
+        if not isinstance(rec, dict) or str(rec.get("action") or "").upper() != "BUY":
+            continue
+        payload = rec.get("payload") or {}
+        if payload.get("source") != "slack_live" or _payload_sport(payload, ingest) != sport:
+            continue
+        submission = rec.get("submission") or {}
+        order_id = str(submission.get("order_id") or "").strip()
+        if not order_id:
+            continue
+        signal_id = str(payload.get("strategy_pick_id") or payload.get("slack_event_id") or "").strip()
+        if not signal_id:
+            continue
+        accepted_at = None
+        try:
+            raw_unix = float(submission.get("accepted_at_unix") or 0)
+            if raw_unix > 0:
+                accepted_at = datetime.fromtimestamp(raw_unix, tz=timezone.utc)
+        except Exception:
+            accepted_at = None
+        submitted_at_by_signal[signal_id] = (
+            accepted_at
+            or _parse_dt(submission.get("recorded_at"))
+            or _parse_dt(rec.get("created_at"))
+            or submitted_at_by_signal.get(signal_id)
+        )
+
+    now = datetime.now(timezone.utc)
+    cutoff = now.timestamp() - 86400
+    last_24h = 0
+    for submitted_at in submitted_at_by_signal.values():
+        if submitted_at is not None and submitted_at.timestamp() >= cutoff:
+            last_24h += 1
+
+    return {
+        "pw_calls": len(submitted_at_by_signal),
+        "pw_calls_24h": last_24h,
+    }
+
+
 def _normalized_executions(executions: dict[str, Any], ingest: Any) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
     for execution_id, raw in executions.items():
@@ -186,6 +274,8 @@ def install(*, app: Any, dashboard: Any, core: Any, ingest: Any, nfl: Any) -> No
         raw_executions = core._load(core.EXECUTIONS_FILE)
         raw_executions = raw_executions if isinstance(raw_executions, dict) else {}
         executions = _normalized_executions(raw_executions, ingest)
+        raw_queue = core._load(core.DATA_DIR / "termux_executor_queue.json")
+        queue = raw_queue if isinstance(raw_queue, dict) else {}
         live_marks = nfl._live_mark_map(dashboard, executions)
 
         cappers: dict[str, Any] = {}
@@ -211,6 +301,12 @@ def install(*, app: Any, dashboard: Any, core: Any, ingest: Any, nfl: Any) -> No
                 sport=sport,
                 ingest=ingest,
             )
+            pw_call_counts = _submitted_pw_call_counts(
+                executions,
+                queue,
+                sport=sport,
+                ingest=ingest,
+            )
             feed_raw = core._load(core.DATA_DIR / spec["state_file"])
             feed = feed_raw if isinstance(feed_raw, dict) else {}
             cappers[label] = {
@@ -227,6 +323,7 @@ def install(*, app: Any, dashboard: Any, core: Any, ingest: Any, nfl: Any) -> No
                 "enabled": capper_control.is_enabled(core, label),
                 "signals": signals,
                 "positions": positions,
+                **pw_call_counts,
                 "feed": {
                     "last_success_at": feed.get("last_success_at"),
                     "last_poll_at": feed.get("last_poll_at"),
@@ -479,7 +576,9 @@ function monitorCard(x,sportKey){
   +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="monitorSetPortfolioPct(\''+sportKey+'\',this)">AUTO %</button><input id="monitorPortfolioPct-'+sportKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
   +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk changes with the live price</span></div>'
   +'</div>';
+ const visiblePwCalls=capperLast24hOnly?Number(x.pw_calls_24h||0):Number(x.pw_calls||0);
  const performance='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>PW Calls</span><b>'+visiblePwCalls+'</b></div>'
   +'<div class="capper-metric"><span>Bets</span><b>'+Number(x.bets||0)+'</b></div>'
   +'<div class="capper-metric"><span>Open</span><b>'+Number(x.open||0)+'</b></div>'
   +'<div class="capper-metric"><span>W-L-P</span><b>'+Number(x.wins||0)+'-'+Number(x.losses||0)+'-'+Number(x.pushes||0)+'</b></div>'
