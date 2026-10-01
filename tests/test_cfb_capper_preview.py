@@ -2335,3 +2335,9 @@ def test_cfb_sizing_controls_put_mode_buttons_left_of_inputs():
     assert auto < auto_input
     assert '<span>$</span>' not in source
     assert '<span>%</span>' not in source
+
+
+def test_cfb_open_positions_label_stake_and_shares_consistently():
+    source = Path("app/cfb_capper_preview.py").read_text(encoding="utf-8")
+    assert "' · Stake $'+Number(cost||0).toFixed(2)+' · Shares '+shares" in source
+    compile(source, "app/cfb_capper_preview.py", "exec")
