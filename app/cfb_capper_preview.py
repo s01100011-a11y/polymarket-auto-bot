@@ -2922,7 +2922,7 @@ function cfbPositionList(x){
   const cost=item.open_cost_basis_usdc||item.stake_usdc;
   const value=item.current_value_usdc===null||item.current_value_usdc===undefined?'—':'$'+Number(item.current_value_usdc).toFixed(2);
   const sell=item.trade_id?'<button type="button" style="margin-top:6px" data-trade-id="'+cfbEsc(item.trade_id)+'" onclick="cfbSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
-  return '<div class="cfb-open-position"><b style="font-size:15px">'+cfbEsc(item.selection||item.market||'CFB position')+' · OPEN</b><br><span>'+cfbEsc(item.outcome||'')+' · Entry '+entry+' · Live '+live+'</span><br><span>Shares '+shares+' · Cost $'+Number(cost||0).toFixed(2)+' · Value '+value+'</span><div class="live-pnl '+cls+'">Live P/L '+pnl+'</div>'+sell+'</div>';
+  return '<div class="cfb-open-position"><b style="font-size:15px">'+cfbEsc(item.selection||item.market||'CFB position')+' · OPEN</b><br><span>'+cfbEsc(item.outcome||'')+' · Stake $'+Number(cost||0).toFixed(2)+' · Shares '+shares+'</span><br><span>Entry '+entry+' · Live '+live+' · Value '+value+'</span><div class="live-pnl '+cls+'">Live P/L '+pnl+'</div>'+sell+'</div>';
  }).join(''):'<div style="margin-top:7px;opacity:.7">No open positions.</div>';
  let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+openHtml+'</div>';
  if(!cfbHideFinished&&(settled.length||capperLast24hOnly)){

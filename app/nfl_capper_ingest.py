@@ -3034,7 +3034,7 @@ function nflPositionList(x){
   const cost=item.open_cost_basis_usdc||item.stake_usdc;
   const value=item.current_value_usdc===null||item.current_value_usdc===undefined?'—':'$'+Number(item.current_value_usdc).toFixed(2);
   const sell=item.trade_id?'<button type="button" style="margin-top:6px" data-trade-id="'+nflEsc(item.trade_id)+'" onclick="nflSellPosition(this.dataset.tradeId,this)">SELL POSITION</button>':'';
-  return '<div class="nfl-position-row open"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+' · OPEN</div><div>'+nflEsc(item.outcome||'')+' · Entry '+entry+' · Live '+live+'</div><div>Shares '+shares+' · Cost $'+Number(cost||0).toFixed(2)+' · Value '+value+'</div><div class="nfl-position-pnl '+pnlClass+'">Live P/L '+pnlText+'</div>'+sell+'</div>';
+  return '<div class="nfl-position-row open"><div class="nfl-position-title">'+nflEsc(item.selection||item.market||'NFL position')+' · OPEN</div><div>'+nflEsc(item.outcome||'')+' · Stake $'+Number(cost||0).toFixed(2)+' · Shares '+shares+'</div><div>Entry '+entry+' · Live '+live+' · Value '+value+'</div><div class="nfl-position-pnl '+pnlClass+'">Live P/L '+pnlText+'</div>'+sell+'</div>';
  };
  const renderSettled=item=>{
   const result=String(item.result||'').toUpperCase();

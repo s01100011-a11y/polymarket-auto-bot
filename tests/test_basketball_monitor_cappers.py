@@ -137,3 +137,8 @@ def test_basketball_open_positions_show_stake_and_shares():
     assert "const stake=item.stake_usdc" in source
     assert "const shares=item.shares" in source
     assert "' · Stake '+stake+' · Shares '+shares" in source
+
+
+def test_basketball_monitor_python_source_compiles():
+    source = Path("app/basketball_monitor_capper.py").read_text(encoding="utf-8")
+    compile(source, "app/basketball_monitor_capper.py", "exec")
