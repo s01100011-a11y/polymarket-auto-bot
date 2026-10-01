@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import threading
 import time
 import uuid
 from decimal import Decimal, ROUND_HALF_UP, ROUND_UP
@@ -391,6 +393,170 @@ ingest._paper_trade_from_alert = _slack_trade_handler
 ingest.SLACK_PAPER_ONLY = not _mode()["auto_prepare_enabled"]
 
 
+def _retry_asset_id(payload: dict[str, Any]) -> str:
+    intent = core.TradeIntent(
+        market_url=str(payload.get("market_url") or ""),
+        outcome=str(payload.get("outcome") or ""),
+        market_type=str(payload.get("market_type") or "moneyline"),
+        max_price=Decimal(str(payload.get("max_price") or "0")),
+        budget_usdc=Decimal(str(payload.get("budget_usdc") or "0")),
+        note="Retry failed Slack live BUY",
+    )
+    with ingest.PublicClient() as client:
+        market = core._select_market(client, intent)
+        asset_id, _, _ = core._resolve_asset(market, intent.outcome)
+    return str(asset_id)
+
+
+def _retry_failed_slack_buy_once(request_id: str | None = None) -> dict[str, Any]:
+    request_id = str(request_id or os.getenv("SLACK_RETRY_REQUEST_ID", "")).strip()
+    if not request_id:
+        return {"status": "disabled"}
+
+    if not (core.bot_enabled() and core.live_trading_enabled() and core.auto_trading_enabled()):
+        return {"status": "waiting_gates"}
+
+    ready, state = _executor_ready()
+    if not ready:
+        return {
+            "status": "waiting_executor",
+            "geo_blocked": bool(state.get("geo_blocked")),
+        }
+
+    queue = remote._queue_load()
+    original = queue.get(request_id)
+    if not isinstance(original, dict):
+        return {"status": "missing_request"}
+    if original.get("manual_retry_request_id"):
+        return {
+            "status": "already_retried",
+            "request_id": original.get("manual_retry_request_id"),
+            "trade_id": original.get("manual_retry_trade_id"),
+        }
+
+    payload = dict(original.get("payload") or {})
+    error = str(original.get("error") or "")
+    if (
+        original.get("action") != "BUY"
+        or original.get("status") != "FAILED"
+        or payload.get("source") != "slack_live"
+        or "ConnectTimeout" not in error
+    ):
+        return {"status": "not_retryable"}
+
+    market_url = str(payload.get("market_url") or "")
+    outcome = str(payload.get("outcome") or "")
+    if not market_url or not outcome:
+        return {"status": "invalid_payload"}
+
+    try:
+        asset_id = _retry_asset_id(payload)
+    except Exception as exc:
+        return {"status": "market_resolution_failed", "error": f"{type(exc).__name__}: {exc}"}
+
+    position = remote._authoritative_position(asset_id)
+    try:
+        position_size = Decimal(str(getattr(position, "current_size", "0") or "0")) if position is not None else Decimal("0")
+    except Exception:
+        position_size = Decimal("0")
+    if position_size > 0:
+        return {
+            "status": "position_exists",
+            "asset_id": asset_id,
+            "position_size": str(position_size),
+        }
+
+    if _active_or_pending(asset_id, market_url, outcome):
+        return {"status": "duplicate_active", "asset_id": asset_id}
+
+    new_trade_id = f"{payload.get('trade_id') or 'slack-live'}-retry-{uuid.uuid4().hex[:6]}"
+    new_request_id = f"exec-{uuid.uuid4().hex[:14]}"
+    retry_payload = dict(payload)
+    retry_payload.update({
+        "trade_id": new_trade_id,
+        "retry_of_request_id": request_id,
+        "retry_reason": "manual_resend_after_connect_timeout",
+    })
+    now_iso = ingest._now_iso()
+    record = {
+        "id": new_request_id,
+        "action": "BUY",
+        "status": "PENDING",
+        "payload": retry_payload,
+        "created_at": now_iso,
+        "created_unix": time.time(),
+        "updated_at": now_iso,
+    }
+
+    with remote._QUEUE_LOCK:
+        data = remote._queue_load()
+        latest = data.get(request_id)
+        if not isinstance(latest, dict):
+            return {"status": "missing_request"}
+        if latest.get("manual_retry_request_id"):
+            return {
+                "status": "already_retried",
+                "request_id": latest.get("manual_retry_request_id"),
+                "trade_id": latest.get("manual_retry_trade_id"),
+            }
+        for existing in data.values():
+            ep = existing.get("payload") or {}
+            if (
+                existing.get("action") == "BUY"
+                and existing.get("status") in {"PENDING", "LEASED"}
+                and ep.get("source") == "slack_live"
+                and str(ep.get("market_url") or "") == market_url
+                and str(ep.get("outcome") or "").casefold() == outcome.casefold()
+            ):
+                return {"status": "duplicate_active", "request_id": existing.get("id")}
+
+        data[new_request_id] = record
+        latest["manual_retry_request_id"] = new_request_id
+        latest["manual_retry_trade_id"] = new_trade_id
+        latest["manual_retry_at"] = now_iso
+        latest["updated_at"] = now_iso
+        data[request_id] = latest
+        remote._queue_save(data)
+
+    print(
+        "SLACK_FAILED_BUY_REQUEUED "
+        f"original={request_id} request={new_request_id} trade={new_trade_id} "
+        f"outcome={outcome} asset_id={asset_id}",
+        flush=True,
+    )
+    return {
+        "status": "queued",
+        "request_id": new_request_id,
+        "trade_id": new_trade_id,
+        "asset_id": asset_id,
+        "outcome": outcome,
+    }
+
+
+def _run_requested_retry_worker() -> None:
+    request_id = os.getenv("SLACK_RETRY_REQUEST_ID", "").strip()
+    if not request_id:
+        return
+    terminal = {
+        "queued",
+        "already_retried",
+        "position_exists",
+        "duplicate_active",
+        "missing_request",
+        "not_retryable",
+        "invalid_payload",
+    }
+    for _ in range(30):
+        result = _retry_failed_slack_buy_once(request_id)
+        print(
+            f"SLACK_FAILED_BUY_RETRY status={result.get('status')} request={request_id}",
+            flush=True,
+        )
+        if result.get("status") in terminal:
+            return
+        time.sleep(3)
+
+
 @app.get("/api/slack/trading-mode", dependencies=[Depends(dashboard._auth)])
 def slack_trading_mode_get():
     mode = _mode()
@@ -560,3 +726,16 @@ setInterval(loadSlackTradingMode,5000);
 
 
 _install_slack_live_controls()
+
+
+def _start_requested_retry_worker() -> None:
+    if not os.getenv("SLACK_RETRY_REQUEST_ID", "").strip():
+        return
+    threading.Thread(
+        target=_run_requested_retry_worker,
+        name="slack-failed-buy-retry",
+        daemon=True,
+    ).start()
+
+
+app.add_event_handler("startup", _start_requested_retry_worker)
