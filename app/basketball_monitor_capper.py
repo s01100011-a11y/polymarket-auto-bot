@@ -537,6 +537,235 @@ function monitorSignals(x){
   if(item.score)meta.push('Score '+monitorEsc(item.score));
   if(item.status)meta.push('status '+monitorEsc(item.status));
   if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
+  if(String(item.approval_reason||'').includes('MIN_ODDS'))meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
+  const action=item.strategy_action?item.strategy_action+(item.strategy_reason?' · '+item.strategy_reason:''):(item.error||'');
+  let trade='';
+  if(item.trade_executed){
+   trade='<div class="monitor-action '+monitorPnlClass(item.trade_pnl_usdc)+'">Trade '+monitorEsc(item.trade_status||'tracked')+(item.trade_result?' · '+monitorEsc(item.trade_result):'')+(item.trade_pnl_usdc!==null&&item.trade_pnl_usdc!==undefined?' · P/L '+monitorMoney(item.trade_pnl_usdc):'')+'</div>';
+  }else if(item.approval_required&&item.request_id){
+   const apx=item.best_ask||item.current_buy_price;
+   const atxt=apx?('BUY LIVE '+monitorOdds(apx)):('APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2));
+   trade='<div class="monitor-action flat"><span class="capper-event-badge" style="color:#8a5b00">APPROVAL REQUIRED</span> <button type="button" data-request-id="'+monitorEsc(item.request_id)+'" onclick="monitorApproveBuy(this.dataset.requestId,this)">'+atxt+'</button></div>';
+  }else if(item.status==='NO_TRADE'||item.strategy_action==='PASS'){
+   trade='<div class="monitor-action flat">NOT TRADED</div>';
+  }
+  return '<div class="monitor-signal"><b>'+monitorEsc(item.selection||'Unknown selection')+'</b><div class="monitor-meta">'+meta.join(' · ')+'</div>'+(action?'<div class="monitor-meta">'+monitorEsc(action)+'</div>':'')+trade+'</div>';
+ }).join('');
+ return '<div style="margin-top:12px"><span class="capper-section-badge">Signals'+(capperLast24hOnly?' · last 24h':'')+'</span>'+rows+'</div>';
+}
+
+async function monitorApproveBuy(requestId,btn){
+ const original=btn.textContent;btn.disabled=true;btn.textContent='REFRESHING LIVE PRICE…';
+ try{
+  const qr=await fetch('/api/executor/approval-quote/'+encodeURIComponent(requestId),{cache:'no-store'}),q=await qr.json();
+  if(!qr.ok)throw new Error(q.detail||'Live quote refresh failed');
+  const live=monitorOdds(q.polymarket_price), units=monitorUnits(q.units);
+  btn.textContent='BUY LIVE '+live;
+  const target=q.target_profit_usdc?(' · To win 
+async function monitorSetUnitSize(sportKey,btn){
+ const input=document.getElementById('monitorUnitSize-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-size/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSetPortfolioPct(sportKey,btn){
+ const input=document.getElementById('monitorPortfolioPct-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-percent/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+
+function monitorCard(x,sportKey){
+ if(!x)return 'No data.';
+ const win=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const feed=x.feed||{};
+ const feedOk=feed.last_success_at&&!Number(feed.consecutive_errors||0);
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+monitorEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="monitorSetUnitSize(\''+sportKey+'\',this)">SET 1U</button><input id="monitorUnitSize-'+sportKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="monitorSetPortfolioPct(\''+sportKey+'\',this)">AUTO %</button><input id="monitorPortfolioPct-'+sportKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk changes with the live price</span></div>'
+  +'</div>';
+ const visiblePwCalls=capperLast24hOnly?Number(x.pw_calls_24h||0):Number(x.pw_calls||0);
+ const performance='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>PW Calls</span><b>'+visiblePwCalls+'</b></div>'
+  +'<div class="capper-metric"><span>Bets</span><b>'+Number(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+Number(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+Number(x.wins||0)+'-'+Number(x.losses||0)+'-'+Number(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+win+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+monitorPnlClass(x.realized_pnl_usdc)+'">'+monitorMoney(x.realized_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+monitorPnlClass(x.total_live_pnl_usdc)+'">'+monitorMoney(x.total_live_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_7d_usdc)+'">'+monitorMoney(x.realized_pnl_7d_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_30d_usdc)+'">'+monitorMoney(x.realized_pnl_30d_usdc)+'</b></div>'
+  +'</div>';
+ return unitControl+performance+
+  '<div class="monitor-feed '+(feedOk?'positive':'negative')+'">Feed '+(feedOk?'CONNECTED':'CHECK')+' · last success '+monitorTime(feed.last_success_at)+' · records '+Number(feed.last_poll_records||0)+(feed.last_record_error?' · '+monitorEsc(feed.last_record_error):'')+'</div>'+
+  monitorPositions(x)+monitorSignals(x);
+}
+
+function monitorSyncPowerButton(sportKey,enabled){
+ const btn=document.getElementById('monitorCapperPower-'+sportKey);
+ if(!btn)return;
+ const on=enabled!==false;
+ btn.dataset.enabled=on?'1':'0';
+ btn.classList.toggle('active',on);
+ btn.classList.toggle('offline',!on);
+ btn.setAttribute('aria-pressed',on?'true':'false');
+ const text=btn.querySelector('.capper-power-text');
+ if(text)text.textContent=on?'Online':'Offline';
+}
+async function monitorToggleCapper(sportKey,btn){
+ const online=btn.dataset.enabled!=='0';
+ if(online&&!confirm('Turn this basketball monitor OFFLINE? New automatic trades from it will pause.'))return;
+ btn.disabled=true;
+ try{
+  const r=await fetch('/api/basketball-monitor/enabled/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!online})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status update failed');
+  await loadBasketballMonitors();
+ }catch(e){alert(String(e.message||e))}
+ finally{btn.disabled=false}
+}
+function renderBasketballMonitors(){
+ const w=document.getElementById('wnbaMonitorCard'),n=document.getElementById('nbaMonitorCard');
+ if(w)w.innerHTML=monitorCard(basketballMonitorData['WNBA Monitor - WNBA'],'wnba');
+ if(n)n.innerHTML=monitorCard(basketballMonitorData['NBA Monitor - NBA'],'nba');
+ monitorSyncPowerButton('wnba',(basketballMonitorData['WNBA Monitor - WNBA']||{}).enabled);
+ monitorSyncPowerButton('nba',(basketballMonitorData['NBA Monitor - NBA']||{}).enabled);
+ capperSyncLast24hButtons();
+}
+window.addEventListener('capper-history-filter-change',renderBasketballMonitors);
+
+async function loadBasketballMonitors(){
+ try{
+  const r=await fetch('/api/basketball-monitor/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status failed');
+  basketballMonitorData=d.cappers||{};
+  const wnba=basketballMonitorData['WNBA Monitor - WNBA']||{};
+  const nba=basketballMonitorData['NBA Monitor - NBA']||{};
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent=(wnba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
+  if(nbaState)nbaState.textContent=(nba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
+  renderBasketballMonitors();
+ }catch(e){
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent='Status unavailable';
+  if(nbaState)nbaState.textContent='Status unavailable';
+ }
+}
+
+async function monitorSell(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'}),q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'}),sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){await loadBasketballMonitors();return}
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     await loadBasketballMonitors();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
+  }
+  throw new Error('SELL timed out');
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSettle(tradeId,result,btn){
+ if(!confirm('Manually settle this position as '+result+'?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(result),{method:'POST'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+loadBasketballMonitors();
+setInterval(loadBasketballMonitors,10000);
+"""
+    html = html.replace("</script>", js + "\n</script>", 1)
+    dashboard.DASHBOARD_HTML = html
++Number(item.stake_usdc).toFixed(2);
+  const shares=item.shares===null||item.shares===undefined||item.shares===''?'—':Number(item.shares).toFixed(2);
+  const units=monitorUnits(item.units), unitTitle=units?' · '+units:'';
+  const exact=item.exact_position?'<div><b>Exact position:</b> '+monitorEsc(item.exact_position)+'</div>':'';
+  const toWin=item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!==''?'<div><b>To win  }).join(''):'<div class="monitor-empty">No open positions.</div>';
+
+ let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+openHtml+'</div>';
+ if(settled.length||capperLast24hOnly){
+  const settledHtml=settled.length?settled.map(item=>{
+   const result=String(item.result||'').toUpperCase();
+   const awaiting=!result&&String(item.status||'').toUpperCase()==='CLOSED_RECONCILED';
+   const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
+   const pnl=raw===null?'':('<div class="nfl-position-pnl '+monitorPnlClass(raw)+'">Realized P/L '+monitorMoney(raw)+'</div>');
+   const manual=awaiting&&item.trade_id?'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px"><button type="button" data-result="WIN" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE WIN</button><button type="button" data-result="LOSS" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE LOSS</button><button type="button" data-result="PUSH" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE PUSH</button></div>':'';
+   const label=result?' · '+result:(awaiting?' · AWAITING SETTLEMENT':'');
+   return '<div class="nfl-position-row '+(result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'')+'"><div class="nfl-position-title">'+monitorEsc(item.selection||item.market||'Position')+label+'</div><div>'+monitorEsc(item.outcome||'')+(item.stake_usdc?' · Stake $'+Number(item.stake_usdc).toFixed(2):'')+'</div>'+pnl+manual+'</div>';
+  }).join(''):'<div class="monitor-empty">No settled positions in the last 24 hours.</div>';
+  html+='<div style="margin-top:12px"><span class="capper-section-badge">Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</span>'+settledHtml+'</div>';
+ }
+ return html;
+}
+
+function monitorSignals(x){
+ let items=Array.isArray(x.signals)?x.signals:[];
+ if(capperLast24hOnly)items=items.filter(item=>capperWithin24h(item.posted_at||item.received_at));
+ if(!items.length)return '<div style="margin-top:12px"><span class="capper-section-badge">Signals'+(capperLast24hOnly?' · last 24h':'')+'</span><div class="monitor-empty">No monitor signals in this window.</div></div>';
+ const rows=items.map(item=>{
+  const meta=[];
+  if(item.posted_at)meta.push('Signal '+monitorTime(item.posted_at));
+  if(item.quarter)meta.push(monitorEsc(item.quarter));
+  if(item.win_probability!==null&&item.win_probability!==undefined)meta.push('PW '+Number(item.win_probability).toFixed(1)+'%');
+  if(item.bk_ml!==null&&item.bk_ml!==undefined)meta.push('BK ML '+(Number(item.bk_ml)>0?'+':'')+Number(item.bk_ml));
+  if(item.score)meta.push('Score '+monitorEsc(item.score));
+  if(item.status)meta.push('status '+monitorEsc(item.status));
+  if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
   if(item.approval_reason==='MIN_ODDS')meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
   const action=item.strategy_action?item.strategy_action+(item.strategy_reason?' · '+item.strategy_reason:''):(item.error||'');
   let trade='';
@@ -560,6 +789,1042 @@ async function monitorApproveBuy(requestId,btn){
   const d=await r.json();
   if(!r.ok)throw new Error(d.detail||'Approval failed');
   btn.textContent='APPROVED';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSetUnitSize(sportKey,btn){
+ const input=document.getElementById('monitorUnitSize-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-size/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSetPortfolioPct(sportKey,btn){
+ const input=document.getElementById('monitorPortfolioPct-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-percent/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+
+function monitorCard(x,sportKey){
+ if(!x)return 'No data.';
+ const win=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const feed=x.feed||{};
+ const feedOk=feed.last_success_at&&!Number(feed.consecutive_errors||0);
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+monitorEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="monitorSetUnitSize(\''+sportKey+'\',this)">SET 1U</button><input id="monitorUnitSize-'+sportKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="monitorSetPortfolioPct(\''+sportKey+'\',this)">AUTO %</button><input id="monitorPortfolioPct-'+sportKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk changes with the live price</span></div>'
+  +'</div>';
+ const visiblePwCalls=capperLast24hOnly?Number(x.pw_calls_24h||0):Number(x.pw_calls||0);
+ const performance='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>PW Calls</span><b>'+visiblePwCalls+'</b></div>'
+  +'<div class="capper-metric"><span>Bets</span><b>'+Number(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+Number(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+Number(x.wins||0)+'-'+Number(x.losses||0)+'-'+Number(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+win+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+monitorPnlClass(x.realized_pnl_usdc)+'">'+monitorMoney(x.realized_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+monitorPnlClass(x.total_live_pnl_usdc)+'">'+monitorMoney(x.total_live_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_7d_usdc)+'">'+monitorMoney(x.realized_pnl_7d_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_30d_usdc)+'">'+monitorMoney(x.realized_pnl_30d_usdc)+'</b></div>'
+  +'</div>';
+ return unitControl+performance+
+  '<div class="monitor-feed '+(feedOk?'positive':'negative')+'">Feed '+(feedOk?'CONNECTED':'CHECK')+' · last success '+monitorTime(feed.last_success_at)+' · records '+Number(feed.last_poll_records||0)+(feed.last_record_error?' · '+monitorEsc(feed.last_record_error):'')+'</div>'+
+  monitorPositions(x)+monitorSignals(x);
+}
+
+function monitorSyncPowerButton(sportKey,enabled){
+ const btn=document.getElementById('monitorCapperPower-'+sportKey);
+ if(!btn)return;
+ const on=enabled!==false;
+ btn.dataset.enabled=on?'1':'0';
+ btn.classList.toggle('active',on);
+ btn.classList.toggle('offline',!on);
+ btn.setAttribute('aria-pressed',on?'true':'false');
+ const text=btn.querySelector('.capper-power-text');
+ if(text)text.textContent=on?'Online':'Offline';
+}
+async function monitorToggleCapper(sportKey,btn){
+ const online=btn.dataset.enabled!=='0';
+ if(online&&!confirm('Turn this basketball monitor OFFLINE? New automatic trades from it will pause.'))return;
+ btn.disabled=true;
+ try{
+  const r=await fetch('/api/basketball-monitor/enabled/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!online})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status update failed');
+  await loadBasketballMonitors();
+ }catch(e){alert(String(e.message||e))}
+ finally{btn.disabled=false}
+}
+function renderBasketballMonitors(){
+ const w=document.getElementById('wnbaMonitorCard'),n=document.getElementById('nbaMonitorCard');
+ if(w)w.innerHTML=monitorCard(basketballMonitorData['WNBA Monitor - WNBA'],'wnba');
+ if(n)n.innerHTML=monitorCard(basketballMonitorData['NBA Monitor - NBA'],'nba');
+ monitorSyncPowerButton('wnba',(basketballMonitorData['WNBA Monitor - WNBA']||{}).enabled);
+ monitorSyncPowerButton('nba',(basketballMonitorData['NBA Monitor - NBA']||{}).enabled);
+ capperSyncLast24hButtons();
+}
+window.addEventListener('capper-history-filter-change',renderBasketballMonitors);
+
+async function loadBasketballMonitors(){
+ try{
+  const r=await fetch('/api/basketball-monitor/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status failed');
+  basketballMonitorData=d.cappers||{};
+  const wnba=basketballMonitorData['WNBA Monitor - WNBA']||{};
+  const nba=basketballMonitorData['NBA Monitor - NBA']||{};
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent=(wnba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
+  if(nbaState)nbaState.textContent=(nba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
+  renderBasketballMonitors();
+ }catch(e){
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent='Status unavailable';
+  if(nbaState)nbaState.textContent='Status unavailable';
+ }
+}
+
+async function monitorSell(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'}),q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'}),sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){await loadBasketballMonitors();return}
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     await loadBasketballMonitors();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
+  }
+  throw new Error('SELL timed out');
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSettle(tradeId,result,btn){
+ if(!confirm('Manually settle this position as '+result+'?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(result),{method:'POST'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+loadBasketballMonitors();
+setInterval(loadBasketballMonitors,10000);
+"""
+    html = html.replace("</script>", js + "\n</script>", 1)
+    dashboard.DASHBOARD_HTML = html
++Number(item.target_profit_usdc).toFixed(2)+'</b>'+(units?' ('+units+')':'')+'</div>':'';
+  const sell=item.trade_id?'<button type="button" style="margin-top:5px" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSell(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  return '<div class="nfl-position-row open"><div class="nfl-position-title">'+monitorEsc(item.selection||item.market||'Position')+unitTitle+' · OPEN</div>'+exact+toWin+'<div>'+monitorEsc(item.outcome||'')+' · Stake '+stake+' · Shares '+shares+'</div><div>Entry odds '+entry+' · Live odds '+live+'</div><div class="nfl-position-pnl '+monitorPnlClass(raw)+'">Live P/L '+pnl+'</div>'+sell+'</div>';
+ }).join(''):'<div class="monitor-empty">No open positions.</div>';
+
+ let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+openHtml+'</div>';
+ if(settled.length||capperLast24hOnly){
+  const settledHtml=settled.length?settled.map(item=>{
+   const result=String(item.result||'').toUpperCase();
+   const awaiting=!result&&String(item.status||'').toUpperCase()==='CLOSED_RECONCILED';
+   const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
+   const pnl=raw===null?'':('<div class="nfl-position-pnl '+monitorPnlClass(raw)+'">Realized P/L '+monitorMoney(raw)+'</div>');
+   const manual=awaiting&&item.trade_id?'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px"><button type="button" data-result="WIN" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE WIN</button><button type="button" data-result="LOSS" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE LOSS</button><button type="button" data-result="PUSH" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE PUSH</button></div>':'';
+   const label=result?' · '+result:(awaiting?' · AWAITING SETTLEMENT':'');
+   return '<div class="nfl-position-row '+(result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'')+'"><div class="nfl-position-title">'+monitorEsc(item.selection||item.market||'Position')+label+'</div><div>'+monitorEsc(item.outcome||'')+(item.stake_usdc?' · Stake $'+Number(item.stake_usdc).toFixed(2):'')+'</div>'+pnl+manual+'</div>';
+  }).join(''):'<div class="monitor-empty">No settled positions in the last 24 hours.</div>';
+  html+='<div style="margin-top:12px"><span class="capper-section-badge">Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</span>'+settledHtml+'</div>';
+ }
+ return html;
+}
+
+function monitorSignals(x){
+ let items=Array.isArray(x.signals)?x.signals:[];
+ if(capperLast24hOnly)items=items.filter(item=>capperWithin24h(item.posted_at||item.received_at));
+ if(!items.length)return '<div style="margin-top:12px"><span class="capper-section-badge">Signals'+(capperLast24hOnly?' · last 24h':'')+'</span><div class="monitor-empty">No monitor signals in this window.</div></div>';
+ const rows=items.map(item=>{
+  const meta=[];
+  if(item.posted_at)meta.push('Signal '+monitorTime(item.posted_at));
+  if(item.quarter)meta.push(monitorEsc(item.quarter));
+  if(item.win_probability!==null&&item.win_probability!==undefined)meta.push('PW '+Number(item.win_probability).toFixed(1)+'%');
+  if(item.bk_ml!==null&&item.bk_ml!==undefined)meta.push('BK ML '+(Number(item.bk_ml)>0?'+':'')+Number(item.bk_ml));
+  if(item.score)meta.push('Score '+monitorEsc(item.score));
+  if(item.status)meta.push('status '+monitorEsc(item.status));
+  if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
+  if(item.approval_reason==='MIN_ODDS')meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
+  const action=item.strategy_action?item.strategy_action+(item.strategy_reason?' · '+item.strategy_reason:''):(item.error||'');
+  let trade='';
+  if(item.trade_executed){
+   trade='<div class="monitor-action '+monitorPnlClass(item.trade_pnl_usdc)+'">Trade '+monitorEsc(item.trade_status||'tracked')+(item.trade_result?' · '+monitorEsc(item.trade_result):'')+(item.trade_pnl_usdc!==null&&item.trade_pnl_usdc!==undefined?' · P/L '+monitorMoney(item.trade_pnl_usdc):'')+'</div>';
+  }else if(item.approval_required&&item.request_id){
+   trade='<div class="monitor-action flat"><span class="capper-event-badge" style="color:#8a5b00">APPROVAL REQUIRED</span> <button type="button" data-request-id="'+monitorEsc(item.request_id)+'" onclick="monitorApproveBuy(this.dataset.requestId,this)">APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2)+'</button></div>';
+  }else if(item.status==='NO_TRADE'||item.strategy_action==='PASS'){
+   trade='<div class="monitor-action flat">NOT TRADED</div>';
+  }
+  return '<div class="monitor-signal"><b>'+monitorEsc(item.selection||'Unknown selection')+'</b><div class="monitor-meta">'+meta.join(' · ')+'</div>'+(action?'<div class="monitor-meta">'+monitorEsc(action)+'</div>':'')+trade+'</div>';
+ }).join('');
+ return '<div style="margin-top:12px"><span class="capper-section-badge">Signals'+(capperLast24hOnly?' · last 24h':'')+'</span>'+rows+'</div>';
+}
+
+async function monitorApproveBuy(requestId,btn){
+ if(!confirm('Approve this below-minimum-odds BUY for execution?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='APPROVING…';
+ try{
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSetUnitSize(sportKey,btn){
+ const input=document.getElementById('monitorUnitSize-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-size/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSetPortfolioPct(sportKey,btn){
+ const input=document.getElementById('monitorPortfolioPct-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-percent/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+
+function monitorCard(x,sportKey){
+ if(!x)return 'No data.';
+ const win=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const feed=x.feed||{};
+ const feedOk=feed.last_success_at&&!Number(feed.consecutive_errors||0);
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+monitorEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="monitorSetUnitSize(\''+sportKey+'\',this)">SET 1U</button><input id="monitorUnitSize-'+sportKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="monitorSetPortfolioPct(\''+sportKey+'\',this)">AUTO %</button><input id="monitorPortfolioPct-'+sportKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk changes with the live price</span></div>'
+  +'</div>';
+ const visiblePwCalls=capperLast24hOnly?Number(x.pw_calls_24h||0):Number(x.pw_calls||0);
+ const performance='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>PW Calls</span><b>'+visiblePwCalls+'</b></div>'
+  +'<div class="capper-metric"><span>Bets</span><b>'+Number(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+Number(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+Number(x.wins||0)+'-'+Number(x.losses||0)+'-'+Number(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+win+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+monitorPnlClass(x.realized_pnl_usdc)+'">'+monitorMoney(x.realized_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+monitorPnlClass(x.total_live_pnl_usdc)+'">'+monitorMoney(x.total_live_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_7d_usdc)+'">'+monitorMoney(x.realized_pnl_7d_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_30d_usdc)+'">'+monitorMoney(x.realized_pnl_30d_usdc)+'</b></div>'
+  +'</div>';
+ return unitControl+performance+
+  '<div class="monitor-feed '+(feedOk?'positive':'negative')+'">Feed '+(feedOk?'CONNECTED':'CHECK')+' · last success '+monitorTime(feed.last_success_at)+' · records '+Number(feed.last_poll_records||0)+(feed.last_record_error?' · '+monitorEsc(feed.last_record_error):'')+'</div>'+
+  monitorPositions(x)+monitorSignals(x);
+}
+
+function monitorSyncPowerButton(sportKey,enabled){
+ const btn=document.getElementById('monitorCapperPower-'+sportKey);
+ if(!btn)return;
+ const on=enabled!==false;
+ btn.dataset.enabled=on?'1':'0';
+ btn.classList.toggle('active',on);
+ btn.classList.toggle('offline',!on);
+ btn.setAttribute('aria-pressed',on?'true':'false');
+ const text=btn.querySelector('.capper-power-text');
+ if(text)text.textContent=on?'Online':'Offline';
+}
+async function monitorToggleCapper(sportKey,btn){
+ const online=btn.dataset.enabled!=='0';
+ if(online&&!confirm('Turn this basketball monitor OFFLINE? New automatic trades from it will pause.'))return;
+ btn.disabled=true;
+ try{
+  const r=await fetch('/api/basketball-monitor/enabled/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!online})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status update failed');
+  await loadBasketballMonitors();
+ }catch(e){alert(String(e.message||e))}
+ finally{btn.disabled=false}
+}
+function renderBasketballMonitors(){
+ const w=document.getElementById('wnbaMonitorCard'),n=document.getElementById('nbaMonitorCard');
+ if(w)w.innerHTML=monitorCard(basketballMonitorData['WNBA Monitor - WNBA'],'wnba');
+ if(n)n.innerHTML=monitorCard(basketballMonitorData['NBA Monitor - NBA'],'nba');
+ monitorSyncPowerButton('wnba',(basketballMonitorData['WNBA Monitor - WNBA']||{}).enabled);
+ monitorSyncPowerButton('nba',(basketballMonitorData['NBA Monitor - NBA']||{}).enabled);
+ capperSyncLast24hButtons();
+}
+window.addEventListener('capper-history-filter-change',renderBasketballMonitors);
+
+async function loadBasketballMonitors(){
+ try{
+  const r=await fetch('/api/basketball-monitor/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status failed');
+  basketballMonitorData=d.cappers||{};
+  const wnba=basketballMonitorData['WNBA Monitor - WNBA']||{};
+  const nba=basketballMonitorData['NBA Monitor - NBA']||{};
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent=(wnba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
+  if(nbaState)nbaState.textContent=(nba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
+  renderBasketballMonitors();
+ }catch(e){
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent='Status unavailable';
+  if(nbaState)nbaState.textContent='Status unavailable';
+ }
+}
+
+async function monitorSell(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'}),q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'}),sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){await loadBasketballMonitors();return}
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     await loadBasketballMonitors();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
+  }
+  throw new Error('SELL timed out');
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSettle(tradeId,result,btn){
+ if(!confirm('Manually settle this position as '+result+'?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(result),{method:'POST'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+loadBasketballMonitors();
+setInterval(loadBasketballMonitors,10000);
+"""
+    html = html.replace("</script>", js + "\n</script>", 1)
+    dashboard.DASHBOARD_HTML = html
++Number(q.target_profit_usdc).toFixed(2)+(units?' ('+units+')':'')) : '';
+  if(!confirm('Approve BUY at current '+live+'? Risk 
+async function monitorSetUnitSize(sportKey,btn){
+ const input=document.getElementById('monitorUnitSize-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-size/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSetPortfolioPct(sportKey,btn){
+ const input=document.getElementById('monitorPortfolioPct-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-percent/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+
+function monitorCard(x,sportKey){
+ if(!x)return 'No data.';
+ const win=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const feed=x.feed||{};
+ const feedOk=feed.last_success_at&&!Number(feed.consecutive_errors||0);
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+monitorEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="monitorSetUnitSize(\''+sportKey+'\',this)">SET 1U</button><input id="monitorUnitSize-'+sportKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="monitorSetPortfolioPct(\''+sportKey+'\',this)">AUTO %</button><input id="monitorPortfolioPct-'+sportKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk changes with the live price</span></div>'
+  +'</div>';
+ const visiblePwCalls=capperLast24hOnly?Number(x.pw_calls_24h||0):Number(x.pw_calls||0);
+ const performance='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>PW Calls</span><b>'+visiblePwCalls+'</b></div>'
+  +'<div class="capper-metric"><span>Bets</span><b>'+Number(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+Number(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+Number(x.wins||0)+'-'+Number(x.losses||0)+'-'+Number(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+win+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+monitorPnlClass(x.realized_pnl_usdc)+'">'+monitorMoney(x.realized_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+monitorPnlClass(x.total_live_pnl_usdc)+'">'+monitorMoney(x.total_live_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_7d_usdc)+'">'+monitorMoney(x.realized_pnl_7d_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_30d_usdc)+'">'+monitorMoney(x.realized_pnl_30d_usdc)+'</b></div>'
+  +'</div>';
+ return unitControl+performance+
+  '<div class="monitor-feed '+(feedOk?'positive':'negative')+'">Feed '+(feedOk?'CONNECTED':'CHECK')+' · last success '+monitorTime(feed.last_success_at)+' · records '+Number(feed.last_poll_records||0)+(feed.last_record_error?' · '+monitorEsc(feed.last_record_error):'')+'</div>'+
+  monitorPositions(x)+monitorSignals(x);
+}
+
+function monitorSyncPowerButton(sportKey,enabled){
+ const btn=document.getElementById('monitorCapperPower-'+sportKey);
+ if(!btn)return;
+ const on=enabled!==false;
+ btn.dataset.enabled=on?'1':'0';
+ btn.classList.toggle('active',on);
+ btn.classList.toggle('offline',!on);
+ btn.setAttribute('aria-pressed',on?'true':'false');
+ const text=btn.querySelector('.capper-power-text');
+ if(text)text.textContent=on?'Online':'Offline';
+}
+async function monitorToggleCapper(sportKey,btn){
+ const online=btn.dataset.enabled!=='0';
+ if(online&&!confirm('Turn this basketball monitor OFFLINE? New automatic trades from it will pause.'))return;
+ btn.disabled=true;
+ try{
+  const r=await fetch('/api/basketball-monitor/enabled/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!online})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status update failed');
+  await loadBasketballMonitors();
+ }catch(e){alert(String(e.message||e))}
+ finally{btn.disabled=false}
+}
+function renderBasketballMonitors(){
+ const w=document.getElementById('wnbaMonitorCard'),n=document.getElementById('nbaMonitorCard');
+ if(w)w.innerHTML=monitorCard(basketballMonitorData['WNBA Monitor - WNBA'],'wnba');
+ if(n)n.innerHTML=monitorCard(basketballMonitorData['NBA Monitor - NBA'],'nba');
+ monitorSyncPowerButton('wnba',(basketballMonitorData['WNBA Monitor - WNBA']||{}).enabled);
+ monitorSyncPowerButton('nba',(basketballMonitorData['NBA Monitor - NBA']||{}).enabled);
+ capperSyncLast24hButtons();
+}
+window.addEventListener('capper-history-filter-change',renderBasketballMonitors);
+
+async function loadBasketballMonitors(){
+ try{
+  const r=await fetch('/api/basketball-monitor/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status failed');
+  basketballMonitorData=d.cappers||{};
+  const wnba=basketballMonitorData['WNBA Monitor - WNBA']||{};
+  const nba=basketballMonitorData['NBA Monitor - NBA']||{};
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent=(wnba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
+  if(nbaState)nbaState.textContent=(nba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
+  renderBasketballMonitors();
+ }catch(e){
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent='Status unavailable';
+  if(nbaState)nbaState.textContent='Status unavailable';
+ }
+}
+
+async function monitorSell(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'}),q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'}),sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){await loadBasketballMonitors();return}
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     await loadBasketballMonitors();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
+  }
+  throw new Error('SELL timed out');
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSettle(tradeId,result,btn){
+ if(!confirm('Manually settle this position as '+result+'?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(result),{method:'POST'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+loadBasketballMonitors();
+setInterval(loadBasketballMonitors,10000);
+"""
+    html = html.replace("</script>", js + "\n</script>", 1)
+    dashboard.DASHBOARD_HTML = html
++Number(item.stake_usdc).toFixed(2);
+  const shares=item.shares===null||item.shares===undefined||item.shares===''?'—':Number(item.shares).toFixed(2);
+  const units=monitorUnits(item.units), unitTitle=units?' · '+units:'';
+  const exact=item.exact_position?'<div><b>Exact position:</b> '+monitorEsc(item.exact_position)+'</div>':'';
+  const toWin=item.target_profit_usdc!==null&&item.target_profit_usdc!==undefined&&item.target_profit_usdc!==''?'<div><b>To win  }).join(''):'<div class="monitor-empty">No open positions.</div>';
+
+ let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+openHtml+'</div>';
+ if(settled.length||capperLast24hOnly){
+  const settledHtml=settled.length?settled.map(item=>{
+   const result=String(item.result||'').toUpperCase();
+   const awaiting=!result&&String(item.status||'').toUpperCase()==='CLOSED_RECONCILED';
+   const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
+   const pnl=raw===null?'':('<div class="nfl-position-pnl '+monitorPnlClass(raw)+'">Realized P/L '+monitorMoney(raw)+'</div>');
+   const manual=awaiting&&item.trade_id?'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px"><button type="button" data-result="WIN" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE WIN</button><button type="button" data-result="LOSS" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE LOSS</button><button type="button" data-result="PUSH" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE PUSH</button></div>':'';
+   const label=result?' · '+result:(awaiting?' · AWAITING SETTLEMENT':'');
+   return '<div class="nfl-position-row '+(result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'')+'"><div class="nfl-position-title">'+monitorEsc(item.selection||item.market||'Position')+label+'</div><div>'+monitorEsc(item.outcome||'')+(item.stake_usdc?' · Stake $'+Number(item.stake_usdc).toFixed(2):'')+'</div>'+pnl+manual+'</div>';
+  }).join(''):'<div class="monitor-empty">No settled positions in the last 24 hours.</div>';
+  html+='<div style="margin-top:12px"><span class="capper-section-badge">Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</span>'+settledHtml+'</div>';
+ }
+ return html;
+}
+
+function monitorSignals(x){
+ let items=Array.isArray(x.signals)?x.signals:[];
+ if(capperLast24hOnly)items=items.filter(item=>capperWithin24h(item.posted_at||item.received_at));
+ if(!items.length)return '<div style="margin-top:12px"><span class="capper-section-badge">Signals'+(capperLast24hOnly?' · last 24h':'')+'</span><div class="monitor-empty">No monitor signals in this window.</div></div>';
+ const rows=items.map(item=>{
+  const meta=[];
+  if(item.posted_at)meta.push('Signal '+monitorTime(item.posted_at));
+  if(item.quarter)meta.push(monitorEsc(item.quarter));
+  if(item.win_probability!==null&&item.win_probability!==undefined)meta.push('PW '+Number(item.win_probability).toFixed(1)+'%');
+  if(item.bk_ml!==null&&item.bk_ml!==undefined)meta.push('BK ML '+(Number(item.bk_ml)>0?'+':'')+Number(item.bk_ml));
+  if(item.score)meta.push('Score '+monitorEsc(item.score));
+  if(item.status)meta.push('status '+monitorEsc(item.status));
+  if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
+  if(item.approval_reason==='MIN_ODDS')meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
+  const action=item.strategy_action?item.strategy_action+(item.strategy_reason?' · '+item.strategy_reason:''):(item.error||'');
+  let trade='';
+  if(item.trade_executed){
+   trade='<div class="monitor-action '+monitorPnlClass(item.trade_pnl_usdc)+'">Trade '+monitorEsc(item.trade_status||'tracked')+(item.trade_result?' · '+monitorEsc(item.trade_result):'')+(item.trade_pnl_usdc!==null&&item.trade_pnl_usdc!==undefined?' · P/L '+monitorMoney(item.trade_pnl_usdc):'')+'</div>';
+  }else if(item.approval_required&&item.request_id){
+   trade='<div class="monitor-action flat"><span class="capper-event-badge" style="color:#8a5b00">APPROVAL REQUIRED</span> <button type="button" data-request-id="'+monitorEsc(item.request_id)+'" onclick="monitorApproveBuy(this.dataset.requestId,this)">APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2)+'</button></div>';
+  }else if(item.status==='NO_TRADE'||item.strategy_action==='PASS'){
+   trade='<div class="monitor-action flat">NOT TRADED</div>';
+  }
+  return '<div class="monitor-signal"><b>'+monitorEsc(item.selection||'Unknown selection')+'</b><div class="monitor-meta">'+meta.join(' · ')+'</div>'+(action?'<div class="monitor-meta">'+monitorEsc(action)+'</div>':'')+trade+'</div>';
+ }).join('');
+ return '<div style="margin-top:12px"><span class="capper-section-badge">Signals'+(capperLast24hOnly?' · last 24h':'')+'</span>'+rows+'</div>';
+}
+
+async function monitorApproveBuy(requestId,btn){
+ if(!confirm('Approve this below-minimum-odds BUY for execution?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='APPROVING…';
+ try{
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSetUnitSize(sportKey,btn){
+ const input=document.getElementById('monitorUnitSize-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-size/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSetPortfolioPct(sportKey,btn){
+ const input=document.getElementById('monitorPortfolioPct-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-percent/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+
+function monitorCard(x,sportKey){
+ if(!x)return 'No data.';
+ const win=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const feed=x.feed||{};
+ const feedOk=feed.last_success_at&&!Number(feed.consecutive_errors||0);
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+monitorEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="monitorSetUnitSize(\''+sportKey+'\',this)">SET 1U</button><input id="monitorUnitSize-'+sportKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="monitorSetPortfolioPct(\''+sportKey+'\',this)">AUTO %</button><input id="monitorPortfolioPct-'+sportKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk changes with the live price</span></div>'
+  +'</div>';
+ const visiblePwCalls=capperLast24hOnly?Number(x.pw_calls_24h||0):Number(x.pw_calls||0);
+ const performance='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>PW Calls</span><b>'+visiblePwCalls+'</b></div>'
+  +'<div class="capper-metric"><span>Bets</span><b>'+Number(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+Number(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+Number(x.wins||0)+'-'+Number(x.losses||0)+'-'+Number(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+win+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+monitorPnlClass(x.realized_pnl_usdc)+'">'+monitorMoney(x.realized_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+monitorPnlClass(x.total_live_pnl_usdc)+'">'+monitorMoney(x.total_live_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_7d_usdc)+'">'+monitorMoney(x.realized_pnl_7d_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_30d_usdc)+'">'+monitorMoney(x.realized_pnl_30d_usdc)+'</b></div>'
+  +'</div>';
+ return unitControl+performance+
+  '<div class="monitor-feed '+(feedOk?'positive':'negative')+'">Feed '+(feedOk?'CONNECTED':'CHECK')+' · last success '+monitorTime(feed.last_success_at)+' · records '+Number(feed.last_poll_records||0)+(feed.last_record_error?' · '+monitorEsc(feed.last_record_error):'')+'</div>'+
+  monitorPositions(x)+monitorSignals(x);
+}
+
+function monitorSyncPowerButton(sportKey,enabled){
+ const btn=document.getElementById('monitorCapperPower-'+sportKey);
+ if(!btn)return;
+ const on=enabled!==false;
+ btn.dataset.enabled=on?'1':'0';
+ btn.classList.toggle('active',on);
+ btn.classList.toggle('offline',!on);
+ btn.setAttribute('aria-pressed',on?'true':'false');
+ const text=btn.querySelector('.capper-power-text');
+ if(text)text.textContent=on?'Online':'Offline';
+}
+async function monitorToggleCapper(sportKey,btn){
+ const online=btn.dataset.enabled!=='0';
+ if(online&&!confirm('Turn this basketball monitor OFFLINE? New automatic trades from it will pause.'))return;
+ btn.disabled=true;
+ try{
+  const r=await fetch('/api/basketball-monitor/enabled/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!online})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status update failed');
+  await loadBasketballMonitors();
+ }catch(e){alert(String(e.message||e))}
+ finally{btn.disabled=false}
+}
+function renderBasketballMonitors(){
+ const w=document.getElementById('wnbaMonitorCard'),n=document.getElementById('nbaMonitorCard');
+ if(w)w.innerHTML=monitorCard(basketballMonitorData['WNBA Monitor - WNBA'],'wnba');
+ if(n)n.innerHTML=monitorCard(basketballMonitorData['NBA Monitor - NBA'],'nba');
+ monitorSyncPowerButton('wnba',(basketballMonitorData['WNBA Monitor - WNBA']||{}).enabled);
+ monitorSyncPowerButton('nba',(basketballMonitorData['NBA Monitor - NBA']||{}).enabled);
+ capperSyncLast24hButtons();
+}
+window.addEventListener('capper-history-filter-change',renderBasketballMonitors);
+
+async function loadBasketballMonitors(){
+ try{
+  const r=await fetch('/api/basketball-monitor/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status failed');
+  basketballMonitorData=d.cappers||{};
+  const wnba=basketballMonitorData['WNBA Monitor - WNBA']||{};
+  const nba=basketballMonitorData['NBA Monitor - NBA']||{};
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent=(wnba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
+  if(nbaState)nbaState.textContent=(nba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
+  renderBasketballMonitors();
+ }catch(e){
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent='Status unavailable';
+  if(nbaState)nbaState.textContent='Status unavailable';
+ }
+}
+
+async function monitorSell(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'}),q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'}),sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){await loadBasketballMonitors();return}
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     await loadBasketballMonitors();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
+  }
+  throw new Error('SELL timed out');
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSettle(tradeId,result,btn){
+ if(!confirm('Manually settle this position as '+result+'?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(result),{method:'POST'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+loadBasketballMonitors();
+setInterval(loadBasketballMonitors,10000);
+"""
+    html = html.replace("</script>", js + "\n</script>", 1)
+    dashboard.DASHBOARD_HTML = html
++Number(item.target_profit_usdc).toFixed(2)+'</b>'+(units?' ('+units+')':'')+'</div>':'';
+  const sell=item.trade_id?'<button type="button" style="margin-top:5px" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSell(this.dataset.tradeId,this)">SELL POSITION</button>':'';
+  return '<div class="nfl-position-row open"><div class="nfl-position-title">'+monitorEsc(item.selection||item.market||'Position')+unitTitle+' · OPEN</div>'+exact+toWin+'<div>'+monitorEsc(item.outcome||'')+' · Stake '+stake+' · Shares '+shares+'</div><div>Entry odds '+entry+' · Live odds '+live+'</div><div class="nfl-position-pnl '+monitorPnlClass(raw)+'">Live P/L '+pnl+'</div>'+sell+'</div>';
+ }).join(''):'<div class="monitor-empty">No open positions.</div>';
+
+ let html='<div style="margin-top:9px"><span class="capper-section-badge">Open positions</span>'+openHtml+'</div>';
+ if(settled.length||capperLast24hOnly){
+  const settledHtml=settled.length?settled.map(item=>{
+   const result=String(item.result||'').toUpperCase();
+   const awaiting=!result&&String(item.status||'').toUpperCase()==='CLOSED_RECONCILED';
+   const raw=item.realized_pnl_usdc===null||item.realized_pnl_usdc===undefined?null:Number(item.realized_pnl_usdc);
+   const pnl=raw===null?'':('<div class="nfl-position-pnl '+monitorPnlClass(raw)+'">Realized P/L '+monitorMoney(raw)+'</div>');
+   const manual=awaiting&&item.trade_id?'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px"><button type="button" data-result="WIN" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE WIN</button><button type="button" data-result="LOSS" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE LOSS</button><button type="button" data-result="PUSH" data-trade-id="'+monitorEsc(item.trade_id)+'" onclick="monitorSettle(this.dataset.tradeId,this.dataset.result,this)">SETTLE PUSH</button></div>':'';
+   const label=result?' · '+result:(awaiting?' · AWAITING SETTLEMENT':'');
+   return '<div class="nfl-position-row '+(result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'')+'"><div class="nfl-position-title">'+monitorEsc(item.selection||item.market||'Position')+label+'</div><div>'+monitorEsc(item.outcome||'')+(item.stake_usdc?' · Stake $'+Number(item.stake_usdc).toFixed(2):'')+'</div>'+pnl+manual+'</div>';
+  }).join(''):'<div class="monitor-empty">No settled positions in the last 24 hours.</div>';
+  html+='<div style="margin-top:12px"><span class="capper-section-badge">Settled positions'+(capperLast24hOnly?' · last 24h':'')+'</span>'+settledHtml+'</div>';
+ }
+ return html;
+}
+
+function monitorSignals(x){
+ let items=Array.isArray(x.signals)?x.signals:[];
+ if(capperLast24hOnly)items=items.filter(item=>capperWithin24h(item.posted_at||item.received_at));
+ if(!items.length)return '<div style="margin-top:12px"><span class="capper-section-badge">Signals'+(capperLast24hOnly?' · last 24h':'')+'</span><div class="monitor-empty">No monitor signals in this window.</div></div>';
+ const rows=items.map(item=>{
+  const meta=[];
+  if(item.posted_at)meta.push('Signal '+monitorTime(item.posted_at));
+  if(item.quarter)meta.push(monitorEsc(item.quarter));
+  if(item.win_probability!==null&&item.win_probability!==undefined)meta.push('PW '+Number(item.win_probability).toFixed(1)+'%');
+  if(item.bk_ml!==null&&item.bk_ml!==undefined)meta.push('BK ML '+(Number(item.bk_ml)>0?'+':'')+Number(item.bk_ml));
+  if(item.score)meta.push('Score '+monitorEsc(item.score));
+  if(item.status)meta.push('status '+monitorEsc(item.status));
+  if(item.signal_decimal_odds)meta.push('odds '+Number(item.signal_decimal_odds).toFixed(2));
+  if(item.approval_reason==='MIN_ODDS')meta.push('minimum odds '+Number(item.minimum_decimal_odds||1.70).toFixed(2));
+  const action=item.strategy_action?item.strategy_action+(item.strategy_reason?' · '+item.strategy_reason:''):(item.error||'');
+  let trade='';
+  if(item.trade_executed){
+   trade='<div class="monitor-action '+monitorPnlClass(item.trade_pnl_usdc)+'">Trade '+monitorEsc(item.trade_status||'tracked')+(item.trade_result?' · '+monitorEsc(item.trade_result):'')+(item.trade_pnl_usdc!==null&&item.trade_pnl_usdc!==undefined?' · P/L '+monitorMoney(item.trade_pnl_usdc):'')+'</div>';
+  }else if(item.approval_required&&item.request_id){
+   trade='<div class="monitor-action flat"><span class="capper-event-badge" style="color:#8a5b00">APPROVAL REQUIRED</span> <button type="button" data-request-id="'+monitorEsc(item.request_id)+'" onclick="monitorApproveBuy(this.dataset.requestId,this)">APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2)+'</button></div>';
+  }else if(item.status==='NO_TRADE'||item.strategy_action==='PASS'){
+   trade='<div class="monitor-action flat">NOT TRADED</div>';
+  }
+  return '<div class="monitor-signal"><b>'+monitorEsc(item.selection||'Unknown selection')+'</b><div class="monitor-meta">'+meta.join(' · ')+'</div>'+(action?'<div class="monitor-meta">'+monitorEsc(action)+'</div>':'')+trade+'</div>';
+ }).join('');
+ return '<div style="margin-top:12px"><span class="capper-section-badge">Signals'+(capperLast24hOnly?' · last 24h':'')+'</span>'+rows+'</div>';
+}
+
+async function monitorApproveBuy(requestId,btn){
+ if(!confirm('Approve this below-minimum-odds BUY for execution?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='APPROVING…';
+ try{
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSetUnitSize(sportKey,btn){
+ const input=document.getElementById('monitorUnitSize-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0){
+  alert('Enter a unit size greater than 0.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-size/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({unit_usdc:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Unit size update failed');
+  btn.textContent='SAVED';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSetPortfolioPct(sportKey,btn){
+ const input=document.getElementById('monitorPortfolioPct-'+sportKey);
+ const value=Number(input&&input.value);
+ if(!Number.isFinite(value)||value<=0||value>100){
+  alert('Enter a portfolio percentage greater than 0 and no more than 100.');
+  return;
+ }
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SAVING…';
+ try{
+  const r=await fetch('/api/basketball-monitor/unit-percent/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({portfolio_pct:value})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Portfolio unit update failed');
+  btn.textContent='AUTO ON';
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+
+function monitorCard(x,sportKey){
+ if(!x)return 'No data.';
+ const win=x.win_pct===null||x.win_pct===undefined?'—':Number(x.win_pct).toFixed(1)+'%';
+ const roi=x.roi_pct===null||x.roi_pct===undefined?'—':Number(x.roi_pct).toFixed(1)+'%';
+ const feed=x.feed||{};
+ const feedOk=feed.last_success_at&&!Number(feed.consecutive_errors||0);
+ const unitValue=Number(x.unit_usdc||10).toFixed(2);
+ const fixedValue=Number(x.fixed_unit_usdc||x.unit_usdc||10).toFixed(2);
+ const pctValue=Number(x.portfolio_pct||10).toFixed(2);
+ const autoPct=String(x.unit_mode||'fixed')==='portfolio_pct';
+ const portfolioValue=x.portfolio_value_usdc===null||x.portfolio_value_usdc===undefined?null:Number(x.portfolio_value_usdc);
+ const modeText=autoPct
+  ? (x.unit_error?('AUTO '+pctValue+'% · '+monitorEsc(x.unit_error)):('AUTO '+pctValue+'% of $'+portfolioValue.toFixed(2)+' = 1u WIN $'+unitValue))
+  : ('FIXED · 1u WIN $'+fixedValue);
+ const fixedBtnStyle=autoPct?'opacity:.68':'font-weight:800;border-color:#86efac';
+ const autoBtnStyle=autoPct?'font-weight:800;border-color:#86efac':'opacity:.68';
+ const unitControl='<div class="capper-sizing">'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Fixed 1u win $</span><div class="capper-sizing-controls"><button type="button" class="'+(!autoPct?'active':'')+'" aria-pressed="'+(!autoPct?'true':'false')+'" style="'+fixedBtnStyle+'" onclick="monitorSetUnitSize(\''+sportKey+'\',this)">SET 1U</button><input id="monitorUnitSize-'+sportKey+'" type="number" min="0.01" max="10000" step="0.01" value="'+fixedValue+'"></div></div>'
+  +'<div class="capper-sizing-row"><span class="capper-sizing-label">Portfolio %</span><div class="capper-sizing-controls"><button type="button" class="'+(autoPct?'active':'')+'" aria-pressed="'+(autoPct?'true':'false')+'" style="'+autoBtnStyle+'" onclick="monitorSetPortfolioPct(\''+sportKey+'\',this)">AUTO %</button><input id="monitorPortfolioPct-'+sportKey+'" type="number" min="0.01" max="100" step="0.01" value="'+pctValue+'"></div></div>'
+  +'<div class="capper-sizing-note">'+modeText+'<br><span>TO WIN sizing · risk changes with the live price</span></div>'
+  +'</div>';
+ const visiblePwCalls=capperLast24hOnly?Number(x.pw_calls_24h||0):Number(x.pw_calls||0);
+ const performance='<div class="capper-metrics-grid">'
+  +'<div class="capper-metric"><span>PW Calls</span><b>'+visiblePwCalls+'</b></div>'
+  +'<div class="capper-metric"><span>Bets</span><b>'+Number(x.bets||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Open</span><b>'+Number(x.open||0)+'</b></div>'
+  +'<div class="capper-metric"><span>W-L-P</span><b>'+Number(x.wins||0)+'-'+Number(x.losses||0)+'-'+Number(x.pushes||0)+'</b></div>'
+  +'<div class="capper-metric"><span>Win</span><b>'+win+'</b></div>'
+  +'<div class="capper-metric"><span>Stake</span><b>$'+Number(x.graded_stake_usdc||0).toFixed(2)+'</b></div>'
+  +'<div class="capper-metric"><span>ROI</span><b>'+roi+'</b></div>'
+  +'<div class="capper-metric"><span>Realized P/L</span><b class="capper-pnl '+monitorPnlClass(x.realized_pnl_usdc)+'">'+monitorMoney(x.realized_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>Live P/L</span><b class="capper-pnl '+monitorPnlClass(x.total_live_pnl_usdc)+'">'+monitorMoney(x.total_live_pnl_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>7D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_7d_usdc)+'">'+monitorMoney(x.realized_pnl_7d_usdc)+'</b></div>'
+  +'<div class="capper-metric"><span>30D P/L</span><b class="'+monitorPnlClass(x.realized_pnl_30d_usdc)+'">'+monitorMoney(x.realized_pnl_30d_usdc)+'</b></div>'
+  +'</div>';
+ return unitControl+performance+
+  '<div class="monitor-feed '+(feedOk?'positive':'negative')+'">Feed '+(feedOk?'CONNECTED':'CHECK')+' · last success '+monitorTime(feed.last_success_at)+' · records '+Number(feed.last_poll_records||0)+(feed.last_record_error?' · '+monitorEsc(feed.last_record_error):'')+'</div>'+
+  monitorPositions(x)+monitorSignals(x);
+}
+
+function monitorSyncPowerButton(sportKey,enabled){
+ const btn=document.getElementById('monitorCapperPower-'+sportKey);
+ if(!btn)return;
+ const on=enabled!==false;
+ btn.dataset.enabled=on?'1':'0';
+ btn.classList.toggle('active',on);
+ btn.classList.toggle('offline',!on);
+ btn.setAttribute('aria-pressed',on?'true':'false');
+ const text=btn.querySelector('.capper-power-text');
+ if(text)text.textContent=on?'Online':'Offline';
+}
+async function monitorToggleCapper(sportKey,btn){
+ const online=btn.dataset.enabled!=='0';
+ if(online&&!confirm('Turn this basketball monitor OFFLINE? New automatic trades from it will pause.'))return;
+ btn.disabled=true;
+ try{
+  const r=await fetch('/api/basketball-monitor/enabled/'+encodeURIComponent(sportKey),{
+   method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!online})
+  });
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status update failed');
+  await loadBasketballMonitors();
+ }catch(e){alert(String(e.message||e))}
+ finally{btn.disabled=false}
+}
+function renderBasketballMonitors(){
+ const w=document.getElementById('wnbaMonitorCard'),n=document.getElementById('nbaMonitorCard');
+ if(w)w.innerHTML=monitorCard(basketballMonitorData['WNBA Monitor - WNBA'],'wnba');
+ if(n)n.innerHTML=monitorCard(basketballMonitorData['NBA Monitor - NBA'],'nba');
+ monitorSyncPowerButton('wnba',(basketballMonitorData['WNBA Monitor - WNBA']||{}).enabled);
+ monitorSyncPowerButton('nba',(basketballMonitorData['NBA Monitor - NBA']||{}).enabled);
+ capperSyncLast24hButtons();
+}
+window.addEventListener('capper-history-filter-change',renderBasketballMonitors);
+
+async function loadBasketballMonitors(){
+ try{
+  const r=await fetch('/api/basketball-monitor/status',{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Monitor status failed');
+  basketballMonitorData=d.cappers||{};
+  const wnba=basketballMonitorData['WNBA Monitor - WNBA']||{};
+  const nba=basketballMonitorData['NBA Monitor - NBA']||{};
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent=(wnba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
+  if(nbaState)nbaState.textContent=(nba.enabled!==false&&d.auto_trading&&d.live_trading)?'ENABLED · AUTO LIVE':'ENABLED · AUTO OFF';
+  renderBasketballMonitors();
+ }catch(e){
+  const wnbaState=document.getElementById('wnbaMonitorState'),nbaState=document.getElementById('nbaMonitorState');
+  if(wnbaState)wnbaState.textContent='Status unavailable';
+  if(nbaState)nbaState.textContent='Status unavailable';
+ }
+}
+
+async function monitorSell(tradeId,btn){
+ if(!confirm('Sell the full tracked open position at the current executable market?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SELLING…';
+ try{
+  const r=await fetch('/api/executor/request-sell/'+encodeURIComponent(tradeId),{method:'POST'}),q=await r.json();
+  if(!r.ok)throw new Error(q.detail||'SELL request failed');
+  const started=Date.now();
+  while(Date.now()-started<90000){
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const sr=await fetch('/api/executor/request-status/'+encodeURIComponent(q.request_id),{cache:'no-store'}),sd=await sr.json();
+   if(!sr.ok)throw new Error(sd.detail||'SELL status failed');
+   if(sd.status==='DONE'){await loadBasketballMonitors();return}
+   if(sd.status==='FAILED'){
+    const err=String(sd.error||'SELL failed');
+    if(err.includes('CLOB outcome-token balance became zero before SELL')){
+     await loadBasketballMonitors();
+     alert('Position already has 0 shares on Polymarket. No second SELL was submitted; the dashboard will reconcile it as closed.');
+     return;
+    }
+    throw new Error(err);
+   }
+  }
+  throw new Error('SELL timed out');
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+async function monitorSettle(tradeId,result,btn){
+ if(!confirm('Manually settle this position as '+result+'?'))return;
+ const original=btn.textContent;btn.disabled=true;btn.textContent='SETTLING…';
+ try{
+  const r=await fetch('/api/dashboard/manual-settle/'+encodeURIComponent(tradeId)+'/'+encodeURIComponent(result),{method:'POST'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Manual settlement failed');
+  await loadBasketballMonitors();
+ }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
+}
+loadBasketballMonitors();
+setInterval(loadBasketballMonitors,10000);
+"""
+    html = html.replace("</script>", js + "\n</script>", 1)
+    dashboard.DASHBOARD_HTML = html
++Number(q.budget_usdc||0).toFixed(2)+target)){btn.disabled=false;btn.textContent=original;return}
+  btn.textContent='APPROVING '+live+'…';
+  const r=await fetch('/api/executor/approve-buy/'+encodeURIComponent(requestId),{method:'POST'}),d=await r.json();
+  if(!r.ok)throw new Error(d.detail||'Approval failed');
+  btn.textContent='APPROVED '+monitorOdds(d.polymarket_price);
   await loadBasketballMonitors();
  }catch(e){btn.disabled=false;btn.textContent=original;alert(String(e.message||e))}
 }
