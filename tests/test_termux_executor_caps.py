@@ -149,6 +149,7 @@ class SlackFailedBuyRetryTests(unittest.TestCase):
             patch.object(live_control, "_executor_ready", return_value=(True, {})),
             patch.object(live_control, "_retry_asset_id", return_value="asset-1"),
             patch.object(live_control.remote, "_authoritative_position", return_value=None),
+            patch.object(live_control, "_open_orders_for_asset", return_value=[]),
             patch.object(live_control, "_active_or_pending", return_value=False),
             patch.object(live_control.remote, "_queue_load", side_effect=lambda: store),
             patch.object(live_control.remote, "_queue_save", side_effect=lambda data: store.update(data)),
