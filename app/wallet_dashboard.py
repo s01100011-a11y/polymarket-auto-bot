@@ -69,11 +69,17 @@ def _install_wallet_ui() -> None:
       <div class="wallet-main">
         <div class="label">Wallet</div>
 
+        <div class="system-health-panel wallet-system-health" aria-label="System health">
+          <div class="system-health-row"><span>Dashboard:</span><b id="healthDashboard">—</b></div>
+          <div class="system-health-row"><span>Executor:</span><b id="healthExecutor">—</b></div>
+          <div class="system-health-row"><span>Telegram:</span><b id="healthTelegram">—</b></div>
+          <div class="system-health-row"><span>Trading:</span><b id="healthTrading">—</b></div>
+        </div>
+
         <div class="wallet-dashboard-row wallet-row-address">
           <div class="wallet-data-box wallet-address-box">
             <div class="label">Wallet address</div>
             <div class="wallet-address" id="walletAddress">Checking connection…</div>
-            <div class="wallet-state" id="walletState">Read-only balance check</div>
           </div>
         </div>
 
@@ -114,7 +120,7 @@ def _install_wallet_ui() -> None:
     html = html.replace('  <div class="tabs">', wallet_html + '  <div class="tabs">', 1)
 
     css = '''
-.wallet-live-layout{display:grid;grid-template-columns:1fr;gap:14px;align-items:stretch;margin:18px 0}.wallet-strip{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:16px;padding:16px;margin:0;height:100%;box-sizing:border-box}.wallet-main{height:100%}.wallet-dashboard-row{display:grid;gap:8px;margin-top:8px}.wallet-row-address{grid-template-columns:1fr}.wallet-row-balance{grid-template-columns:repeat(3,minmax(0,1fr))}.wallet-row-activity{grid-template-columns:repeat(3,minmax(0,1fr))}.wallet-data-box{min-width:0;padding:10px}.wallet-address{font-size:15px;font-weight:800;margin-top:6px;word-break:break-all}.wallet-state{font-size:11px;color:var(--muted);margin-top:4px}.wallet-metric{border:0}.wallet-balance{font-size:26px;font-weight:900;color:var(--accent);margin-top:5px}.wallet-secondary{font-size:20px;font-weight:850;margin-top:5px}.wallet-error{color:var(--bad)}.wallet-graph-slot{min-width:0;margin:14px 0}.wallet-graph-slot .pnl-chart-card{height:auto;box-sizing:border-box;margin:0}.wallet-graph-slot .pnl-chart{height:225px}@media(max-width:1050px){.wallet-live-layout{grid-template-columns:1fr}}@media(max-width:700px){.wallet-row-address,.wallet-row-balance,.wallet-row-activity{grid-template-columns:1fr}.wallet-dashboard-row{gap:6px}.wallet-data-box{padding:9px}}
+.wallet-live-layout{display:grid;grid-template-columns:1fr;gap:14px;align-items:stretch;margin:18px 0}.wallet-strip{background:rgba(17,24,39,.88);border:1px solid var(--border);border-radius:16px;padding:16px;margin:0;height:100%;box-sizing:border-box}.wallet-main{height:100%}.wallet-dashboard-row{display:grid;gap:8px;margin-top:8px}.wallet-row-address{grid-template-columns:1fr}.wallet-row-balance{grid-template-columns:repeat(3,minmax(0,1fr))}.wallet-row-activity{grid-template-columns:repeat(3,minmax(0,1fr))}.wallet-data-box{min-width:0;padding:10px}.wallet-address{font-size:15px;font-weight:800;margin-top:6px;word-break:break-all}.wallet-metric{border:0}.wallet-balance{font-size:26px;font-weight:900;color:var(--accent);margin-top:5px}.wallet-secondary{font-size:20px;font-weight:850;margin-top:5px}.wallet-error{color:var(--bad)}.wallet-graph-slot{min-width:0;margin:14px 0}.wallet-graph-slot .pnl-chart-card{height:auto;box-sizing:border-box;margin:0}.wallet-graph-slot .pnl-chart{height:225px}@media(max-width:1050px){.wallet-live-layout{grid-template-columns:1fr}}@media(max-width:700px){.wallet-row-address,.wallet-row-balance,.wallet-row-activity{grid-template-columns:1fr}.wallet-dashboard-row{gap:6px}.wallet-data-box{padding:9px}}
 '''
     html = html.replace('</style>', css + '</style>', 1)
 
@@ -127,16 +133,31 @@ function moveLivePnlGraphToStandaloneWindow(){
 async function loadWallet(){
  try{
   const r=await fetch('/api/live/wallet',{cache:'no-store'});
-  const a=document.getElementById('walletAddress'),s=document.getElementById('walletState'),b=document.getElementById('walletBalance'),p=document.getElementById('walletPortfolio');
+  const a=document.getElementById('walletAddress'),b=document.getElementById('walletBalance'),p=document.getElementById('walletPortfolio');
   if(!r.ok){let msg='HTTP '+r.status;try{const e=await r.json();msg=e.detail||msg}catch(_e){};throw new Error(msg)}
   const d=await r.json();
   a.textContent=d.wallet||'Connected wallet';a.className='wallet-address';
-  s.textContent=`Connected · ${d.wallet_type||'wallet'} · Live trading ${d.live_trading?'ON':'OFF'} · Slack ${d.slack_paper_only?'PAPER':'LIVE'}`;s.className='wallet-state';
-  b.textContent='$'+Number(d.usdc_balance||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-  p.textContent=d.portfolio_value===null||d.portfolio_value===undefined?'—':'$'+Number(d.portfolio_value).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  b.textContent='
+}
+'''
+    html = html.replace('</script>', wallet_js + '\nmoveLivePnlGraphToStandaloneWindow();loadWallet();setInterval(loadWallet,5000);\n</script>', 1)
+    dashboard.DASHBOARD_HTML = html
+
+
+_install_wallet_ui()
++Number(d.usdc_balance||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  p.textContent=d.portfolio_value===null||d.portfolio_value===undefined?'—':'
+}
+'''
+    html = html.replace('</script>', wallet_js + '\nmoveLivePnlGraphToStandaloneWindow();loadWallet();setInterval(loadWallet,5000);\n</script>', 1)
+    dashboard.DASHBOARD_HTML = html
+
+
+_install_wallet_ui()
++Number(d.portfolio_value).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
  }catch(e){
-  const a=document.getElementById('walletAddress'),s=document.getElementById('walletState'),b=document.getElementById('walletBalance'),p=document.getElementById('walletPortfolio');
-  if(a){a.textContent='Wallet connection failed';a.className='wallet-address wallet-error'}if(s){s.textContent=String(e);s.className='wallet-state wallet-error'}if(b)b.textContent='—';if(p)p.textContent='—';
+  const a=document.getElementById('walletAddress'),b=document.getElementById('walletBalance'),p=document.getElementById('walletPortfolio');
+  if(a){a.textContent='Wallet connection failed';a.className='wallet-address wallet-error'}if(b)b.textContent='—';if(p)p.textContent='—';
  }
 }
 '''
