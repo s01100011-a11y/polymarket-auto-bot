@@ -79,6 +79,13 @@ def _buy_requires_min_odds_approval(payload: dict[str, Any]) -> bool:
             reasons.append("PRICE_LIMIT")
     except Exception:
         pass
+    try:
+        signal_spread = Decimal(str(payload.get("signal_spread")))
+        automatic_spread = Decimal(str(payload.get("max_spread") or core.MAX_SPREAD))
+        if signal_spread > automatic_spread:
+            reasons.append("SPREAD_LIMIT")
+    except Exception:
+        pass
     if reasons:
         payload["approval_required"] = True
         payload["approval_reason"] = "+".join(reasons)
