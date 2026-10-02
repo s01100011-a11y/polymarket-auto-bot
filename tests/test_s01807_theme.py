@@ -282,9 +282,11 @@ def test_top_mode_row_keeps_horizontal_inset_after_shared_status_rule():
     assert "padding:4px 8px 5px;" in source
 
 
-def test_top_system_health_is_separate_from_master_switch_and_wallet_is_yellow():
+def test_system_health_uses_wallet_panel_and_master_switch_stays_separate():
     theme = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
     dashboard = Path("app/dashboard.py").read_text(encoding="utf-8")
+    wallet = Path("app/wallet_dashboard.py").read_text(encoding="utf-8")
+    top = theme.split("new_top = '''", 1)[1].split("'''", 1)[0]
 
     assert "fetch('/api/executor/status',{cache:'no-store'})" in dashboard
     assert '"telegram_online": bool(telegram_health["online"])' in dashboard
@@ -294,10 +296,12 @@ def test_top_system_health_is_separate_from_master_switch_and_wallet_is_yellow()
     assert "['healthTelegram',telegramConnected,'ONLINE','OFFLINE']" in dashboard
     assert "['healthTrading',tradingEnabled,'ON','OFF']" in dashboard
     assert "powerBtn.classList.toggle('offline',!dashboardEnabled)" in dashboard
-    assert 'id="healthDashboard"' in theme
-    assert 'id="healthExecutor"' in theme
-    assert 'id="healthTelegram"' in theme
-    assert 'id="healthTrading"' in theme
+    assert 'class="system-health-panel wallet-system-health"' in wallet
+    assert 'id="healthDashboard"' in wallet
+    assert 'id="healthExecutor"' in wallet
+    assert 'id="healthTelegram"' in wallet
+    assert 'id="healthTrading"' in wallet
+    assert 'id="healthDashboard"' not in top
     assert ".system-health-row .health-online{color:var(--retro-green)!important}" in theme
     assert ".system-health-row .health-offline{color:var(--retro-red)!important}" in theme
     assert "#walletAddress{color:var(--retro-yellow)!important}" in theme
