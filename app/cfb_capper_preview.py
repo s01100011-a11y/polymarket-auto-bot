@@ -1844,7 +1844,7 @@ def _refresh_live_buy_quote(
     spread = Decimal(quote["spread"])
     if best_ask > core.MAX_PRICE and not allow_price_approval:
         raise RuntimeError(f"Current best ask {best_ask} exceeds MAX_PRICE={core.MAX_PRICE}")
-    if spread > core.MAX_SPREAD:
+    if spread > core.MAX_SPREAD and not allow_price_approval:
         raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
     return quote
 
@@ -2155,6 +2155,7 @@ def _prepare_preview(
         "budget_usdc": str(stake),
         "trade_id": trade_id,
         "max_spread": str(core.MAX_SPREAD),
+        "signal_spread": str(quote.get("spread") or "0"),
         "max_price_global": str(core.MAX_PRICE),
         "source": "cfb_capper_preview",
         "auto": False,
