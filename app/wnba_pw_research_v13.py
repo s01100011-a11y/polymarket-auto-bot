@@ -462,7 +462,7 @@ a{color:#0000ee;text-decoration:underline}
 .win95-stats-body .performance-strip{margin:0 0 6px}
 .win95-stats-body .more-stats-shell{margin:0}
 
-.wallet-address{font-family:"Courier New",monospace;color:#fff!important}
+.wallet-address{font-family:"Courier New",monospace;color:var(--retro-yellow)!important}
 .wallet-state{color:#fff!important}
 .wallet-metrics-stack{border-top:1px solid #808080!important;margin-top:8px!important}
 .wallet-metric{border-color:#808080!important;padding:9px 0!important}
@@ -765,6 +765,9 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
 .capper-power-btn{flex:0 0 auto!important;margin:0!important;white-space:nowrap!important}
 .capper-power-btn.offline .dot{background:#ff1616!important;border-color:#600!important}
 .capper-power-btn.offline .capper-power-text{color:#900!important}
+#botPowerBtn:not(.offline) .dot{background:var(--retro-green)!important;border-color:#006000!important;box-shadow:0 0 8px var(--retro-green)!important}
+#botPowerBtn:not(.offline) .capper-power-text{color:#008000!important}
+#botPowerBtn.offline .capper-power-text{color:#b00000!important}
 .nfl-capper-kpis,.cfb-capper-performance{color:#000!important}
 .nfl-position-row,.cfb-open-position,.cfb-settled-position{
  font-family:"Lucida Console","Courier New",monospace!important;
@@ -861,7 +864,9 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
  color:#fff!important;
 }
 .nfl-capper-card .muted{color:#000!important}
-.wallet-address,.wallet-state,.wallet-secondary{color:#fff!important}
+.wallet-state,.wallet-secondary{color:#fff!important}
+#walletAddress{color:var(--retro-yellow)!important}
+#walletAddress.wallet-error{color:var(--retro-red)!important}
 .win95-stats-window{background:#c0c0c0!important}
 .win95-stats-body{padding:7px!important}
 .win95-stats-body .performance-strip{gap:7px!important;margin:0 0 7px!important}
