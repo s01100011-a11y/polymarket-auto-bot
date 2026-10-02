@@ -117,6 +117,12 @@ def _install_s01807_win95_theme() -> None:
       </div>
       <button type="button" class="badge capper-power-btn sport-power-btn" id="botPowerBtn" data-enabled="1" aria-pressed="true" title="Dashboard master bot switch"><span class="dot"></span><span class="capper-power-text" id="serviceState">Connecting</span></button>
     </div>
+    <div class="system-health-panel" aria-label="System health">
+      <div class="system-health-row"><span>Dashboard:</span><b id="healthDashboard">—</b></div>
+      <div class="system-health-row"><span>Executor:</span><b id="healthExecutor">—</b></div>
+      <div class="system-health-row"><span>Telegram:</span><b id="healthTelegram">—</b></div>
+      <div class="system-health-row"><span>Trading:</span><b id="healthTrading">—</b></div>
+    </div>
     <div class="win95-info-strip">
       <div class="win95-info-group win95-time-group">
         <span class="win95-time-box" id="updated">Updated —</span>
@@ -285,6 +291,36 @@ a{color:#0000ee;text-decoration:underline}
  min-height:30px!important;
  margin:0 0 0 auto!important;
  flex:0 0 auto!important;
+}
+
+.system-health-panel{
+ margin:4px 8px 6px!important;
+ padding:7px 9px!important;
+ display:grid!important;
+ grid-template-columns:repeat(4,minmax(0,1fr))!important;
+ gap:6px!important;
+ background:#000!important;
+ color:#fff!important;
+ border-top:2px solid #404040!important;
+ border-left:2px solid #404040!important;
+ border-right:2px solid #fff!important;
+ border-bottom:2px solid #fff!important;
+ font-family:"Lucida Console","Courier New",monospace!important;
+ box-sizing:border-box!important;
+}
+.system-health-row{
+ display:flex!important;
+ align-items:center!important;
+ justify-content:space-between!important;
+ gap:8px!important;
+ min-width:0!important;
+}
+.system-health-row span{color:#fff!important;font-size:11px!important}
+.system-health-row b{font-size:12px!important;white-space:nowrap!important}
+.system-health-row .health-online{color:var(--retro-green)!important}
+.system-health-row .health-offline{color:var(--retro-red)!important}
+@media(max-width:650px){
+ .system-health-panel{grid-template-columns:repeat(2,minmax(0,1fr))!important}
 }
 .win95-info-strip{
  display:flex;
