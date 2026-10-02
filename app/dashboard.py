@@ -21,8 +21,8 @@ DASHBOARD_SETTINGS_FILE = core.DATA_DIR / "dashboard_settings.json"
 AUTO_TRADING_STATE_FILE = core.DATA_DIR / "auto_trading_state.json"
 DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
-DASHBOARD_VERSION = "0.5.3"
-DASHBOARD_VERSION_DATE = "2026-09-19"
+DASHBOARD_VERSION = "0.5.4"
+DASHBOARD_VERSION_DATE = "2026-10-02"
 
 
 class DashboardSettings(BaseModel):
@@ -392,14 +392,31 @@ async function loadExecutorEvents(){
 }
 async function load(){
  try{
-  const r=await fetch('/api/dashboard',{cache:'no-store'}); if(!r.ok)throw new Error('HTTP '+r.status); const d=await r.json(),s=d.status;
+  const [r,executorResponse]=await Promise.all([
+   fetch('/api/dashboard',{cache:'no-store'}),
+   fetch('/api/executor/status',{cache:'no-store'})
+  ]);
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const d=await r.json(),s=d.status;
+  let executorStatus={connected:false};
+  if(executorResponse.ok){try{executorStatus=await executorResponse.json()}catch(_e){}}
+  const executorConnected=executorStatus.connected===true;
+  const dashboardEnabled=s.bot_enabled!==false;
+  const serviceOnline=dashboardEnabled&&executorConnected;
   const serviceState=document.getElementById('serviceState'),versionLabel=document.getElementById('versionLabel'),versionDateLabel=document.getElementById('versionDateLabel'),win95Title=document.getElementById('win95Title'),powerBtn=document.getElementById('botPowerBtn'),updatedEl=document.getElementById('updated'),uptimeEl=document.getElementById('uptime');
-  if(serviceState)serviceState.textContent=s.bot_enabled===false?'Offline':'Online';
+  if(serviceState)serviceState.textContent=serviceOnline?'Online':'Offline';
   if(versionLabel)versionLabel.textContent='v'+(s.version||'—');
   if(versionDateLabel)versionDateLabel.textContent=s.version_date||'—';
   if(win95Title)win95Title.textContent='S01807 v'+(s.version||'—');
   document.title='S01807 v'+(s.version||'—');
-  if(powerBtn){powerBtn.dataset.enabled=s.bot_enabled===false?'0':'1';powerBtn.classList.toggle('active',s.bot_enabled!==false);powerBtn.classList.toggle('offline',s.bot_enabled===false);powerBtn.setAttribute('aria-pressed',s.bot_enabled!==false?'true':'false')}
+  if(powerBtn){
+   powerBtn.dataset.enabled=dashboardEnabled?'1':'0';
+   powerBtn.dataset.executorConnected=executorConnected?'1':'0';
+   powerBtn.classList.toggle('active',dashboardEnabled);
+   powerBtn.classList.toggle('offline',!serviceOnline);
+   powerBtn.setAttribute('aria-pressed',dashboardEnabled?'true':'false');
+   powerBtn.title=!dashboardEnabled?'Dashboard master bot is OFF':(executorConnected?'Termux executor heartbeat is ONLINE':'Termux executor heartbeat is OFFLINE');
+  }
   if(updatedEl)updatedEl.textContent='Updated '+new Date(d.generated_at).toLocaleTimeString();
   if(uptimeEl){
    const uptimeSeconds=Math.max(0,Number(s.uptime_seconds||0));
