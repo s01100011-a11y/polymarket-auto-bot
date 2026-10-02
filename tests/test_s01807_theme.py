@@ -282,6 +282,22 @@ def test_top_mode_row_keeps_horizontal_inset_after_shared_status_rule():
     assert "padding:4px 8px 5px;" in source
 
 
+def test_top_online_badge_follows_termux_executor_heartbeat_and_wallet_is_yellow():
+    theme = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
+    dashboard = Path("app/dashboard.py").read_text(encoding="utf-8")
+
+    assert "fetch('/api/executor/status',{cache:'no-store'})" in dashboard
+    assert "const serviceOnline=dashboardEnabled&&executorConnected;" in dashboard
+    assert "serviceState.textContent=serviceOnline?'Online':'Offline'" in dashboard
+    assert "powerBtn.classList.toggle('offline',!serviceOnline)" in dashboard
+    assert "Termux executor heartbeat is ONLINE" in dashboard
+    assert "Termux executor heartbeat is OFFLINE" in dashboard
+    assert "#botPowerBtn:not(.offline) .capper-power-text{color:#008000!important}" in theme
+    assert "#botPowerBtn.offline .capper-power-text{color:#b00000!important}" in theme
+    assert "#walletAddress{color:var(--retro-yellow)!important}" in theme
+    assert "#walletAddress.wallet-error{color:var(--retro-red)!important}" in theme
+
+
 def test_shared_monitor_signal_card_matches_wnba_visual_system():
     source = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
 
