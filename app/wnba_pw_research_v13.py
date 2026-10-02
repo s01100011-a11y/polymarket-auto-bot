@@ -117,12 +117,6 @@ def _install_s01807_win95_theme() -> None:
       </div>
       <button type="button" class="badge capper-power-btn sport-power-btn" id="botPowerBtn" data-enabled="1" aria-pressed="true" title="Dashboard master bot switch"><span class="dot"></span><span class="capper-power-text" id="serviceState">Connecting</span></button>
     </div>
-    <div class="system-health-panel" aria-label="System health">
-      <div class="system-health-row"><span>Dashboard:</span><b id="healthDashboard">—</b></div>
-      <div class="system-health-row"><span>Executor:</span><b id="healthExecutor">—</b></div>
-      <div class="system-health-row"><span>Telegram:</span><b id="healthTelegram">—</b></div>
-      <div class="system-health-row"><span>Trading:</span><b id="healthTrading">—</b></div>
-    </div>
     <div class="win95-info-strip">
       <div class="win95-info-group win95-time-group">
         <span class="win95-time-box" id="updated">Updated —</span>
@@ -294,11 +288,11 @@ a{color:#0000ee;text-decoration:underline}
 }
 
 .system-health-panel{
- margin:4px 8px 6px!important;
- padding:7px 9px!important;
+ margin:7px 0 0!important;
+ padding:8px 9px!important;
  display:grid!important;
  grid-template-columns:repeat(4,minmax(0,1fr))!important;
- gap:6px!important;
+ gap:7px!important;
  background:#000!important;
  color:#fff!important;
  border-top:2px solid #404040!important;
@@ -320,7 +314,7 @@ a{color:#0000ee;text-decoration:underline}
 .system-health-row .health-online{color:var(--retro-green)!important}
 .system-health-row .health-offline{color:var(--retro-red)!important}
 @media(max-width:650px){
- .system-health-panel{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+ .system-health-panel{grid-template-columns:1fr!important}
 }
 .win95-info-strip{
  display:flex;
@@ -499,7 +493,6 @@ a{color:#0000ee;text-decoration:underline}
 .win95-stats-body .more-stats-shell{margin:0}
 
 .wallet-address{font-family:"Courier New",monospace;color:var(--retro-yellow)!important}
-.wallet-state{color:#fff!important}
 .wallet-metrics-stack{border-top:1px solid #808080!important;margin-top:8px!important}
 .wallet-metric{border-color:#808080!important;padding:9px 0!important}
 .wallet-balance{color:#008000!important;font-family:"Courier New",monospace!important}
@@ -894,13 +887,13 @@ td.red,.nfl-result-line.negative,.cfb-result-line.negative{
  color:#fff!important;
 }
 .nfl-capper-card .label{color:#000!important}
-.wallet-data-box .wallet-state,.wallet-data-box .performance-sub,
+.wallet-data-box .performance-sub,
 .performance-card .performance-sub,
 .more-stats-row .muted,.setting label,.ro .toggle-note,.exec-status-box .note{
  color:#fff!important;
 }
 .nfl-capper-card .muted{color:#000!important}
-.wallet-state,.wallet-secondary{color:#fff!important}
+.wallet-secondary{color:#fff!important}
 #walletAddress{color:var(--retro-yellow)!important}
 #walletAddress.wallet-error{color:var(--retro-red)!important}
 .win95-stats-window{background:#c0c0c0!important}
