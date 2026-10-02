@@ -86,6 +86,10 @@ def _buy_requires_min_odds_approval(payload: dict[str, Any]) -> bool:
             reasons.append("SPREAD_LIMIT")
     except Exception:
         pass
+    if bool(payload.get("trade_cap_exceeded")):
+        reasons.append("TRADE_CAP")
+    if bool(payload.get("daily_budget_exceeded")):
+        reasons.append("DAILY_BUDGET")
     if reasons:
         payload["approval_required"] = True
         payload["approval_reason"] = "+".join(reasons)
