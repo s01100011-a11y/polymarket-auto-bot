@@ -282,18 +282,24 @@ def test_top_mode_row_keeps_horizontal_inset_after_shared_status_rule():
     assert "padding:4px 8px 5px;" in source
 
 
-def test_top_online_badge_follows_termux_executor_heartbeat_and_wallet_is_yellow():
+def test_top_system_health_is_separate_from_master_switch_and_wallet_is_yellow():
     theme = Path("app/wnba_pw_research_v13.py").read_text(encoding="utf-8")
     dashboard = Path("app/dashboard.py").read_text(encoding="utf-8")
 
     assert "fetch('/api/executor/status',{cache:'no-store'})" in dashboard
-    assert "const serviceOnline=dashboardEnabled&&executorConnected;" in dashboard
-    assert "serviceState.textContent=serviceOnline?'Online':'Offline'" in dashboard
-    assert "powerBtn.classList.toggle('offline',!serviceOnline)" in dashboard
-    assert "Termux executor heartbeat is ONLINE" in dashboard
-    assert "Termux executor heartbeat is OFFLINE" in dashboard
-    assert "#botPowerBtn:not(.offline) .capper-power-text{color:#008000!important}" in theme
-    assert "#botPowerBtn.offline .capper-power-text{color:#b00000!important}" in theme
+    assert '"telegram_online": bool(telegram_health["online"])' in dashboard
+    assert "const telegramConnected=s.telegram_online===true;" in dashboard
+    assert "['healthDashboard',true,'ONLINE','OFFLINE']" in dashboard
+    assert "['healthExecutor',executorConnected,'ONLINE','OFFLINE']" in dashboard
+    assert "['healthTelegram',telegramConnected,'ONLINE','OFFLINE']" in dashboard
+    assert "['healthTrading',tradingEnabled,'ON','OFF']" in dashboard
+    assert "powerBtn.classList.toggle('offline',!dashboardEnabled)" in dashboard
+    assert 'id="healthDashboard"' in theme
+    assert 'id="healthExecutor"' in theme
+    assert 'id="healthTelegram"' in theme
+    assert 'id="healthTrading"' in theme
+    assert ".system-health-row .health-online{color:var(--retro-green)!important}" in theme
+    assert ".system-health-row .health-offline{color:var(--retro-red)!important}" in theme
     assert "#walletAddress{color:var(--retro-yellow)!important}" in theme
     assert "#walletAddress.wallet-error{color:var(--retro-red)!important}" in theme
 
