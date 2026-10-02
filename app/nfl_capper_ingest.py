@@ -1584,11 +1584,8 @@ def _prepare_pick(
     if best_ask is None:
         raise RuntimeError("No current ask is available")
     max_price = best_ask
-    # Above the unattended ceiling is retained for explicit approval.
-    # The executor queue keeps it WAITING_APPROVAL until the user accepts a refreshed live quote.
-    if spread > core.MAX_SPREAD:
-        raise RuntimeError(f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
-
+    # Price/odds/spread breaches are retained for explicit approval.
+    # The executor queue keeps them WAITING_APPROVAL until the user accepts a refreshed live quote.
     stake = _stake_to_win_at_price(target_profit, max_price)
     if stake > core.MAX_AUTO_TRADE_USDC:
         raise RuntimeError(
@@ -1623,6 +1620,7 @@ def _prepare_pick(
         "budget_usdc": str(stake),
         "trade_id": trade_id,
         "max_spread": str(core.MAX_SPREAD),
+        "signal_spread": str(spread),
         "max_price_global": str(core.MAX_PRICE),
         "source": "termux_executor",
         "auto": True,
