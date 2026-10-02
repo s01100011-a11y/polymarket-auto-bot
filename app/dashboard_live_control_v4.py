@@ -878,17 +878,14 @@ def _waiting_buy_live_quote(rec: dict[str, Any]) -> dict[str, Any]:
         budget = (target * best_ask / (Decimal("1") - best_ask)).quantize(Decimal("0.01"), rounding=ROUND_UP)
     if budget <= 0:
         raise HTTPException(status_code=409, detail="Prepared BUY has an invalid stake")
-    if budget > core.MAX_AUTO_TRADE_USDC:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Live price requires ${budget} stake, above Auto trade cap ${core.MAX_AUTO_TRADE_USDC}",
-        )
     return {
         "best_ask": best_ask,
         "spread": spread,
         "decimal_odds": decimal_odds,
         "budget_usdc": budget,
         "polymarket_cents": (best_ask * Decimal("100")).quantize(Decimal("0.1")),
+        "auto_trade_cap_usdc": Decimal(str(core.MAX_AUTO_TRADE_USDC)),
+        "budget_cap_exceeded": budget > Decimal(str(core.MAX_AUTO_TRADE_USDC)),
     }
 
 
@@ -907,6 +904,8 @@ def waiting_buy_approval_quote(request_id: str):
         "polymarket_cents": str(live["polymarket_cents"]),
         "spread": str(live["spread"]),
         "budget_usdc": str(live["budget_usdc"]),
+        "auto_trade_cap_usdc": str(live["auto_trade_cap_usdc"]),
+        "budget_cap_exceeded": bool(live["budget_cap_exceeded"]),
         "target_profit_usdc": payload.get("strategy_target_profit_usdc"),
         "units": payload.get("strategy_units"),
         "approval_reason": payload.get("approval_reason"),
@@ -923,6 +922,15 @@ def _approve_waiting_buy(request_id: str) -> dict[str, Any]:
     if not initial or initial.get("action") != "BUY" or initial.get("status") != "WAITING_APPROVAL":
         raise HTTPException(status_code=404, detail="Prepared BUY is not awaiting approval")
     live = _waiting_buy_live_quote(initial)
+    if bool(live.get("budget_cap_exceeded")):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Current live quote requires ${live['budget_usdc']} stake, above "
+                f"the dashboard Auto trade cap ${live['auto_trade_cap_usdc']}. "
+                "Raise the cap explicitly before approving this BUY."
+            ),
+        )
 
     with remote._QUEUE_LOCK:
         queue = remote._queue_load()
