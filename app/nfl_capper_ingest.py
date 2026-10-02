@@ -1587,21 +1587,11 @@ def _prepare_pick(
     # Price/odds/spread breaches are retained for explicit approval.
     # The executor queue keeps them WAITING_APPROVAL until the user accepts a refreshed live quote.
     stake = _stake_to_win_at_price(target_profit, max_price)
-    if stake > core.MAX_AUTO_TRADE_USDC:
-        raise RuntimeError(
-            "Requested " + str(units) + "u targets $" + str(target_profit)
-            + " profit and requires $" + str(stake) + " stake at "
-            + str(max_price) + "; exceeds MAX_AUTO_TRADE_USDC=$"
-            + str(core.MAX_AUTO_TRADE_USDC)
-        )
+    trade_cap_exceeded = stake > core.MAX_AUTO_TRADE_USDC
 
     used = core._daily_budget_used()
     pending = _pending_auto_budget(remote)
-    if used + pending + stake > core.MAX_DAILY_BUDGET_USDC:
-        raise RuntimeError(
-            "Daily auto budget would exceed MAX_DAILY_BUDGET_USDC=$" + str(core.MAX_DAILY_BUDGET_USDC)
-            + "; used=$" + str(used) + ", pending=$" + str(pending) + ", requested=$" + str(stake)
-        )
+    daily_budget_exceeded = used + pending + stake > core.MAX_DAILY_BUDGET_USDC
 
     event_slug = str(getattr(event, "slug", "") or "")
     if not event_slug:
@@ -1622,6 +1612,12 @@ def _prepare_pick(
         "max_spread": str(core.MAX_SPREAD),
         "signal_spread": str(spread),
         "max_price_global": str(core.MAX_PRICE),
+        "trade_cap_exceeded": bool(trade_cap_exceeded),
+        "daily_budget_exceeded": bool(daily_budget_exceeded),
+        "auto_trade_cap_usdc": str(core.MAX_AUTO_TRADE_USDC),
+        "daily_budget_limit_usdc": str(core.MAX_DAILY_BUDGET_USDC),
+        "daily_budget_used_usdc": str(used),
+        "pending_auto_budget_usdc": str(pending),
         "source": "termux_executor",
         "auto": True,
         "strategy_source": source_label,
