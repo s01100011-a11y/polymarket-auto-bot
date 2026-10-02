@@ -2680,6 +2680,64 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         _STATUS["last_error"] = None
         _STATUS["cycles"] = int(_STATUS.get("cycles") or 0) + 1
 
+    def _persist_manual_resend_signal(
+        trigger_hash: str,
+        pick: dict[str, Any],
+        result: dict[str, Any],
+    ) -> str:
+        """Expose a one-shot repaired signal in the normal NFL dashboard queue UI."""
+        signal_id = f"manual-resend-{trigger_hash[:24]}"
+        signals = _load_signals()
+        existing = signals.get(signal_id) if isinstance(signals.get(signal_id), dict) else {}
+        now = _now_iso()
+        record = dict(existing or {})
+        record.update({
+            "id": signal_id,
+            "first_seen_at": record.get("first_seen_at") or now,
+            "updated_at": now,
+            "source": result.get("strategy_source") or _source_label(pick),
+            "telegram_source": pick.get("source"),
+            "posted_at": pick.get("posted_at") or now,
+            "selection": pick.get("selection"),
+            "units": result.get("units") or str(_units_for_pick(pick)),
+            "unit_usdc": result.get("unit_usdc"),
+            "unit_usdc_at_call": result.get("unit_usdc"),
+            "target_profit_usdc": result.get("target_profit_usdc"),
+            "target_profit_usdc_at_call": result.get("target_profit_usdc"),
+            "stake_usdc": result.get("stake_usdc"),
+            "stake_usdc_at_call": result.get("stake_usdc"),
+            "sizing_mode": result.get("sizing_mode") or "TO_WIN",
+            "pick": pick,
+            "status": result.get("status"),
+            "request_id": result.get("request_id"),
+            "approval_required": bool(result.get("approval_required")),
+            "approval_reason": result.get("approval_reason"),
+            "signal_decimal_odds": result.get("signal_decimal_odds"),
+            "minimum_decimal_odds": result.get("minimum_decimal_odds"),
+            "trade_id": result.get("trade_id"),
+            "market_type": result.get("market_type"),
+            "market": result.get("market"),
+            "market_url": result.get("market_url"),
+            "outcome": result.get("outcome"),
+            "asset_id": result.get("asset_id"),
+            "best_ask": result.get("max_price"),
+            "max_price": result.get("max_price"),
+            "spread": result.get("spread"),
+            "requested_spread_line": result.get("requested_spread_line"),
+            "executed_spread_line": result.get("executed_spread_line"),
+            "alternate_spread_fallback": result.get("alternate_spread_fallback"),
+            "requested_total_line": result.get("requested_total_line"),
+            "executed_total_line": result.get("executed_total_line"),
+            "alternate_total_fallback": result.get("alternate_total_fallback"),
+            "market_scope": result.get("market_scope"),
+            "manual_resend": True,
+            "manual_resend_trigger_hash": trigger_hash,
+        })
+        signals[signal_id] = record
+        _save_signals(signals)
+        return signal_id
+
+
     async def _run_manual_resend_once() -> None:
         """One-shot, environment-triggered resend through the normal NFL BUY path.
 
@@ -2698,6 +2756,10 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
             and existing_marker.get("trigger_hash") == trigger_hash
             and existing_marker.get("status") in {"QUEUED", "WAITING_APPROVAL", "DONE", "SKIPPED_DUPLICATE"}
         ):
+            existing_pick = existing_marker.get("pick") if isinstance(existing_marker.get("pick"), dict) else None
+            existing_result = existing_marker.get("result") if isinstance(existing_marker.get("result"), dict) else None
+            if existing_pick is not None and existing_result is not None:
+                _persist_manual_resend_signal(trigger_hash, existing_pick, existing_result)
             return
 
         try:
@@ -2771,6 +2833,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
                 "unit_usdc": str(resend_unit),
                 "result": result,
             }
+            core._save(manual_resend_marker, marker)
+            signal_id = _persist_manual_resend_signal(trigger_hash, pick, result)
+            marker["dashboard_signal_id"] = signal_id
             core._save(manual_resend_marker, marker)
             print("NFL_CAPPER_MANUAL_RESEND " + json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str), flush=True)
         except Exception as exc:
