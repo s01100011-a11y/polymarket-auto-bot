@@ -868,8 +868,8 @@ def _waiting_buy_live_quote(rec: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"Could not refresh live Polymarket quote: {type(exc).__name__}: {exc}") from exc
     if best_ask is None or best_ask <= 0 or best_ask >= 1:
         raise HTTPException(status_code=409, detail="No valid live Polymarket ask is available")
-    if spread > core.MAX_SPREAD:
-        raise HTTPException(status_code=409, detail=f"Current spread {spread} exceeds MAX_SPREAD={core.MAX_SPREAD}")
+    # Wide spreads remain visible as explicit approval opportunities.
+    # They never enter the executor automatically; approval stamps a one-request override.
     decimal_odds = remote._decimal_odds_from_price(best_ask)
     target_raw = payload.get("strategy_target_profit_usdc")
     budget = Decimal(str(payload.get("budget_usdc") or "0"))
@@ -938,8 +938,12 @@ def _approve_waiting_buy(request_id: str) -> dict[str, Any]:
         payload["approved_live_price"] = str(live_price)
         payload["approved_live_decimal_odds"] = str(live["decimal_odds"])
         payload["approved_price_override"] = live_price > core.MAX_PRICE
+        live_spread = Decimal(str(live["spread"]))
+        payload["approved_spread_override"] = live_spread > core.MAX_SPREAD
         # Explicit approval widens only this request; dashboard defaults stay unchanged.
         payload["max_price_global"] = str(max(core.MAX_PRICE, live_price))
+        payload["max_spread"] = str(max(core.MAX_SPREAD, live_spread))
+        payload["signal_spread"] = str(live_spread)
         decided_at = ingest._now_iso()
         payload["approved_at"] = decided_at
         rec["payload"] = payload
