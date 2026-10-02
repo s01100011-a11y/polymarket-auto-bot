@@ -1579,10 +1579,13 @@ def _prepare_pick(
 
     asks = getattr(book, "asks", None) or []
     best_ask = min((Decimal(str(level.price)) for level in asks), default=None)
+    if best_ask is None or best_ask <= 0 or best_ask >= 1:
+        raise RuntimeError("No valid current ask is available")
+    # The CLOB price endpoint can transiently return 0 on thin markets even
+    # when an executable ask is present in the order book. Use the book ask as
+    # the authoritative live BUY quote in that case.
     if buy_price <= 0 or buy_price >= 1:
-        raise RuntimeError(f"Invalid current BUY price {buy_price}")
-    if best_ask is None:
-        raise RuntimeError("No current ask is available")
+        buy_price = best_ask
     max_price = best_ask
     # Price/odds/spread breaches are retained for explicit approval.
     # The executor queue keeps them WAITING_APPROVAL until the user accepts a refreshed live quote.
