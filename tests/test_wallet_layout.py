@@ -9,6 +9,12 @@ def test_wallet_contains_summary_metrics_and_live_graph_is_standalone():
     assert 'class="wallet-dashboard-row wallet-row-balance"' in source
     assert 'class="wallet-dashboard-row wallet-row-activity"' in source
     assert 'id="walletAddress"' in source
+    assert 'class="system-health-panel wallet-system-health"' in source
+    assert 'id="healthDashboard"' in source
+    assert 'id="healthExecutor"' in source
+    assert 'id="healthTelegram"' in source
+    assert 'id="healthTrading"' in source
+    assert 'id="walletState"' not in source
     assert 'class="wallet-data-box wallet-mode-box"' not in source
     assert 'id="walletBalance"' in source
     assert 'id="walletPortfolio"' in source
