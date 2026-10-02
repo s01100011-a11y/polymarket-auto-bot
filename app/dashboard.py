@@ -21,7 +21,7 @@ DASHBOARD_SETTINGS_FILE = core.DATA_DIR / "dashboard_settings.json"
 AUTO_TRADING_STATE_FILE = core.DATA_DIR / "auto_trading_state.json"
 DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
-DASHBOARD_VERSION = "0.5.4"
+DASHBOARD_VERSION = "0.5.5"
 DASHBOARD_VERSION_DATE = "2026-10-02"
 
 
@@ -94,6 +94,56 @@ def _safe_decimal(value, default="0") -> Decimal:
         return Decimal(str(value))
     except Exception:
         return Decimal(default)
+
+
+def _parse_status_time(value) -> float:
+    if not value:
+        return 0.0
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except Exception:
+        return 0.0
+
+
+def _telegram_bridge_health(max_age_seconds: int = 60) -> dict:
+    now = time.time()
+    sources = []
+    for sport, filename in (
+        ("NFL", "nfl_capper_last_feed.json"),
+        ("CFB", "cfb_capper_last_feed.json"),
+    ):
+        feed = core._load(core.DATA_DIR / filename)
+        if not isinstance(feed, dict) or not feed:
+            continue
+        freshness = feed.get("freshness") or {}
+        saved_at = feed.get("saved_at") or feed.get("generated_at")
+        saved_unix = _parse_status_time(saved_at)
+        age = (now - saved_unix) if saved_unix else None
+        connected = bool(feed.get("listener_connected"))
+        ready = bool(feed.get("listener_ready"))
+        if freshness:
+            if freshness.get("connected") is False:
+                connected = False
+            if freshness.get("ready") is False:
+                ready = False
+        fresh = bool(age is not None and age <= max_age_seconds)
+        sources.append({
+            "sport": sport,
+            "connected": connected,
+            "ready": ready,
+            "fresh": fresh,
+            "age_seconds": round(age, 1) if age is not None else None,
+            "error": feed.get("bridge_error") or freshness.get("error"),
+        })
+    online = any(item["connected"] and item["ready"] and item["fresh"] for item in sources)
+    return {
+        "online": online,
+        "max_age_seconds": max_age_seconds,
+        "sources": sources,
+    }
 
 
 def _estimate_pnl(records: list[dict]) -> tuple[list[dict], Decimal]:
@@ -178,6 +228,7 @@ def _dashboard_snapshot() -> dict:
     live_trades, total_pnl = _estimate_pnl(executions)
     dry_runs = [r for r in executions if r.get("status") in {"AUTO_DRY_RUN", "APPROVED_DRY_RUN"}]
     today_used = core._daily_budget_used()
+    telegram_health = _telegram_bridge_health()
 
     history = []
     for rec in executions[:100]:
@@ -206,6 +257,8 @@ def _dashboard_snapshot() -> dict:
             "bot_enabled": core.bot_enabled(),
             "live_trading": core.live_trading_enabled(),
             "auto_trading": core.auto_trading_enabled(),
+            "telegram_online": bool(telegram_health["online"]),
+            "telegram_health": telegram_health,
             "block_political_auto": core.BLOCK_POLITICAL_AUTO,
             "uptime_seconds": int(time.time() - STARTED_AT),
             "poll_seconds": core.AUTO_POLL_SECONDS,
@@ -402,9 +455,22 @@ async function load(){
   if(executorResponse.ok){try{executorStatus=await executorResponse.json()}catch(_e){}}
   const executorConnected=executorStatus.connected===true;
   const dashboardEnabled=s.bot_enabled!==false;
-  const serviceOnline=dashboardEnabled&&executorConnected;
+  const telegramConnected=s.telegram_online===true;
+  const tradingEnabled=s.live_trading===true;
   const serviceState=document.getElementById('serviceState'),versionLabel=document.getElementById('versionLabel'),versionDateLabel=document.getElementById('versionDateLabel'),win95Title=document.getElementById('win95Title'),powerBtn=document.getElementById('botPowerBtn'),updatedEl=document.getElementById('updated'),uptimeEl=document.getElementById('uptime');
-  if(serviceState)serviceState.textContent=serviceOnline?'Online':'Offline';
+  if(serviceState)serviceState.textContent=dashboardEnabled?'Online':'Offline';
+  const healthStates=[
+   ['healthDashboard',true,'ONLINE','OFFLINE'],
+   ['healthExecutor',executorConnected,'ONLINE','OFFLINE'],
+   ['healthTelegram',telegramConnected,'ONLINE','OFFLINE'],
+   ['healthTrading',tradingEnabled,'ON','OFF']
+  ];
+  healthStates.forEach(([id,on,onText,offText])=>{
+   const el=document.getElementById(id);if(!el)return;
+   el.textContent=on?onText:offText;
+   el.classList.toggle('health-online',!!on);
+   el.classList.toggle('health-offline',!on);
+  });
   if(versionLabel)versionLabel.textContent='v'+(s.version||'—');
   if(versionDateLabel)versionDateLabel.textContent=s.version_date||'—';
   if(win95Title)win95Title.textContent='S01807 v'+(s.version||'—');
@@ -413,9 +479,9 @@ async function load(){
    powerBtn.dataset.enabled=dashboardEnabled?'1':'0';
    powerBtn.dataset.executorConnected=executorConnected?'1':'0';
    powerBtn.classList.toggle('active',dashboardEnabled);
-   powerBtn.classList.toggle('offline',!serviceOnline);
+   powerBtn.classList.toggle('offline',!dashboardEnabled);
    powerBtn.setAttribute('aria-pressed',dashboardEnabled?'true':'false');
-   powerBtn.title=!dashboardEnabled?'Dashboard master bot is OFF':(executorConnected?'Termux executor heartbeat is ONLINE':'Termux executor heartbeat is OFFLINE');
+   powerBtn.title=dashboardEnabled?'Dashboard master bot is ON':'Dashboard master bot is OFF';
   }
   if(updatedEl)updatedEl.textContent='Updated '+new Date(d.generated_at).toLocaleTimeString();
   if(uptimeEl){
