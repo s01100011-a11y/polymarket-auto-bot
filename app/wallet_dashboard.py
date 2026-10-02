@@ -137,24 +137,8 @@ async function loadWallet(){
   if(!r.ok){let msg='HTTP '+r.status;try{const e=await r.json();msg=e.detail||msg}catch(_e){};throw new Error(msg)}
   const d=await r.json();
   a.textContent=d.wallet||'Connected wallet';a.className='wallet-address';
-  b.textContent='
-}
-'''
-    html = html.replace('</script>', wallet_js + '\nmoveLivePnlGraphToStandaloneWindow();loadWallet();setInterval(loadWallet,5000);\n</script>', 1)
-    dashboard.DASHBOARD_HTML = html
-
-
-_install_wallet_ui()
-+Number(d.usdc_balance||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-  p.textContent=d.portfolio_value===null||d.portfolio_value===undefined?'—':'
-}
-'''
-    html = html.replace('</script>', wallet_js + '\nmoveLivePnlGraphToStandaloneWindow();loadWallet();setInterval(loadWallet,5000);\n</script>', 1)
-    dashboard.DASHBOARD_HTML = html
-
-
-_install_wallet_ui()
-+Number(d.portfolio_value).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  b.textContent='$'+Number(d.usdc_balance||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  p.textContent=d.portfolio_value===null||d.portfolio_value===undefined?'—':'$'+Number(d.portfolio_value).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
  }catch(e){
   const a=document.getElementById('walletAddress'),b=document.getElementById('walletBalance'),p=document.getElementById('walletPortfolio');
   if(a){a.textContent='Wallet connection failed';a.className='wallet-address wallet-error'}if(b)b.textContent='—';if(p)p.textContent='—';
