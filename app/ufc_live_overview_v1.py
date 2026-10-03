@@ -27,6 +27,28 @@ def _d(value: Any, default: str = "0") -> Decimal:
         return Decimal(default)
 
 
+def _explicit_realized_pnl(rec: dict[str, Any]) -> Decimal | None:
+    """Return persisted realized P/L for closed/settled/redeemed positions."""
+    execution = rec.get("execution") if isinstance(rec.get("execution"), dict) else {}
+    for value in (rec.get("realized_pnl"), execution.get("realized_pnl")):
+        if value is not None:
+            try:
+                return Decimal(str(value))
+            except Exception:
+                pass
+
+    quote = rec.get("quote") if isinstance(rec.get("quote"), dict) else {}
+    entry = rec.get("entry_price") or quote.get("paper_entry_price") or quote.get("entry_price")
+    exit_price = rec.get("exit_price") or execution.get("exit_price") or quote.get("exit_price")
+    shares = rec.get("shares") or rec.get("filled_shares") or quote.get("shares")
+    if entry is None or exit_price is None or shares is None:
+        return None
+    try:
+        return (Decimal(str(exit_price)) - Decimal(str(entry))) * Decimal(str(shares))
+    except Exception:
+        return None
+
+
 def _position_text(rec: dict[str, Any]) -> str:
     quote = rec.get("quote") if isinstance(rec.get("quote"), dict) else {}
     return " ".join(
@@ -36,12 +58,37 @@ def _position_text(rec: dict[str, Any]) -> str:
             rec.get("strategy_selection"),
             rec.get("exact_position"),
             rec.get("outcome"),
+            rec.get("market"),
+            rec.get("event_title"),
+            rec.get("title"),
             quote.get("resolved_outcome"),
             quote.get("requested_outcome"),
             quote.get("outcome"),
-            rec.get("market"),
+            quote.get("market"),
+            quote.get("market_title"),
+            quote.get("event_title"),
+            quote.get("question"),
         )
     )
+
+
+def _record_fight_id(rec: dict[str, Any]) -> str | None:
+    """Resolve an execution to one of the fights on the currently loaded UFC card."""
+    direct = live._fight_id_from_payload(rec)
+    if direct in ufc.FIGHTS:
+        return direct
+
+    text = ufc._compact(_position_text(rec))
+    if not text:
+        return None
+    for candidate, fighters in ufc.FIGHTS.items():
+        a, b = fighters
+        # Imported wallet positions do not always retain strategy_pick_id/trade_id.
+        # Their market/event title normally contains both fighter names, so use
+        # that as the safe fallback without pulling in positions from old cards.
+        if ufc._compact(a) in text and ufc._compact(b) in text:
+            return candidate
+    return None
 
 
 def _overview(fight_id: str | None) -> dict[str, Any]:
@@ -58,13 +105,14 @@ def _overview(fight_id: str | None) -> dict[str, Any]:
 
     raw = core._load(core.EXECUTIONS_FILE)
     executions = raw if isinstance(raw, dict) else {}
+    records: list[dict[str, Any]] = []
     active: list[dict[str, Any]] = []
     for rec in executions.values():
         if not isinstance(rec, dict) or rec.get("parent_trade_id") or rec.get("paper"):
             continue
-        if str(rec.get("status") or "").upper() not in _ACTIVE:
-            continue
-        active.append(rec)
+        records.append(rec)
+        if str(rec.get("status") or "").upper() in _ACTIVE:
+            active.append(rec)
 
     try:
         marked, _ = dashboard._estimate_pnl(active)
@@ -76,9 +124,22 @@ def _overview(fight_id: str | None) -> dict[str, Any]:
         if isinstance(row, dict)
     }
 
+    # Portfolio LIVE P/L remains unrealized-only by design.
     portfolio_live = Decimal("0")
-    card_live = Decimal("0")
-    fight_live = Decimal("0")
+    for rec in active:
+        trade_id = str(rec.get("id") or "")
+        mark = marks.get(trade_id) or {}
+        portfolio_live += _d(
+            mark.get("estimated_pnl")
+            if mark.get("estimated_pnl") is not None
+            else rec.get("estimated_pnl")
+        )
+
+    # UFC card/fight totals are cumulative: realized P/L must remain after a
+    # position is sold, settled or redeemed, while open positions add their
+    # current unrealized mark. This prevents the boxes resetting to $0.00.
+    card_total = Decimal("0")
+    fight_total = Decimal("0")
     card_open = 0
     fight_open = 0
 
@@ -90,39 +151,39 @@ def _overview(fight_id: str | None) -> dict[str, Any]:
         name: 0 for name in (fighters or ())
     }
 
-    for rec in active:
-        trade_id = str(rec.get("id") or "")
-        mark = marks.get(trade_id) or {}
-        pnl = _d(
-            mark.get("estimated_pnl")
-            if mark.get("estimated_pnl") is not None
-            else rec.get("estimated_pnl")
-        )
-        portfolio_live += pnl
-
-        strategy_sport = str(rec.get("strategy_sport") or "").upper()
-        pick_id = str(rec.get("strategy_pick_id") or "")
-        quote = rec.get("quote") if isinstance(rec.get("quote"), dict) else {}
-        market_url = str(quote.get("market_url") or rec.get("market_url") or "").lower()
-        is_current_ufc = (
-            strategy_sport == "UFC"
-            or pick_id.startswith("ufc332:")
-            or "/ufc/" in market_url
-        )
-        if not is_current_ufc:
+    for rec in records:
+        record_fight_id = _record_fight_id(rec)
+        if record_fight_id not in ufc.FIGHTS:
             continue
 
-        card_open += 1
-        card_live += pnl
-        if fight_id and live._fight_id_from_payload(rec) == fight_id:
-            fight_open += 1
-            fight_live += pnl
+        status = str(rec.get("status") or "").upper()
+        is_open = status in _ACTIVE
+        realized = _explicit_realized_pnl(rec) or Decimal("0")
+        unrealized = Decimal("0")
+        if is_open:
+            trade_id = str(rec.get("id") or "")
+            mark = marks.get(trade_id) or {}
+            unrealized = _d(
+                mark.get("estimated_pnl")
+                if mark.get("estimated_pnl") is not None
+                else rec.get("estimated_pnl")
+            )
+            card_open += 1
+
+        total_pnl = realized + unrealized
+        card_total += total_pnl
+
+        if fight_id and record_fight_id == fight_id:
+            if is_open:
+                fight_open += 1
+            fight_total += total_pnl
             if fighters:
                 text = ufc._compact(_position_text(rec))
                 for fighter in fighters:
                     if ufc._compact(fighter) in text:
-                        fighter_pnl[fighter] += pnl
-                        fighter_positions[fighter] += 1
+                        fighter_pnl[fighter] += total_pnl
+                        if is_open:
+                            fighter_positions[fighter] += 1
                         break
 
     result = {
@@ -131,14 +192,16 @@ def _overview(fight_id: str | None) -> dict[str, Any]:
         "available_usdc": str(cash.quantize(Decimal("0.01"))),
         "positions_value_usdc": str(positions_value.quantize(Decimal("0.01"))),
         "portfolio_live_pnl_usdc": str(portfolio_live.quantize(Decimal("0.01"))),
-        "card_total_pnl_usdc": str(card_live.quantize(Decimal("0.01"))),
-        "active_fight_pnl_usdc": str(fight_live.quantize(Decimal("0.01"))),
+        "card_total_pnl_usdc": str(card_total.quantize(Decimal("0.01"))),
+        "active_fight_pnl_usdc": str(fight_total.quantize(Decimal("0.01"))),
         "card_open_positions": card_open,
         "active_fight_open_positions": fight_open,
         "fight_id": fight_id,
         "fighters": [
             {
                 "name": fighter,
+                "total_pnl_usdc": str(fighter_pnl[fighter].quantize(Decimal("0.01"))),
+                # Keep the old key for backward compatibility with any cached UI.
                 "live_pnl_usdc": str(fighter_pnl[fighter].quantize(Decimal("0.01"))),
                 "open_positions": fighter_positions[fighter],
             }
@@ -207,7 +270,7 @@ if "ufc-live-overview-v1" not in html:
   }
   const list=Array.isArray(rows)?rows:[];
   grid.innerHTML=list.map(x=>{
-   const n=Number(x.live_pnl_usdc||0),cls=n>0?'profit':n<0?'loss':'',count=Number(x.open_positions||0);
+   const n=Number(x.total_pnl_usdc??x.live_pnl_usdc??0),cls=n>0?'profit':n<0?'loss':'',count=Number(x.open_positions||0);
    return '<div class="fighter-pnl-box"><span class="fighter-name">'+esc(x.name||'Fighter')+' · TOTAL P/L</span><span class="fighter-pnl '+cls+'">'+(n>0?'+':'')+'$'+n.toFixed(2)+'</span><span class="fighter-count">'+count+' open position'+(count===1?'':'s')+'</span></div>';
   }).join('');
  }
