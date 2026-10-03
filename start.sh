@@ -58,6 +58,6 @@ if ! python -m app.cfb_runtime_hotfix; then
   echo "CFB_RUNTIME_HOTFIX_FAILED; continuing with normal startup"
 fi
 
-# Start the normal composite app + live CFB spread/total options, then layer the
-# explicit total-click queue/approval feedback and duplicate-pending safeguard.
-exec python -m app.cfb_total_click_launcher
+# Start the composite app with live CFB alternatives, explicit click/approval
+# queue handling, and visible pending-approval controls on each CFB signal card.
+exec python -m app.cfb_pending_approval_ui
