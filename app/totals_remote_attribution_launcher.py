@@ -13,6 +13,7 @@ from app import basketball_monitor_attribution_guard_v1 as _basketball_guard  # 
 # sport cards with full Polymarket market metadata, then install the WNBA totals
 # remote bridge on the same app.
 from app import dashboard_sh01_capper_v4 as base
+from app import newest_first_dashboard_v1 as _newest_first  # noqa: F401
 from app import more_stats_capper_sports_v1 as _capper_sport_stats  # noqa: F401
 from app import sh01_visible_position_stats_v1 as _sh01_visible_stats  # noqa: F401
 from app import capper_section_toggles_v1 as _capper_section_toggles  # noqa: F401
