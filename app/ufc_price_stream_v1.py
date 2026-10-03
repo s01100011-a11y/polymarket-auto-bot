@@ -8,7 +8,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends
+from fastapi import Depends, Query
 from fastapi.responses import PlainTextResponse
 
 from app import dashboard_ufc_v2 as base
@@ -37,13 +37,28 @@ def _build_mapping() -> dict[str, dict[str, Any]]:
         matched = ufc._moneyline_market(event, fighter_a, fighter_b)
         if matched is None:
             continue
-        _market, outcomes = matched
+        market, outcomes = matched
+        event_slug = ufc._text(getattr(event, "slug", ""))
+        event_title = ufc._text(getattr(event, "title", ""))
+        market_title = ufc._text(getattr(market, "question", "") or event_title)
+        market_url = f"https://polymarket.com/sports/ufc/{event_slug}" if event_slug else None
         for side, fighter in enumerate((fighter_a, fighter_b)):
-            _label, outcome = outcomes[fighter]
+            label, outcome = outcomes[fighter]
             asset_id = ufc._text(getattr(outcome, "token_id", None) or getattr(outcome, "position_id", None))
             if not asset_id:
                 continue
-            result[asset_id] = {"fight_id": fight_id, "side": side, "fighter": fighter}
+            result[asset_id] = {
+                "fight_id": fight_id,
+                "side": side,
+                "fighter": fighter,
+                "fighter_a": fighter_a,
+                "fighter_b": fighter_b,
+                "outcome": label,
+                "event_slug": event_slug,
+                "event_title": event_title,
+                "market": market_title,
+                "market_url": market_url,
+            }
     with _LOCK:
         _MAPPING.clear()
         _MAPPING.update(result)
@@ -152,8 +167,16 @@ def _thread_main() -> None:
     asyncio.run(_run())
 
 
+def cached_selection(fight_id: str, side: int) -> tuple[str, dict[str, Any], dict[str, Any]] | None:
+    with _LOCK:
+        for asset_id, meta in _MAPPING.items():
+            if str(meta.get("fight_id") or "") == str(fight_id) and int(meta.get("side") or 0) == int(side):
+                return asset_id, dict(meta), dict(_PRICES.get(asset_id) or {})
+    return None
+
+
 @app.get("/api/dashboard/ufc-stream-prices", dependencies=[Depends(dashboard._auth)])
-def ufc_stream_prices() -> dict[str, Any]:
+def ufc_stream_prices(fight_id: str | None = Query(default=None)) -> dict[str, Any]:
     now = time.time()
     with _LOCK:
         mapping = dict(_MAPPING)
@@ -161,6 +184,8 @@ def ufc_stream_prices() -> dict[str, Any]:
         status = dict(_STATUS)
     rows = []
     for asset, meta in mapping.items():
+        if fight_id and str(meta.get("fight_id") or "") != str(fight_id):
+            continue
         p = prices.get(asset) or {}
         ask = p.get("best_ask")
         odds = None
@@ -173,6 +198,7 @@ def ufc_stream_prices() -> dict[str, Any]:
             **meta,
             "asset_id": asset,
             "best_ask": str(ask) if ask is not None else None,
+            "best_bid": str(p.get("best_bid")) if p.get("best_bid") is not None else None,
             "decimal_odds": str(odds) if odds is not None else None,
             "age_ms": int(max(0, now - float(p.get("received_unix") or now)) * 1000) if p else None,
             "source": p.get("source"),
