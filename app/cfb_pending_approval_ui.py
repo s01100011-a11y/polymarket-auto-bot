@@ -154,6 +154,14 @@ html = html.replace(
     "const waitingApproval=String(item.status||'').toUpperCase()==='WAITING_APPROVAL'||state==='WAITING_APPROVAL'||item.approval_required===true;",
     1,
 )
+# The base CFB renderer only displayed the odds on its fallback approval button.
+# Always include the exact bet/line being authorized so an approval can never be
+# mistaken for another live alternate.
+html = html.replace(
+    "const approvalText=approvalPx?('BUY LIVE '+cfbOdds(approvalPx)):('APPROVE '+Number(item.signal_decimal_odds||0).toFixed(2));",
+    "const approvalBet=cfbEsc(item.manual_buy_alternate_line||item.strategy_execution_selection||item.selection||'CFB BUY'); const approvalText=approvalPx?('APPROVE '+approvalBet+' @ '+cfbOdds(approvalPx)):('APPROVE '+approvalBet+' @ '+Number(item.signal_decimal_odds||0).toFixed(2));",
+    1,
+)
 
 _old_approve = """  const approveAction=(waitingApproval&&item.request_id)?'<button type=\"button\" style=\"margin-top:6px;margin-right:6px\" data-request-id=\"'+cfbEsc(item.request_id)+'\" onclick=\"cfbApproveBuy(this.dataset.requestId,this)\">'+approvalText+'</button>':'';"""
 _new_approve = """  const approvalRequestId=item.request_id||item.manual_buy_request_id;
