@@ -53,8 +53,11 @@ def _hot_quote(asset_id: str) -> dict[str, Decimal]:
         bid = Decimal(str(row.get("best_bid"))) if row.get("best_bid") not in {None, ""} else None
     except Exception:
         bid = None
-    spread = max(Decimal("0"), ask - bid) if bid is not None and bid > 0 else Decimal("0")
-    return {"buy_price": ask, "best_ask": ask, "spread": spread}
+    # Never invent a zero spread. If top-of-book does not include a usable bid,
+    # fall back to the old direct quote path so the spread safeguard remains exact.
+    if bid is None or bid <= 0 or bid >= 1 or bid > ask:
+        return _ORIGINAL_QUOTE(asset_id)
+    return {"buy_price": ask, "best_ask": ask, "spread": ask - bid}
 
 
 # The existing BUY endpoint resolves these functions at request time. Replacing
