@@ -34,6 +34,7 @@ from app import ufc_rebuy_approval_v1 as _ufc_rebuy_approval  # noqa: F401
 from app import ufc_live_overview_v1 as _ufc_live_overview  # noqa: F401
 from app import ufc_live_activity_v1 as _ufc_live_activity  # noqa: F401
 from app import ufc_current_capper_bets_v1 as _ufc_current_capper_bets  # noqa: F401
+from app import ufc_capper_ml_filter_fix_v1 as _ufc_capper_ml_filter_fix  # noqa: F401
 from app import hybrid_unit_staking_v1 as _hybrid_unit_staking  # noqa: F401
 from app import ufc_main_dashboard_cleanup_v1 as _ufc_main_cleanup  # noqa: F401
 from app import audit_core_sync
