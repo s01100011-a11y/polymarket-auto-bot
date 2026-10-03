@@ -21,6 +21,7 @@ from app import capper_section_toggles_v1 as _capper_section_toggles  # noqa: F4
 from app import basketball_monitor_feed_box_v1 as _basketball_monitor_feed_box  # noqa: F401
 from app import dashboard_taskbar_v3 as _dashboard_taskbar  # noqa: F401
 from app import audit_core_sync
+from app import audit_core_sync_schema_patch
 from app import audit_research_store
 from app import pw_totals_remote
 
@@ -32,6 +33,7 @@ pw_totals_remote.install(
     core=base.core,
 )
 
+audit_core_sync_schema_patch.install(audit_core_sync)
 audit_core_sync.install(
     app=app,
     core=base.core,
