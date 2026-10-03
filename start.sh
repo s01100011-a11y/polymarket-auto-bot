@@ -59,5 +59,5 @@ if ! python -m app.cfb_runtime_hotfix; then
 fi
 
 # Start the composite app with CFB live alternatives, approval/cancel controls,
-# persisted exact lines, and spread signs derived from the purchased outcome.
-exec python -m app.cfb_exact_position_fix_v2
+# persisted exact lines, and exact spread signs resolved from the owned token.
+exec python -m app.cfb_exact_position_fix_v3
