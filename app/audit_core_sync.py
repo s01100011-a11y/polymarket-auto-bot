@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import os
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -126,9 +127,23 @@ def install(*, app: Any, core: Any) -> None:
                     state["last_error"] = f"{type(exc).__name__}: {exc}"
                 await asyncio.sleep(poll_seconds)
 
-    @app.on_event("startup")
-    async def _start_audit_core_sync() -> None:
-        asyncio.create_task(_loop())
+    previous_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def _audit_core_lifespan(application):
+        async with previous_lifespan(application):
+            task = asyncio.create_task(_loop())
+            try:
+                yield
+            finally:
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+    app.router.lifespan_context = _audit_core_lifespan
 
     @app.get("/api/audit-core-sync/status")
     async def _audit_core_sync_status():
