@@ -4,15 +4,18 @@ import os
 
 import uvicorn
 
-from app import cfb_total_click_launcher as base
+# Keep the full dashboard/executor chain, including universal exact-position
+# identity, unit P/L, missed unit P/L, SH01 hard attribution, and account
+# reconciliation, then install the WNBA totals bridge on the same app.
+from app import dashboard_attribution_v1 as base
 from app import pw_totals_remote
 
 app = base.app
 
 pw_totals_remote.install(
     app=app,
-    dashboard=base.composite.dashboard,
-    core=base.composite.core,
+    dashboard=base.dashboard,
+    core=base.core,
 )
 
 
