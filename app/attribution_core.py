@@ -18,6 +18,38 @@ def _d(value: Any, default: str = "0") -> Decimal:
         return Decimal(default)
 
 
+def unit_value_usdc(rec: dict[str, Any]) -> Decimal:
+    """Recover the value of 1u at bet time without depending on risk/stake size.
+
+    Primary source is the unit snapshot persisted by the executor. Older records
+    can recover it from target profit / called units, or from the binary entry
+    economics for TO_WIN sizing. This keeps unit P/L comparable when the dollar
+    stake or portfolio percentage changes over time.
+    """
+    direct = _d(rec.get("strategy_unit_usdc"))
+    if direct > 0:
+        return direct
+
+    units = _d(rec.get("strategy_units"))
+    target = _d(rec.get("strategy_target_profit_usdc"))
+    if units > 0 and target > 0:
+        return target / units
+
+    mode = str(rec.get("strategy_sizing_mode") or rec.get("sizing_mode") or "").upper()
+    quote = rec.get("quote") or {}
+    entry = _d(quote.get("paper_entry_price") or quote.get("entry_price") or quote.get("limit_price"))
+    stake = _d(rec.get("actual_cost_usdc") or rec.get("budget_usdc"))
+    if units > 0 and stake > 0:
+        if mode in {"TO_WIN", "WIN", "TARGET_PROFIT"} and Decimal("0") < entry < Decimal("1"):
+            potential_profit = stake * (Decimal("1") - entry) / entry
+            if potential_profit > 0:
+                return potential_profit / units
+        # Last-resort historical fallback when only a flat-risk record survives.
+        if mode in {"RISK", "FLAT", "STAKE", ""}:
+            return stake / units
+    return Decimal("0")
+
+
 def attribution_for_execution(rec: dict[str, Any]) -> tuple[str, str]:
     source = str(rec.get("strategy_source") or "").strip()
     if source.upper() == SH01 or str(rec.get("source") or "") == "polymarket_account_reconcile":
@@ -81,6 +113,10 @@ def repair_records(core: Any) -> dict[str, int]:
         if source == SH01 and rec.get("original_strategy_source") is None and rec.get("strategy_source"):
             rec["original_strategy_source"] = rec.get("strategy_source")
             changed += 1
+        unit_value = unit_value_usdc(rec)
+        if unit_value > 0 and _d(rec.get("stats_unit_value_usdc")) != unit_value:
+            rec["stats_unit_value_usdc"] = str(unit_value)
+            changed += 1
         executions[key] = rec
     if changed:
         core._save(core.EXECUTIONS_FILE, executions)
@@ -113,7 +149,7 @@ def install_stats_attribution(core: Any) -> None:
                 record_sport = str(rec.get("strategy_sport") or "").upper()
                 if sport and record_sport and record_sport != str(sport).upper():
                     continue
-                unit_usdc = _d(rec.get("strategy_unit_usdc"))
+                unit_usdc = unit_value_usdc(rec)
                 if unit_usdc <= 0:
                     continue
                 coverage += 1
@@ -175,7 +211,7 @@ def unit_summary(records: list[dict[str, Any]], marks: dict[str, dict[str, Any]]
         if bet_type and rec_type != bet_type:
             continue
         units_called += _d(rec.get("strategy_units"))
-        unit_usdc = _d(rec.get("strategy_unit_usdc"))
+        unit_usdc = unit_value_usdc(rec)
         if unit_usdc <= 0:
             continue
         coverage += 1
