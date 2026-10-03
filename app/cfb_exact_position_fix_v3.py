@@ -8,10 +8,19 @@ import uvicorn
 from polymarket import PublicClient
 
 from app import cfb_exact_position_fix_v2 as base
+from app import nfl_capper_ingest
+from app import performance_sizing_v1
 
 composite = base.composite
 cfb = base.cfb
 app = base.app
+
+performance_sizing_v1.install(
+    app=app,
+    dashboard=composite.dashboard,
+    core=composite.core,
+    nfl=nfl_capper_ingest,
+)
 
 
 def _format_signed(value: Decimal) -> str:
