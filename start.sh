@@ -52,6 +52,13 @@ fi
 echo "TAILSCALE_READY"
 tailscale --socket="$TS_SOCKET" ip -4 || true
 
+# Repair the CFB poller scope regression and immediately refresh any existing
+# Slam PITT +3 row so live alternate BUY choices do not wait behind historical
+# reconciliation. This only updates matching/quote state; it never submits a bet.
+if ! python -m app.cfb_runtime_hotfix; then
+  echo "CFB_RUNTIME_HOTFIX_FAILED; continuing with normal startup"
+fi
+
 # Start the normal composite app with the CFB live-options resolver patched
 # before FastAPI lifespan/background polling begins.
 exec python -m app.cfb_live_options_bootstrap
