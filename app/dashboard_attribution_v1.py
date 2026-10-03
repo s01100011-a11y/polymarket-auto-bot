@@ -7,7 +7,7 @@ import uvicorn
 from fastapi import Depends
 
 from app import attribution_core as attribution
-from app import cfb_exact_position_fix_v2 as base
+from app import cfb_exact_position_fix_v3 as base
 from app import dashboard_metrics_v3 as metrics
 from app import sh01_account_reconcile
 from app import termux_executor_dashboard_v2 as termux_v2
