@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 import uvicorn
+from fastapi import Depends, HTTPException
 
 from app import wnba_pw_research_v13 as composite
 from app import cfb_capper_preview as cfb
@@ -238,18 +239,100 @@ def _refresh_unmatched_with_live_totals(record: dict[str, Any]) -> bool:
 cfb._refresh_unmatched_record = _refresh_unmatched_with_live_totals
 
 
-# The existing CFB card renderer expects live_alternatives. For total rows, make
-# the option open the matched Polymarket event rather than send it through the
-# spread-only alternate endpoint.
-_OLD_ALT_FN = "async function cfbManualAltBuy(signalId,altId,btn){\n const original=btn.textContent;"
-_NEW_ALT_FN = "async function cfbManualAltBuy(signalId,altId,btn){\n if(String(altId||'').startsWith('total-view-')){const card=btn.closest('.capper-pick')||btn.parentElement;const link=card&&card.querySelector?card.querySelector('a[href^=\"https://polymarket.com/\"]'):null;if(link){window.open(link.href,'_blank','noopener');return;}}\n const original=btn.textContent;"
-if _OLD_ALT_FN in composite.dashboard.DASHBOARD_HTML:
-    composite.dashboard.DASHBOARD_HTML = composite.dashboard.DASHBOARD_HTML.replace(_OLD_ALT_FN, _NEW_ALT_FN, 1)
-composite.dashboard.DASHBOARD_HTML = composite.dashboard.DASHBOARD_HTML.replace(
-    ">BUY '+cfbEsc(alt.spread_line)+' @ '+odds+relative+'</button>'",
-    ">'+(String(alt.alternative_id||'').startsWith('total-view-')?'OPEN ':'BUY ')+cfbEsc(alt.spread_line)+' @ '+odds+relative+'</button>'",
-    1,
+# Direct total-alternate BUY route. Keep the existing spread endpoint untouched.
+@composite.app.post(
+    "/api/cfb-cappers/manual-buy-total-alternate/{signal_id}/{alternative_id}",
+    dependencies=[Depends(composite.dashboard._auth)],
 )
+def cfb_capper_manual_buy_total_alternate(signal_id: str, alternative_id: str) -> dict[str, Any]:
+    signal_file = composite.core.DATA_DIR / "cfb_capper_preview_signals.json"
+    signals = composite.core._load(signal_file)
+    if not isinstance(signals, dict):
+        signals = {}
+    record = signals.get(signal_id)
+    if not isinstance(record, dict):
+        raise HTTPException(status_code=404, detail="Unknown CFB signal")
+    if record.get("source") not in cfb.SOURCE_LABELS:
+        raise HTTPException(status_code=400, detail="Only Slam/Syndicate CFB signals can be bought")
+
+    pick = cfb._persisted_record_pick(record)
+    if not isinstance(pick, dict):
+        raise HTTPException(status_code=409, detail="Original CFB pick details are unavailable")
+    kind, _ = cfb._classify_pick(pick)
+    if kind != "total":
+        raise HTTPException(status_code=409, detail="This endpoint is only for full-game total signals")
+
+    try:
+        alternatives = _find_five_better_live_total_options(pick, limit=5)
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=f"Could not refresh live total alternatives: {exc}") from exc
+    selected = next(
+        (alt for alt in alternatives if str(alt.get("alternative_id") or "") == alternative_id),
+        None,
+    )
+    if selected is None:
+        raise HTTPException(
+            status_code=409,
+            detail="That live total is no longer available; refresh the dashboard and choose a current line",
+        )
+    if cfb._event_phase(selected) == "CLOSED":
+        raise HTTPException(status_code=409, detail="Selected Polymarket total market is closed")
+
+    execution_pick = dict(pick)
+    execution_pick["total_side"] = str(selected["total_side"])
+    execution_pick["total_line"] = selected["total_line"]
+    hints = [str(x) for x in (pick.get("event_hints") or []) if str(x)]
+    matchup = "/".join(hints) if len(hints) == 2 else str(pick.get("selection") or "CFB total")
+    execution_pick["selection"] = f"{matchup} {selected['total_side']} {selected['total_line']}"
+
+    try:
+        effective_unit_usdc = cfb.nfl._capper_unit_usdc(
+            composite.core,
+            str(record.get("source") or ""),
+            Decimal(os.getenv("CFB_CAPPER_UNIT_USDC", "10")),
+        )
+        result = cfb._prepare_manual_buy(
+            execution_pick,
+            core=composite.core,
+            remote=cfb.live_control.remote,
+            unit_usdc=effective_unit_usdc,
+            matched=selected,
+            strategy_pick_id=signal_id,
+            strategy_selection=str(record.get("selection") or pick.get("selection") or ""),
+            strategy_alternate_line=f"{selected['total_side']} {selected['total_line']}",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    record["manual_buy_request_id"] = result["request_id"]
+    record["manual_buy_trade_id"] = result["trade_id"]
+    record["manual_buy_status"] = "PENDING"
+    record["manual_buy_error"] = None
+    record["manual_buy_at"] = cfb._now_iso()
+    record["manual_buy_alternate_line"] = f"{selected['total_side']} {selected['total_line']}"
+    record["manual_buy_alternative_id"] = alternative_id
+    record["live_alternatives"] = alternatives
+    record["updated_at"] = cfb._now_iso()
+    signals[signal_id] = record
+    composite.core._save(signal_file, signals)
+    return {
+        "ok": True,
+        "signal_id": signal_id,
+        "original_selection": record.get("selection"),
+        "selected_live_line": f"{selected['total_side']} {selected['total_line']}",
+        "request_id": result["request_id"],
+        "trade_id": result["trade_id"],
+        "best_ask": result.get("best_ask"),
+        "live_odds_american": result.get("live_odds_american"),
+    }
+
+
+# Route total alternatives to the total endpoint; spread alternatives retain the
+# existing spread endpoint. Both still re-check the selected line before queueing.
+_OLD_ALT_FETCH = "const r=await fetch('/api/cfb-cappers/manual-buy-alternate/'+encodeURIComponent(signalId)+'/'+encodeURIComponent(altId),{method:'POST'});"
+_NEW_ALT_FETCH = "const endpoint=String(altId||'').startsWith('total-view-')?'/api/cfb-cappers/manual-buy-total-alternate/':'/api/cfb-cappers/manual-buy-alternate/';const r=await fetch(endpoint+encodeURIComponent(signalId)+'/'+encodeURIComponent(altId),{method:'POST'});"
+if _OLD_ALT_FETCH in composite.dashboard.DASHBOARD_HTML:
+    composite.dashboard.DASHBOARD_HTML = composite.dashboard.DASHBOARD_HTML.replace(_OLD_ALT_FETCH, _NEW_ALT_FETCH, 1)
 
 
 def _refresh_existing_live_total_rows() -> None:
