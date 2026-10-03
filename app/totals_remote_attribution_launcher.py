@@ -40,6 +40,7 @@ from app import hybrid_unit_staking_v1 as _hybrid_unit_staking  # noqa: F401
 from app import ufc_main_dashboard_cleanup_v1 as _ufc_main_cleanup  # noqa: F401
 from app import ufc_telegram_dashboard_bridge_v1 as _ufc_telegram_dashboard_bridge  # noqa: F401
 from app import ufc_live_betting_splits_v1 as _ufc_live_betting_splits  # noqa: F401
+from app import ufc_live_betting_splits_display_fix_v1 as _ufc_live_betting_splits_display_fix  # noqa: F401
 from app import audit_core_sync
 from app import audit_core_sync_schema_patch
 from app import audit_research_store
