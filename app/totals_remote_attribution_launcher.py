@@ -4,10 +4,9 @@ import os
 
 import uvicorn
 
-# Keep the full dashboard/executor chain (including owned-token CFB exact-position
-# resolution, universal position identity, unit P/L, SH01 attribution and account
-# reconciliation), then install the WNBA totals remote bridge on the same app.
-from app import dashboard_attribution_v1 as base
+# Keep the full dashboard/executor chain, promote SH01 into the normal sport
+# capper cards, then install the WNBA totals remote bridge on the same app.
+from app import dashboard_sh01_capper_v2 as base
 from app import pw_totals_remote
 
 app = base.app
