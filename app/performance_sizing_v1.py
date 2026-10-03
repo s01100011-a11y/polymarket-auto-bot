@@ -203,7 +203,15 @@ def _execution_metrics(core: Any, label: str) -> dict[str, Any]:
 
 
 def _recommend(core: Any, label: str) -> dict[str, Any]:
-    m = _audit_file(core, label) or _audit_research(core, label) or _execution_metrics(core, label)
+    # Audit DB is authoritative. If its capper history is not available yet,
+    # stay in the minimum conservative tier rather than inferring quality from
+    # the subset of bets this bot happened to execute.
+    m = _audit_file(core, label) or _audit_research(core, label) or {
+        "label": label, "bets": 0, "season_roi_pct": Decimal("0"),
+        "last30_roi_pct": Decimal("0"), "last10_roi_pct": Decimal("0"),
+        "drawdown_units": Decimal("0"), "source": "audit_missing_conservative",
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    }
     n = max(0, int(m.get("bets") or 0))
     season, r30, r10 = _d(m.get("season_roi_pct")), _d(m.get("last30_roi_pct")), _d(m.get("last10_roi_pct"))
     dd = max(Decimal("0"), _d(m.get("drawdown_units")))
