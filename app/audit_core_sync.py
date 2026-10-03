@@ -78,10 +78,7 @@ def _pw_signal_payload(event_id: str, alert: dict[str, Any]) -> dict[str, Any] |
     if sport not in {"WNBA", "NBA"}:
         return None
 
-    predicted = _first(
-        meta,
-        "predicted_winner",
-    ) or _first(
+    predicted = _first(meta, "predicted_winner") or _first(
         record,
         "predicted_winner",
         "predictedWinner",
@@ -152,6 +149,27 @@ def _signature(payload: dict[str, Any]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _pw_health_payload(core: Any, sport: str) -> dict[str, Any]:
+    filename = "pw_export_ingest_state.json" if sport == "WNBA" else "pw_nba_export_ingest_state.json"
+    path = core.DATA_DIR / filename
+    raw = core._load(path) if path.exists() else {}
+    st = raw if isinstance(raw, dict) else {}
+    return {
+        "source": f"PW_{sport}",
+        "sport": sport,
+        "last_poll_at": st.get("last_poll_at"),
+        "last_success_at": st.get("last_success_at"),
+        "last_error_at": st.get("last_error_at"),
+        "last_error": st.get("last_error"),
+        "consecutive_errors": st.get("consecutive_errors", 0),
+        "last_poll_records": st.get("last_poll_records"),
+        "last_route": st.get("last_route"),
+        "successful_polls": st.get("successful_polls", 0),
+        "updated_at": st.get("updated_at"),
+        "poll_seconds": max(3.0, float(os.getenv("PW_EXPORT_POLL_SECONDS", "8"))),
+    }
+
+
 def install(*, app: Any, core: Any) -> None:
     global _INSTALLED
     if _INSTALLED:
@@ -170,6 +188,7 @@ def install(*, app: Any, core: Any) -> None:
         "tracked": 0,
         "signals_posted": 0,
         "signals_tracked": 0,
+        "health_posts": 0,
     }
     sent: dict[str, str] = {}
     sent_signals: dict[str, str] = {}
@@ -232,9 +251,22 @@ def install(*, app: Any, core: Any) -> None:
             sent_signals[key] = signature
             state["signals_posted"] = int(state.get("signals_posted") or 0) + 1
 
+    async def _sync_pw_health(client: httpx.AsyncClient) -> None:
+        for sport in ("WNBA", "NBA"):
+            payload = _pw_health_payload(core, sport)
+            response = await client.post(
+                f"{base_url}/api/core/source-health",
+                headers={"X-Audit-Core-Token": token},
+                json=payload,
+                timeout=8.0,
+            )
+            response.raise_for_status()
+            state["health_posts"] = int(state.get("health_posts") or 0) + 1
+
     async def _sync_once(client: httpx.AsyncClient) -> None:
         await _sync_executions(client)
         await _sync_pw_signals(client)
+        await _sync_pw_health(client)
         from datetime import datetime, timezone
         state["last_success_at"] = datetime.now(timezone.utc).isoformat()
         state["last_error"] = None
