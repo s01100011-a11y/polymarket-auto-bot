@@ -58,6 +58,6 @@ if ! python -m app.cfb_runtime_hotfix; then
   echo "CFB_RUNTIME_HOTFIX_FAILED; continuing with normal startup"
 fi
 
-# Start the composite app with live CFB alternatives, explicit click/approval
-# queue handling, and visible pending-approval controls on each CFB signal card.
-exec python -m app.cfb_pending_approval_ui
+# Start the composite app with CFB live alternatives, approvals/cancel controls,
+# and exact executed-line metadata for manual CFB alternate positions.
+exec python -m app.cfb_exact_position_fix
