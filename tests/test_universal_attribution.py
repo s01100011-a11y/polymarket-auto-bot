@@ -33,7 +33,7 @@ class UniversalPositionIdentityTests(unittest.TestCase):
 
 
 class AttributionTests(unittest.TestCase):
-    def test_live_alternate_does_not_count_for_original_capper(self):
+    def test_large_live_alternate_does_not_count_for_original_capper(self):
         rec = {
             "strategy_source": "Slam - CFB",
             "strategy_pick_id": "pick-1",
@@ -65,17 +65,81 @@ class AttributionTests(unittest.TestCase):
         }
         self.assertEqual(attribution.attribution_for_execution(rec)[0], "Slam - CFB")
 
-    def test_changed_total_moves_to_sh01(self):
+    def test_spread_exactly_one_point_variance_keeps_capper_credit(self):
+        rec = {
+            "strategy_source": "Slam - CFB",
+            "strategy_pick_id": "pick-spread-1pt",
+            "strategy_selection": "PITT +3",
+            "strategy_requested_spread_line": "+3",
+            "quote": {
+                "market_type": "spread",
+                "market": "Spread: Virginia Tech (-4)",
+                "requested_outcome": "Pittsburgh",
+                "resolved_outcome": "Pittsburgh",
+            },
+        }
+        source, reason = attribution.attribution_for_execution(rec)
+        self.assertEqual(source, "Slam - CFB")
+        self.assertIn("within_1pt", reason)
+
+    def test_spread_more_than_one_point_variance_moves_to_sh01(self):
+        rec = {
+            "strategy_source": "Slam - CFB",
+            "strategy_pick_id": "pick-spread-15pt",
+            "strategy_selection": "PITT +3",
+            "strategy_requested_spread_line": "+3",
+            "quote": {
+                "market_type": "spread",
+                "market": "Spread: Virginia Tech (-4.5)",
+                "requested_outcome": "Pittsburgh",
+                "resolved_outcome": "Pittsburgh",
+            },
+        }
+        self.assertEqual(attribution.attribution_for_execution(rec)[0], "SH01")
+
+    def test_total_exactly_one_point_variance_keeps_capper_credit(self):
+        rec = {
+            "strategy_source": "Slam - CFB",
+            "strategy_pick_id": "pick-total-1pt",
+            "strategy_selection": "PENN STATE/NORTHWESTERN UNDER 46.5",
+            "strategy_requested_total_line": "46.5",
+            "strategy_executed_total_line": "47.5",
+            "quote": {
+                "market_type": "total",
+                "requested_outcome": "UNDER",
+                "resolved_outcome": "UNDER",
+            },
+        }
+        source, reason = attribution.attribution_for_execution(rec)
+        self.assertEqual(source, "Slam - CFB")
+        self.assertIn("within_1pt", reason)
+
+    def test_changed_total_over_one_point_moves_to_sh01(self):
         rec = {
             "strategy_source": "Slam - CFB",
             "strategy_pick_id": "pick-3",
             "strategy_selection": "PENN STATE/NORTHWESTERN UNDER 46.5",
             "strategy_requested_total_line": "46.5",
-            "strategy_executed_total_line": "51.5",
+            "strategy_executed_total_line": "48",
             "quote": {
                 "market_type": "total",
                 "requested_outcome": "UNDER",
                 "resolved_outcome": "UNDER",
+            },
+        }
+        self.assertEqual(attribution.attribution_for_execution(rec)[0], "SH01")
+
+    def test_total_side_flip_is_sh01_even_with_same_line(self):
+        rec = {
+            "strategy_source": "Slam - CFB",
+            "strategy_pick_id": "pick-side-flip",
+            "strategy_selection": "PENN STATE/NORTHWESTERN UNDER 46.5",
+            "strategy_requested_total_line": "46.5",
+            "strategy_executed_total_line": "46.5",
+            "quote": {
+                "market_type": "total",
+                "requested_outcome": "UNDER",
+                "resolved_outcome": "OVER",
             },
         }
         self.assertEqual(attribution.attribution_for_execution(rec)[0], "SH01")
