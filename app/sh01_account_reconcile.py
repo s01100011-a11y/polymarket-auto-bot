@@ -53,13 +53,28 @@ def _infer_market_type(pos: Any, title: str) -> str:
     return "moneyline"
 
 
+def _current_wallet_positions(wallet: str) -> dict[str, Any]:
+    """Return current holdings only; do not page through the full account history."""
+    positions: dict[str, Any] = {}
+    with metrics.ingest.PublicClient() as client:
+        paginator = client.list_positions(user=wallet, page_size=100)
+        for pos in paginator.iter_items():
+            asset_id = str(getattr(pos, "asset_id", None) or getattr(pos, "token_id", None) or "")
+            if not asset_id:
+                continue
+            if _d(getattr(pos, "current_size", "0")) <= _EPS:
+                continue
+            positions[asset_id] = pos
+    return positions
+
+
 def reconcile(core: Any) -> dict[str, Any]:
     with _LOCK:
         wallet = metrics._wallet_for_reconciliation()
         if not wallet:
             return {"ok": False, "reason": "wallet unavailable"}
         try:
-            positions = metrics._full_wallet_positions(wallet)
+            positions = _current_wallet_positions(wallet)
         except Exception as exc:
             return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
 
@@ -85,11 +100,13 @@ def reconcile(core: Any) -> dict[str, Any]:
 
         stamp = metrics._now_iso()
         changed = imported = 0
+        seen_synthetic: set[str] = set()
         for asset_id, pos in positions.items():
             wallet_size = _d(getattr(pos, "current_size", "0"))
             known = known_by_asset.get(str(asset_id), Decimal("0"))
             unmatched = max(Decimal("0"), wallet_size - known)
             rec_id = "sh01-account-" + hashlib.sha256(str(asset_id).encode("utf-8")).hexdigest()[:18]
+            seen_synthetic.add(rec_id)
             existing = executions.get(rec_id) if isinstance(executions.get(rec_id), dict) else None
 
             if unmatched <= _EPS:
@@ -98,7 +115,7 @@ def reconcile(core: Any) -> dict[str, Any]:
                     existing["remaining_shares"] = "0"
                     existing["closed_at"] = existing.get("closed_at") or stamp
                     existing["wallet_reconciled_at"] = stamp
-                    existing["reconciliation_note"] = "Previously unmatched Polymarket holding is no longer present; realized P/L is unknown without a recorded exit."
+                    existing["reconciliation_note"] = "Previously unmatched Polymarket holding is now fully explained by tracked executions."
                     executions[rec_id] = existing
                     changed += 1
                 continue
@@ -152,6 +169,21 @@ def reconcile(core: Any) -> dict[str, Any]:
             changed += 1
             imported += 1
 
+        # Current-only reconciliation must explicitly close synthetic records whose
+        # asset disappeared from the live Polymarket holdings response.
+        for rec_id, rec in list(executions.items()):
+            if not str(rec_id).startswith("sh01-account-") or not isinstance(rec, dict):
+                continue
+            if rec_id in seen_synthetic or rec.get("status") not in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}:
+                continue
+            rec["status"] = "CLOSED_RECONCILED"
+            rec["remaining_shares"] = "0"
+            rec["closed_at"] = rec.get("closed_at") or stamp
+            rec["wallet_reconciled_at"] = stamp
+            rec["reconciliation_note"] = "Unmatched Polymarket holding is no longer present. Exit price and realized P/L remain unknown unless recorded by the bot."
+            executions[rec_id] = rec
+            changed += 1
+
         if changed:
             core._save(core.EXECUTIONS_FILE, executions)
         return {"ok": True, "positions_checked": len(positions), "imported_or_updated_sh01": imported, "changed": changed}
@@ -159,6 +191,7 @@ def reconcile(core: Any) -> dict[str, Any]:
 
 def start_background(core: Any, interval_seconds: int = 30) -> None:
     def loop() -> None:
+        print("SH01_ACCOUNT_RECONCILE_THREAD_STARTED", flush=True)
         while True:
             try:
                 print(f"SH01_ACCOUNT_RECONCILE {reconcile(core)}", flush=True)
