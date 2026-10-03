@@ -56,4 +56,6 @@ if ! python -m app.cfb_runtime_hotfix; then
   echo "CFB_RUNTIME_HOTFIX_FAILED; continuing with normal startup"
 fi
 
-exec python -m app.totals_remote_launcher
+# Launch the combined dashboard so WNBA totals research and universal
+# capper/SH01 attribution are both active in the same production process.
+exec python -m app.totals_remote_attribution_launcher
