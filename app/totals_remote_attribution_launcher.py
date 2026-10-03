@@ -24,8 +24,11 @@ from app import dashboard_taskbar_v3 as _dashboard_taskbar  # noqa: F401
 from app import dashboard_ufc_v2 as _dashboard_ufc_v2  # noqa: F401
 from app import ufc_fight_timing_v1 as _ufc_fight_timing  # noqa: F401
 from app import ufc_price_stream_v1 as _ufc_price_stream  # noqa: F401
+from app import ufc_fast_path_v1 as _ufc_fast_path  # noqa: F401
 from app import ufc_disabled_fast_action_v1 as _ufc_disabled_fast_action  # noqa: F401
 from app import ufc_position_summary_v1 as _ufc_position_summary  # noqa: F401
+from app import executor_event_labels_v1 as _executor_event_labels  # noqa: F401
+from app import ufc_live_page_v1 as _ufc_live_page  # noqa: F401
 from app import audit_core_sync
 from app import audit_core_sync_schema_patch
 from app import audit_research_store
