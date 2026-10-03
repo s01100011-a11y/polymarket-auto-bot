@@ -12,6 +12,7 @@ from app import sh01_attribution_reconcile_guard_v5 as _sh01_guard  # noqa: F401
 # Keep the full dashboard/executor chain, promote SH01 into the normal sport
 # capper cards, then install the WNBA totals remote bridge on the same app.
 from app import dashboard_sh01_capper_v2 as base
+from app import audit_core_sync
 from app import pw_totals_remote
 
 app = base.app
@@ -19,6 +20,11 @@ app = base.app
 pw_totals_remote.install(
     app=app,
     dashboard=base.dashboard,
+    core=base.core,
+)
+
+audit_core_sync.install(
+    app=app,
     core=base.core,
 )
 
