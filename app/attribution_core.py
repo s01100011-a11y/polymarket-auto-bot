@@ -9,6 +9,7 @@ from app import nfl_capper_ingest as nfl
 from app import universal_position_identity as identity
 
 SH01 = "SH01"
+LINE_TOLERANCE_POINTS = Decimal("1")
 
 
 def _d(value: Any, default: str = "0") -> Decimal:
@@ -16,6 +17,10 @@ def _d(value: Any, default: str = "0") -> Decimal:
         return Decimal(str(value))
     except Exception:
         return Decimal(default)
+
+
+def _within_line_tolerance(requested: Decimal, executed: Decimal) -> bool:
+    return abs(requested - executed) <= LINE_TOLERANCE_POINTS
 
 
 def unit_value_usdc(rec: dict[str, Any]) -> Decimal:
@@ -65,8 +70,10 @@ def attribution_for_execution(rec: dict[str, Any]) -> tuple[str, str]:
         executed = identity.effective_spread(rec)
         if requested is None or executed is None:
             return SH01, "spread_line_unverifiable"
-        if requested != executed:
+        if not _within_line_tolerance(requested, executed):
             return SH01, f"spread_changed:{identity.fmt_signed(requested)}->{identity.fmt_signed(executed)}"
+        if requested != executed:
+            return source, f"spread_within_1pt:{identity.fmt_signed(requested)}->{identity.fmt_signed(executed)}"
         return source, "exact_original_call"
 
     if kind in {"total", "team_total"}:
@@ -74,8 +81,12 @@ def attribution_for_execution(rec: dict[str, Any]) -> tuple[str, str]:
         exe_side, executed = identity.total_identity(rec)
         if requested is None or executed is None:
             return SH01, "total_line_unverifiable"
-        if requested != executed or (req_side and exe_side and req_side != exe_side):
+        if req_side and exe_side and req_side != exe_side:
+            return SH01, "total_side_changed_from_original_call"
+        if not _within_line_tolerance(requested, executed):
             return SH01, "total_changed_from_original_call"
+        if requested != executed:
+            return source, f"total_within_1pt:{requested}->{executed}"
         return source, "exact_original_call"
 
     if kind == "moneyline":
