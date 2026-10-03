@@ -16,6 +16,7 @@ from app import dashboard_sh01_capper_v4 as base
 from app import newest_first_dashboard_v1 as _newest_first  # noqa: F401
 from app import more_stats_capper_sports_v1 as _capper_sport_stats  # noqa: F401
 from app import sh01_visible_position_stats_v1 as _sh01_visible_stats  # noqa: F401
+from app import more_stats_sh01_truth_v1 as _sh01_more_stats_truth  # noqa: F401
 from app import capper_section_toggles_v1 as _capper_section_toggles  # noqa: F401
 from app import basketball_monitor_feed_box_v1 as _basketball_monitor_feed_box  # noqa: F401
 from app import audit_core_sync
