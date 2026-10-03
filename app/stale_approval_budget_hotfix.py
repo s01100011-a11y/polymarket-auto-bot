@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -125,9 +129,67 @@ def _patch_pending_budget_cleanup() -> None:
     print("STALE_APPROVAL_BUDGET_PATCH applied", flush=True)
 
 
+def _release_persisted_stale_approvals() -> None:
+    """Release old approval-only reservations before the web app starts."""
+    data_dir = Path(os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "/app/data"))
+    queue_path = data_dir / "termux_executor_queue.json"
+    if not queue_path.exists():
+        print("STALE_APPROVAL_STARTUP_RELEASE queue_missing", flush=True)
+        return
+
+    try:
+        raw = json.loads(queue_path.read_text(encoding="utf-8") or "{}")
+    except Exception as exc:
+        raise RuntimeError(f"Could not read executor queue for stale approval cleanup: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise RuntimeError("Executor queue is not a JSON object")
+
+    now = time.time()
+    ttl = max(30, int(os.getenv("EXECUTOR_APPROVAL_TTL_SECONDS", str(APPROVAL_TTL_DEFAULT_SECONDS))))
+    expired: list[str] = []
+    stamp = datetime.now(timezone.utc).isoformat()
+
+    for request_id, rec in raw.items():
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("action") not in {"BUY", "COMBO_BUY"}:
+            continue
+        if str(rec.get("status") or "") != "WAITING_APPROVAL":
+            continue
+        try:
+            created = float(rec.get("created_unix") or 0)
+        except (TypeError, ValueError):
+            created = 0
+        if not created or now - created <= ttl:
+            continue
+
+        rec["status"] = "FAILED"
+        rec["expired_at"] = stamp
+        rec["updated_at"] = stamp
+        rec["error"] = (
+            f"BUY approval expired after {ttl}s; no order was submitted and "
+            "reserved daily budget was released"
+        )
+        rec.pop("lease_until_unix", None)
+        raw[request_id] = rec
+        expired.append(str(request_id))
+
+    if expired:
+        tmp = queue_path.with_suffix(queue_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(raw, indent=2, sort_keys=True), encoding="utf-8")
+        tmp.replace(queue_path)
+
+    print(
+        "STALE_APPROVAL_STARTUP_RELEASE "
+        f"expired={len(expired)} ttl={ttl}s ids={','.join(expired) if expired else '-'}",
+        flush=True,
+    )
+
+
 def main() -> None:
     _patch_executor_approval_expiry()
     _patch_pending_budget_cleanup()
+    _release_persisted_stale_approvals()
 
 
 if __name__ == "__main__":
