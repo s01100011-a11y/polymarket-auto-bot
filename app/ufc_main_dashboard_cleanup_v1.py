@@ -19,6 +19,7 @@ if "ufc-main-dashboard-cleanup-v1" not in html:
         "ufc-price-stream-v1",
         "ufc-disabled-fast-action-v1",
         "ufc-position-summary-v1",
+        "ufc-live-page-link-v1",
     ):
         html = re.sub(
             rf'<script\s+id=["\']{re.escape(script_id)}["\'][^>]*>.*?</script>',
@@ -55,23 +56,43 @@ if "ufc-main-dashboard-cleanup-v1" not in html:
 '''
             html = html[:start] + stats_panel + html[script_end:]
 
-    # Lightweight UFC taskbar entry. This replaces the taskbar creation that
-    # previously lived inside the heavy UFC frontend bundle.
+    # Lightweight UFC taskbar entry. Keep UFC directly below NBA on the main
+    # dashboard and make the taskbar button jump to this stats panel. The fast
+    # /ufc-live page remains available through OPEN UFC LIVE inside the panel.
     task_js = r'''
 <script id="ufc-main-dashboard-cleanup-v1">
 (function(){
+ function placePanel(){
+  const panel=document.getElementById('ufcAutoTradingPanel');
+  const nba=document.getElementById('nbaAutoTradingPanel');
+  if(panel&&nba&&panel.previousElementSibling!==nba)nba.insertAdjacentElement('afterend',panel);
+ }
+ function jumpToUfc(btn){
+  const panel=document.getElementById('ufcAutoTradingPanel');if(!panel)return;
+  const bar=document.getElementById('s01807TaskbarV1');
+  if(bar)bar.querySelectorAll('button[data-jump]').forEach(x=>x.classList.toggle('active',x===btn));
+  const offset=(bar?.offsetHeight||0)+7;
+  const y=Math.max(0,panel.getBoundingClientRect().top+window.scrollY-offset);
+  window.scrollTo({top:y,behavior:'smooth'});
+ }
  function install(){
+  placePanel();
   const bar=document.getElementById('s01807TaskbarV1');if(!bar)return;
-  if(bar.querySelector('button[data-jump="ufc"]'))return;
-  const rows=bar.querySelectorAll('.s01807-taskbar-row'),row=rows[1];if(!row)return;
-  row.classList.add('ufc-five');
-  const b=document.createElement('button');
-  b.type='button';b.dataset.jump='ufc';b.className='ufc-task-btn';b.title='Open UFC Live';
-  b.innerHTML='<span class="app-icon">🥊</span>UFC';
-  b.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();location.href='/ufc-live'},true);
-  const other=row.querySelector('[data-jump="other"]');other?row.insertBefore(b,other):row.appendChild(b);
+  let b=bar.querySelector('button[data-jump="ufc"]');
+  if(!b){
+   const rows=bar.querySelectorAll('.s01807-taskbar-row'),row=rows[1];if(!row)return;
+   row.classList.add('ufc-five');
+   b=document.createElement('button');
+   b.type='button';b.dataset.jump='ufc';b.className='ufc-task-btn';
+   b.innerHTML='<span class="app-icon">🥊</span>UFC';
+   const other=row.querySelector('[data-jump="other"]');other?row.insertBefore(b,other):row.appendChild(b);
+  }
+  b.title='UFC stats on main dashboard';
+  b.onclick=null;
+  b.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();jumpToUfc(b)},true);
  }
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);else install();
+ window.addEventListener('load',placePanel,{once:true});
 })();
 </script>
 '''
