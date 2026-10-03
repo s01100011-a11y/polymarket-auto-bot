@@ -8,6 +8,14 @@ TS_PROXY_ADDR="${TS_PROXY_ADDR:-127.0.0.1:1055}"
 
 mkdir -p "$(dirname "$TS_SOCKET")" "$TS_STATE_DIR"
 
+# Apply the stale-approval cleanup from inside the normal startup script.
+# Railway's custom start command is kept as this shell script so startup can
+# continue normally after the cleanup and reach the dashboard healthcheck.
+if ! python -m app.stale_approval_budget_hotfix; then
+  echo "STALE_APPROVAL_BUDGET_HOTFIX_FAILED"
+  exit 1
+fi
+
 echo "TAILSCALE_START userspace=true proxy=$TS_PROXY_ADDR state=$TS_STATE_DIR"
 tailscaled \
   --tun=userspace-networking \
