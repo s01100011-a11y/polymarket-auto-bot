@@ -12,6 +12,8 @@ from app import universal_position_identity as identity
 
 _EPS = Decimal("0.0001")
 _LOCK = threading.Lock()
+_ACTIVE = {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}
+_SETTLED = {"SETTLED_WIN", "SETTLED_LOSS", "SETTLED_PUSH"}
 
 
 def _d(value: Any, default: str = "0") -> Decimal:
@@ -54,7 +56,7 @@ def _infer_market_type(pos: Any, title: str) -> str:
 
 
 def _current_wallet_positions(wallet: str) -> dict[str, Any]:
-    """Return current holdings only; do not page through the full account history."""
+    """Return current wallet holdings only, not the full historical position archive."""
     positions: dict[str, Any] = {}
     with metrics.ingest.PublicClient() as client:
         paginator = client.list_positions(user=wallet, page_size=100)
@@ -89,7 +91,7 @@ def reconcile(core: Any) -> dict[str, Any]:
                 continue
             if str(rec.get("source") or "") == "polymarket_account_reconcile":
                 continue
-            if str(rec.get("status") or "") not in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}:
+            if str(rec.get("status") or "") not in _ACTIVE:
                 continue
             quote = rec.get("quote") or {}
             asset_id = str(quote.get("asset_id") or "")
@@ -99,7 +101,7 @@ def reconcile(core: Any) -> dict[str, Any]:
             known_by_asset[asset_id] = known_by_asset.get(asset_id, Decimal("0")) + max(shares, Decimal("0"))
 
         stamp = metrics._now_iso()
-        changed = imported = 0
+        changed = imported = preserved_settled = 0
         seen_synthetic: set[str] = set()
         for asset_id, pos in positions.items():
             wallet_size = _d(getattr(pos, "current_size", "0"))
@@ -110,7 +112,7 @@ def reconcile(core: Any) -> dict[str, Any]:
             existing = executions.get(rec_id) if isinstance(executions.get(rec_id), dict) else None
 
             if unmatched <= _EPS:
-                if existing and existing.get("status") in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}:
+                if existing and existing.get("status") in _ACTIVE:
                     existing["status"] = "CLOSED_RECONCILED"
                     existing["remaining_shares"] = "0"
                     existing["closed_at"] = existing.get("closed_at") or stamp
@@ -118,6 +120,17 @@ def reconcile(core: Any) -> dict[str, Any]:
                     existing["reconciliation_note"] = "Previously unmatched Polymarket holding is now fully explained by tracked executions."
                     executions[rec_id] = existing
                     changed += 1
+                continue
+
+            # Resolved positions can remain visible in the wallet until redemption.
+            # Once the normal settlement engine has graded a synthetic SH01 record,
+            # never reopen it merely because those terminal CTF shares still exist.
+            if existing and str(existing.get("status") or "") in _SETTLED:
+                existing["wallet_reconciled_at"] = stamp
+                existing["wallet_position_size"] = str(wallet_size)
+                existing["account_reconcile_note"] = "Resolved unmatched account position remains attributed to SH01; terminal settlement is preserved until redemption."
+                executions[rec_id] = existing
+                preserved_settled += 1
                 continue
 
             avg_price = _d(getattr(pos, "avg_price", "0"))
@@ -169,12 +182,12 @@ def reconcile(core: Any) -> dict[str, Any]:
             changed += 1
             imported += 1
 
-        # Current-only reconciliation must explicitly close synthetic records whose
-        # asset disappeared from the live Polymarket holdings response.
+        # Current-only reconciliation explicitly closes synthetic live records whose
+        # asset disappears from the wallet response. Already-settled records stay graded.
         for rec_id, rec in list(executions.items()):
             if not str(rec_id).startswith("sh01-account-") or not isinstance(rec, dict):
                 continue
-            if rec_id in seen_synthetic or rec.get("status") not in {"ORDER_SUBMITTED", "PARTIALLY_CLOSED"}:
+            if rec_id in seen_synthetic or rec.get("status") not in _ACTIVE:
                 continue
             rec["status"] = "CLOSED_RECONCILED"
             rec["remaining_shares"] = "0"
@@ -184,9 +197,15 @@ def reconcile(core: Any) -> dict[str, Any]:
             executions[rec_id] = rec
             changed += 1
 
-        if changed:
+        if changed or preserved_settled:
             core._save(core.EXECUTIONS_FILE, executions)
-        return {"ok": True, "positions_checked": len(positions), "imported_or_updated_sh01": imported, "changed": changed}
+        return {
+            "ok": True,
+            "positions_checked": len(positions),
+            "imported_or_updated_sh01": imported,
+            "preserved_settled_sh01": preserved_settled,
+            "changed": changed,
+        }
 
 
 def start_background(core: Any, interval_seconds: int = 30) -> None:
