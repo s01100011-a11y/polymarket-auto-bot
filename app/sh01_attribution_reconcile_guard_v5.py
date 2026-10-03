@@ -12,19 +12,34 @@ _ORIGINAL_CLEANUP = v4._cleanup_historical_synthetics
 
 
 def _preprocess_v5(executions: dict[str, Any]) -> int:
-    """Normalize legacy synthetic total rows before universal identity repair."""
+    """Normalize legacy synthetic rows and keep account observations out of performance stats.
+
+    Polymarket account reconciliation creates synthetic SH01 rows so the dashboard can
+    still show wallet positions that were not created by a tracked bot execution. Those
+    rows are observations of the wallet, not proof that SH01 placed a bet, so they must
+    not change SH01 bet count, W-L-P, ROI, realized P/L, or unit P/L.
+    """
     changed = _ORIGINAL_PREPROCESS(executions)
     for key, rec in executions.items():
         if not isinstance(rec, dict) or not v4._is_synthetic(rec):
             continue
+
+        if rec.get("performance_excluded") is not True:
+            rec["performance_excluded"] = True
+            changed += 1
+        if rec.get("performance_excluded_reason") != "account_reconcile_observation_not_tracked_execution":
+            rec["performance_excluded_reason"] = "account_reconcile_observation_not_tracked_execution"
+            changed += 1
+
         quote = rec.get("quote") if isinstance(rec.get("quote"), dict) else {}
         market = str(quote.get("market") or "")
         low = market.casefold()
         if ("o/u" in low or "over/under" in low) and str(quote.get("market_type") or "").casefold() != "total":
             quote["market_type"] = "total"
             rec["quote"] = quote
-            executions[key] = rec
             changed += 1
+
+        executions[key] = rec
     return changed
 
 
@@ -38,7 +53,8 @@ def _cleanup_v5(
     The v4 cleanup reduced oversized synthetic rows, but an already-reduced row could
     still retain the cost basis of the *full* wallet position. Reprice every partial
     residual against its own residual shares when a reliable average entry price is
-    present.
+    present. These rows remain visible as account observations but stay excluded from
+    performance statistics.
     """
     changed = _ORIGINAL_CLEANUP(executions, known, stamp)
     for key, rec in executions.items():
@@ -77,3 +93,46 @@ def _cleanup_v5(
 # tight patch upgrades both startup repair and the recurring wallet watcher.
 v4._preprocess_legacy_records = _preprocess_v5
 v4._cleanup_historical_synthetics = _cleanup_v5
+
+
+# Keep synthetic account observations visible in SH01 position/history displays, but
+# exclude them from every performance aggregation. A synthetic account row can prove
+# that shares existed in the wallet; it cannot prove SH01 originated the wager.
+_ORIGINAL_STATS = v4.nfl._stats_from_executions
+_ORIGINAL_UNIT_SUMMARY = v4.attribution.unit_summary
+_ORIGINAL_LEGACY_IDENTITY = v4.metrics._legacy_monitor_identity
+
+
+def _performance_execs(executions: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: rec
+        for key, rec in executions.items()
+        if not (isinstance(rec, dict) and rec.get("performance_excluded"))
+    }
+
+
+def _stats_without_account_observations(executions: dict[str, Any], *args: Any, **kwargs: Any):
+    return _ORIGINAL_STATS(_performance_execs(executions), *args, **kwargs)
+
+
+def _unit_summary_without_account_observations(
+    records: list[dict[str, Any]],
+    marks: dict[str, dict[str, Any]],
+    **kwargs: Any,
+):
+    clean = [
+        rec for rec in records
+        if not (isinstance(rec, dict) and rec.get("performance_excluded"))
+    ]
+    return _ORIGINAL_UNIT_SUMMARY(clean, marks, **kwargs)
+
+
+def _identity_without_account_observations(rec: dict[str, Any]):
+    if isinstance(rec, dict) and rec.get("performance_excluded"):
+        return None, None
+    return _ORIGINAL_LEGACY_IDENTITY(rec)
+
+
+v4.nfl._stats_from_executions = _stats_without_account_observations
+v4.attribution.unit_summary = _unit_summary_without_account_observations
+v4.metrics._legacy_monitor_identity = _identity_without_account_observations
