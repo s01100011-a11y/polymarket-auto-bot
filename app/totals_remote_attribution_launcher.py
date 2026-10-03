@@ -19,7 +19,7 @@ from app import sh01_visible_position_stats_v1 as _sh01_visible_stats  # noqa: F
 from app import more_stats_sh01_truth_v1 as _sh01_more_stats_truth  # noqa: F401
 from app import capper_section_toggles_v1 as _capper_section_toggles  # noqa: F401
 from app import basketball_monitor_feed_box_v1 as _basketball_monitor_feed_box  # noqa: F401
-from app import dashboard_taskbar_v1 as _dashboard_taskbar  # noqa: F401
+from app import dashboard_taskbar_v2 as _dashboard_taskbar  # noqa: F401
 from app import audit_core_sync
 from app import pw_totals_remote
 
