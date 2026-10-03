@@ -46,6 +46,7 @@
   return out;
  }
  function matchesFight(pos,fight){
+  if(pos&&pos.fight_id&&fight.dataset.fightId&&String(pos.fight_id)===String(fight.dataset.fightId))return true;
   const hay=norm([pos.selection,pos.outcome,pos.exact_position,pos.market,pos.event_title].join(' '));
   if(!hay)return false;
   return fighterAliases(fight).some(a=>a.full&&hay.includes(a.full)||(a.last&&a.last.length>=4&&hay.includes(a.last)));
@@ -57,7 +58,22 @@
   const shares=pos.shares==null||pos.shares===''?'—':Number(pos.shares).toFixed(2);
   return '<div class="ufc-live-position-row"><b>'+bet.replace(/[&<>]/g,'')+'</b> · '+units(pos.units)+' · Stake '+money(stake,false)+' · Odds '+oddsFromPrice(pos.entry_price)+' · Shares '+shares+' · P/L <span class="'+cls(pnl)+'">'+money(pnl,true)+'</span></div>';
  }
- function render(data,sizing){
+ function renderPending(pos){
+  const bet=String(pos.selection||pos.outcome||'UFC position');
+  const status=String(pos.status||'PENDING').replace(/_/g,' ');
+  const shares='PENDING';
+  const pnl='PENDING';
+  return '<div class="ufc-live-position-row pending"><b>PENDING · '+bet.replace(/[&<>]/g,'')+'</b> · '+units(pos.units)+' · Stake '+money(pos.stake_usdc,false)+' · Odds '+oddsFromPrice(pos.entry_price)+' · Shares '+shares+' · P/L '+pnl+' · '+status+'</div>';
+ }
+ function samePosition(open,pending){
+  const op=String(open.strategy_pick_id||'');
+  const pp=String(pending.strategy_pick_id||'');
+  if(op&&pp&&op===pp)return true;
+  const a=norm(open.exact_position||open.selection||open.outcome||'');
+  const b=norm(pending.selection||pending.outcome||'');
+  return !!a&&!!b&&(a.includes(b)||b.includes(a));
+ }
+ function render(data,sizing,pendingData){
   const sport=((data||{}).sports||{}).UFC||{};
   const unit=n((sizing||{}).unit_usdc);
   lastUnit=unit;
@@ -68,26 +84,29 @@
   }
   const all=Array.isArray(sport.positions)?sport.positions:[];
   const open=all.filter(p=>p&&p.sell_available);
+  const pending=Array.isArray((pendingData||{}).rows)?pendingData.rows:[];
   document.querySelectorAll('#ufcAutoTradingPanel .ufc-fight').forEach(fight=>{
    const uv=ensureFightUnit(fight);if(uv)uv.textContent='UNIT VALUE · 1U = '+money(unit,false);
    const host=ensureLiveHost(fight);if(!host)return;
-   const rows=open.filter(p=>matchesFight(p,fight));
-   host.innerHTML=rows.map(renderPosition).join('');
+   const openRows=open.filter(p=>matchesFight(p,fight));
+   const pendingRows=pending.filter(p=>matchesFight(p,fight)&&!openRows.some(o=>samePosition(o,p)));
+   host.innerHTML=pendingRows.map(renderPending).join('')+openRows.map(renderPosition).join('');
   });
  }
  async function refresh(){
   if(busy||document.visibilityState!=='visible'||!nearPanel())return;
   busy=true;
   try{
-   const [pr,sr]=await Promise.all([
+   const [pr,sr,qr]=await Promise.all([
     fetch('/api/dashboard/sh01-cappers',{cache:'no-store'}),
-    fetch('/api/dashboard/ufc-sh01-sizing',{cache:'no-store'})
+    fetch('/api/dashboard/ufc-sh01-sizing',{cache:'no-store'}),
+    fetch('/api/dashboard/ufc-pending-positions',{cache:'no-store'})
    ]);
-   const [p,s]=await Promise.all([pr.json(),sr.json()]);
-   if(pr.ok&&sr.ok)render(p,s);
+   const [p,s,q]=await Promise.all([pr.json(),sr.json(),qr.json()]);
+   if(pr.ok&&sr.ok&&qr.ok)render(p,s,q);
   }catch(e){}finally{busy=false}
  }
- function loop(){refresh().finally(()=>setTimeout(loop,nearPanel()?2500:5000))}
- function mount(){ensureSummary();refresh();setTimeout(loop,2500)}
+ function loop(){refresh().finally(()=>setTimeout(loop,nearPanel()?1500:5000))}
+ function mount(){ensureSummary();refresh();setTimeout(loop,1500)}
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount,{once:true});else mount();
 })();
