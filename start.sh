@@ -58,6 +58,6 @@ if ! python -m app.cfb_runtime_hotfix; then
   echo "CFB_RUNTIME_HOTFIX_FAILED; continuing with normal startup"
 fi
 
-# Start the composite app with CFB live alternatives, approvals/cancel controls,
-# and exact executed-line metadata for manual CFB alternate positions.
-exec python -m app.cfb_exact_position_fix
+# Start the composite app with CFB live alternatives, approval/cancel controls,
+# persisted exact lines, and spread signs derived from the purchased outcome.
+exec python -m app.cfb_exact_position_fix_v2
