@@ -18,10 +18,39 @@ def _patch_poller_scope() -> None:
         raise RuntimeError("CFB poller scope patch anchor not found")
 
 
+def _patch_immediate_signal_persistence() -> None:
+    """Persist each CFB signal update before later rows can abort the poll cycle.
+
+    The CFB worker historically saved the full signal dictionary only after every
+    bridge pick had been processed.  A later exception could therefore discard an
+    earlier successfully matched signal even though its CFB_CAPPER_* log line had
+    already been emitted.  Save immediately after each per-pick state mutation so
+    the dashboard reflects what the worker has actually processed.
+    """
+    path = Path(__file__).with_name("cfb_capper_preview.py")
+    source = path.read_text(encoding="utf-8")
+    needle = '                signals[fp] = record\n                changed = True\n'
+    replacement = (
+        '                signals[fp] = record\n'
+        '                changed = True\n'
+        '                _save_signals(signals)\n'
+    )
+    already = '                changed = True\n                _save_signals(signals)\n'
+    if already in source:
+        print("CFB_RUNTIME_IMMEDIATE_SAVE_PATCH already_present", flush=True)
+        return
+    count = source.count(needle)
+    if count < 1:
+        raise RuntimeError("CFB immediate-save patch anchor not found")
+    path.write_text(source.replace(needle, replacement), encoding="utf-8")
+    print(f"CFB_RUNTIME_IMMEDIATE_SAVE_PATCH applied replacements={count}", flush=True)
+
+
 def main() -> None:
     _patch_poller_scope()
+    _patch_immediate_signal_persistence()
 
-    # Import after the source repair so the module compiles with the fixed poller.
+    # Import after the source repairs so the module compiles with the fixed poller.
     from app import cfb_live_options_bootstrap as boot
 
     cfb = boot.cfb
