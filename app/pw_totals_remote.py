@@ -17,6 +17,7 @@ _INSTALLED = False
 _BOOT_THREAD: threading.Thread | None = None
 DEFAULT_THRESHOLDS = (4.0, 6.0, 8.0, 10.0, 12.0)
 DEFAULT_MIN_DECIMAL_ODDS = 1.70
+MIN_ENRICHMENT_COVERAGE = 0.80
 
 
 def _finite_float(value: Any) -> float | None:
@@ -29,14 +30,16 @@ def _finite_float(value: Any) -> float | None:
 
 def _american_to_decimal(value: Any) -> float | None:
     try:
-        odds = int(float(str(value).replace("+", "")))
+        n = float(str(value).replace("+", ""))
     except (TypeError, ValueError):
         return None
-    if odds == 0:
+    if not math.isfinite(n) or n == 0:
         return None
-    if odds > 0:
-        return 1.0 + odds / 100.0
-    return 1.0 + 100.0 / abs(odds)
+    if 1.01 <= n <= 10.0:
+        return n
+    if n > 0:
+        return 1.0 + n / 100.0
+    return 1.0 + 100.0 / abs(n)
 
 
 def _parse_ts(value: Any) -> datetime:
@@ -57,6 +60,23 @@ def _same_monitor_url(export_url: str, path: str) -> str:
     if parsed.scheme.lower() != "https" or not parsed.hostname:
         raise RuntimeError("PW_WNBA_EXPORT_URL must be a valid https URL")
     return urlunsplit((parsed.scheme, parsed.netloc, "/" + path.lstrip("/"), "", ""))
+
+
+def _enrichment_status(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    enriched = [
+        row
+        for row in rows
+        if _finite_float(row.get("pace_edge_vs_live_total")) is not None
+        and str(row.get("over_result") or "").upper() in {"W", "L", "P"}
+        and _american_to_decimal(row.get("total_over_price")) is not None
+    ]
+    coverage = len(enriched) / len(rows) if rows else 0.0
+    return {
+        "rows": len(rows),
+        "enriched_rows": len(enriched),
+        "coverage_pct": round(coverage * 100.0, 2),
+        "sufficient": coverage >= MIN_ENRICHMENT_COVERAGE,
+    }
 
 
 def _candidate_bets(rows: list[dict[str, Any]], threshold: float, min_decimal_odds: float | None, first_per_game: bool = True) -> list[dict[str, Any]]:
@@ -198,7 +218,20 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
 
     def run_test(thresholds: tuple[float, ...], min_decimal_odds: float, first_per_game: bool, start_date: str | None = None, end_date: str | None = None) -> dict[str, Any]:
         rows, route = fetch_all_calls(start_date, end_date)
+        enrichment = _enrichment_status(rows)
+        if not enrichment["sufficient"]:
+            result = {
+                "status": "insufficient_enrichment",
+                "message": "Call-level totals cache is incomplete; exact staking results are intentionally blocked.",
+                "enrichment": enrichment,
+                "route": route,
+                "source_endpoint": "/api/research/totals/calls?league=wnba",
+            }
+            core._save(result_file, result)
+            return result
         result = analyze_to_win_one(rows, thresholds, min_decimal_odds, first_per_game)
+        result["status"] = "ok"
+        result["enrichment"] = enrichment
         result["route"] = route
         result["source_endpoint"] = "/api/research/totals/calls?league=wnba"
         core._save(result_file, result)
@@ -230,6 +263,9 @@ def install(*, app: Any, dashboard: Any, core: Any) -> None:
         time.sleep(10.0)
         try:
             result = run_test(DEFAULT_THRESHOLDS, DEFAULT_MIN_DECIMAL_ODDS, True)
+            if result.get("status") != "ok":
+                print("PW_TOTALS_REMOTE_TEST_BLOCKED " + json.dumps(result, separators=(",", ":")), flush=True)
+                return
             compact = {key: value.get("summary", {}) for key, value in (result.get("thresholds") or {}).items()}
             print("PW_TOTALS_REMOTE_TEST_OK " + json.dumps({"source_rows": result.get("source_rows"), "min_decimal_odds": result.get("min_decimal_odds"), "thresholds": compact}, separators=(",", ":")), flush=True)
         except Exception as exc:
