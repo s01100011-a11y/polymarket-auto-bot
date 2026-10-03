@@ -52,6 +52,6 @@ fi
 echo "TAILSCALE_READY"
 tailscale --socket="$TS_SOCKET" ip -4 || true
 
-# Start the API immediately. The in-app PW export poller performs ongoing
-# Tailnet/feed health checks after /health is available to Railway.
-exec uvicorn app.wnba_pw_research_v13:app --host 0.0.0.0 --port "${PORT:-8080}"
+# Start the normal composite app with the CFB live-options resolver patched
+# before FastAPI lifespan/background polling begins.
+exec python -m app.cfb_live_options_bootstrap
