@@ -21,6 +21,7 @@ from app import more_stats_sh01_truth_v1 as _sh01_more_stats_truth  # noqa: F401
 from app import capper_section_toggles_v1 as _capper_section_toggles  # noqa: F401
 from app import basketball_monitor_feed_box_v1 as _basketball_monitor_feed_box  # noqa: F401
 from app import dashboard_taskbar_v3 as _dashboard_taskbar  # noqa: F401
+from app import dashboard_ufc_v2 as _dashboard_ufc_v2  # noqa: F401
 from app import audit_core_sync
 from app import audit_core_sync_schema_patch
 from app import audit_research_store
