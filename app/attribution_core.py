@@ -24,13 +24,7 @@ def _within_line_tolerance(requested: Decimal, executed: Decimal) -> bool:
 
 
 def unit_value_usdc(rec: dict[str, Any]) -> Decimal:
-    """Recover the value of 1u at bet time without depending on risk/stake size.
-
-    Primary source is the unit snapshot persisted by the executor. Older records
-    can recover it from target profit / called units, or from the binary entry
-    economics for TO_WIN sizing. This keeps unit P/L comparable when the dollar
-    stake or portfolio percentage changes over time.
-    """
+    """Recover the value of 1u at bet time without depending on risk/stake size."""
     direct = _d(rec.get("strategy_unit_usdc"))
     if direct > 0:
         return direct
@@ -49,15 +43,27 @@ def unit_value_usdc(rec: dict[str, Any]) -> Decimal:
             potential_profit = stake * (Decimal("1") - entry) / entry
             if potential_profit > 0:
                 return potential_profit / units
-        # Last-resort historical fallback when only a flat-risk record survives.
         if mode in {"RISK", "FLAT", "STAKE", ""}:
             return stake / units
     return Decimal("0")
 
 
+def _original_source(rec: dict[str, Any]) -> str:
+    """Return the capper/monitor identity before an SH01 hard move."""
+    original = str(rec.get("original_strategy_source") or "").strip()
+    current = str(rec.get("strategy_source") or "").strip()
+    return original or current
+
+
 def attribution_for_execution(rec: dict[str, Any]) -> tuple[str, str]:
-    source = str(rec.get("strategy_source") or "").strip()
-    if source.upper() == SH01 or str(rec.get("source") or "") == "polymarket_account_reconcile":
+    # Synthetic wallet/account records are always SH01 and have no linked call.
+    if str(rec.get("source") or "") == "polymarket_account_reconcile":
+        return SH01, "manual_or_account"
+
+    current_source = str(rec.get("strategy_source") or "").strip()
+    source = _original_source(rec)
+    # A genuine SH01 trade with no historical capper identity remains SH01.
+    if current_source.upper() == SH01 and not str(rec.get("original_strategy_source") or "").strip():
         return SH01, "manual_or_account"
 
     link_id = str(rec.get("strategy_pick_id") or rec.get("slack_event_id") or "").strip()
@@ -96,6 +102,12 @@ def attribution_for_execution(rec: dict[str, Any]) -> tuple[str, str]:
 
 
 def repair_records(core: Any) -> dict[str, int]:
+    """Persist canonical identity and hard-move nonmatching trades to SH01.
+
+    original_strategy_source is retained for audit/re-evaluation. That means a
+    later correction to the exact executed line can restore the original capper
+    automatically if it falls inside the allowed tolerance.
+    """
     executions = core._load(core.EXECUTIONS_FILE)
     if not isinstance(executions, dict):
         return {"checked": 0, "changed": 0}
@@ -114,16 +126,29 @@ def repair_records(core: Any) -> dict[str, int]:
             if str(rec.get("strategy_executed_spread_line") or "") != signed:
                 rec["strategy_executed_spread_line"] = signed
                 changed += 1
+
         source, reason = attribution_for_execution(rec)
+        current_source = str(rec.get("strategy_source") or "").strip()
+        if source == SH01:
+            if current_source and current_source.upper() != SH01 and not rec.get("original_strategy_source"):
+                rec["original_strategy_source"] = current_source
+                changed += 1
+            if current_source.upper() != SH01:
+                rec["strategy_source"] = SH01
+                changed += 1
+        else:
+            # Restore the original capper/monitor if a corrected record now matches.
+            if current_source != source:
+                rec["strategy_source"] = source
+                changed += 1
+
         if rec.get("attribution_source") != source:
             rec["attribution_source"] = source
             changed += 1
         if rec.get("attribution_reason") != reason:
             rec["attribution_reason"] = reason
             changed += 1
-        if source == SH01 and rec.get("original_strategy_source") is None and rec.get("strategy_source"):
-            rec["original_strategy_source"] = rec.get("strategy_source")
-            changed += 1
+
         unit_value = unit_value_usdc(rec)
         if unit_value > 0 and _d(rec.get("stats_unit_value_usdc")) != unit_value:
             rec["stats_unit_value_usdc"] = str(unit_value)
@@ -134,10 +159,56 @@ def repair_records(core: Any) -> dict[str, int]:
     return {"checked": checked, "changed": changed}
 
 
+def _signal_unit_basis(record: dict[str, Any], pick: dict[str, Any], historical_default_unit: Decimal) -> tuple[Decimal, Decimal, Decimal]:
+    """Return call-time 1u dollars, target profit, and risk for a missed signal."""
+    record_unit = Decimal("0")
+    for key in ("unit_usdc_at_call", "unit_usdc"):
+        try:
+            candidate = Decimal(str(record.get(key)))
+            if candidate > 0:
+                record_unit = candidate
+                break
+        except Exception:
+            pass
+    if record_unit <= 0:
+        record_unit = historical_default_unit
+
+    target_profit = Decimal("0")
+    for key in ("target_profit_usdc_at_call", "target_profit_usdc"):
+        try:
+            candidate = Decimal(str(record.get(key)))
+            if candidate > 0:
+                target_profit = candidate
+                break
+        except Exception:
+            pass
+    if target_profit <= 0:
+        target_profit = nfl._target_profit_for_pick(pick, record_unit)
+
+    stake = Decimal("0")
+    try:
+        candidate = Decimal(str(record.get("stake_usdc_at_call")))
+        if candidate > 0:
+            stake = candidate
+    except Exception:
+        pass
+    if stake <= 0 and str(record.get("sizing_mode") or "").upper() == "TO_WIN":
+        try:
+            candidate = Decimal(str(record.get("stake_usdc")))
+            if candidate > 0:
+                stake = candidate
+        except Exception:
+            pass
+    if stake <= 0:
+        stake = nfl._stake_for_pick(pick, record_unit)
+    return record_unit, target_profit, stake
+
+
 def install_stats_attribution(core: Any) -> None:
     if getattr(nfl, "_sh01_stats_patch", False):
         return
     original = nfl._stats_from_executions
+    original_missed = nfl._missed_signal_stats
 
     def patched(executions: dict[str, Any], *, labels: tuple[str, ...] = nfl.SOURCE_LABELS, sport: str = "NFL", live_marks: dict[str, dict[str, Any]] | None = None):
         transformed: dict[str, Any] = {}
@@ -190,14 +261,96 @@ def install_stats_attribution(core: Any) -> None:
             row["unit_pnl_coverage_bets"] = coverage
         return result
 
+    def patched_missed(
+        signals: dict[str, Any],
+        executions: dict[str, Any],
+        *,
+        labels: tuple[str, ...] = nfl.SOURCE_LABELS,
+        sport: str = "NFL",
+        unit_usdc: Decimal = Decimal("10"),
+        unit_usdc_by_label: dict[str, Decimal] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        # A linked execution that was moved to SH01 did NOT execute the capper's
+        # original call, so it must remain a missed call for capper audit stats.
+        transformed: dict[str, Any] = {}
+        for key, rec in executions.items():
+            if not isinstance(rec, dict):
+                transformed[key] = rec
+                continue
+            clone = dict(rec)
+            attributed = str(rec.get("attribution_source") or attribution_for_execution(rec)[0])
+            if attributed.upper() == SH01:
+                clone["strategy_pick_id"] = None
+                clone["slack_event_id"] = None
+            transformed[key] = clone
+
+        result = original_missed(
+            signals,
+            transformed,
+            labels=labels,
+            sport=sport,
+            unit_usdc=unit_usdc,
+            unit_usdc_by_label=unit_usdc_by_label,
+        )
+
+        traded_signal_ids: set[str] = set()
+        for rec in transformed.values():
+            if not isinstance(rec, dict) or rec.get("parent_trade_id") or bool(rec.get("paper")):
+                continue
+            record_sport = str(rec.get("strategy_sport") or "").upper()
+            if sport and record_sport and record_sport != str(sport).upper():
+                continue
+            signal_id = str(rec.get("strategy_pick_id") or "")
+            if signal_id:
+                traded_signal_ids.add(signal_id)
+
+        historical_default_unit = Decimal(str(unit_usdc))
+        for label in labels:
+            missed_units = Decimal("0")
+            missed_units_called = Decimal("0")
+            for record in signals.values():
+                if not isinstance(record, dict) or record.get("source") != label:
+                    continue
+                signal_id = str(record.get("id") or "")
+                if signal_id and signal_id in traded_signal_ids:
+                    continue
+                result_name = str(record.get("pick_result") or "").upper()
+                if result_name not in {"WIN", "LOSS", "PUSH"}:
+                    continue
+                pick = record.get("pick") if isinstance(record.get("pick"), dict) else {}
+                try:
+                    called_units = Decimal(str(pick.get("units") if pick.get("units") is not None else record.get("units") or "1"))
+                except Exception:
+                    called_units = Decimal("1")
+                if called_units <= 0:
+                    called_units = Decimal("1")
+                missed_units_called += called_units
+                try:
+                    call_unit, target_profit, stake = _signal_unit_basis(record, pick, historical_default_unit)
+                except Exception:
+                    continue
+                if call_unit <= 0:
+                    continue
+                if result_name == "WIN":
+                    missed_units += target_profit / call_unit
+                elif result_name == "LOSS":
+                    missed_units -= stake / call_unit
+            row = result.setdefault(label, {})
+            row["missed_pnl_units"] = str(missed_units.quantize(Decimal("0.01")))
+            row["missed_units_called"] = str(missed_units_called.quantize(Decimal("0.01")))
+        return result
+
     nfl._stats_from_executions = patched
+    nfl._missed_signal_stats = patched_missed
     nfl._sh01_stats_patch = True
 
     original_identity = metrics._legacy_monitor_identity
+
     def attributed_identity(rec: dict[str, Any]) -> tuple[str, str]:
         source, sport = original_identity(rec)
         attr = str(rec.get("attribution_source") or "").strip()
         return (attr or attribution_for_execution(rec)[0], sport)
+
     metrics._legacy_monitor_identity = attributed_identity
 
 
