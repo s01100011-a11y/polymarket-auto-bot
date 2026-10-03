@@ -5,6 +5,14 @@ from app import dashboard_taskbar_v2 as base
 dashboard = base.dashboard
 
 html = dashboard.DASHBOARD_HTML
+# The main Current watches & trades window is global. Pull the full recent
+# executor window so a burst of UFC activity cannot hide NFL/CFB/NBA/WNBA/etc.
+html = html.replace("/api/executor/recent-actions?limit=12", "/api/executor/recent-actions?limit=50")
+html = html.replace(
+    "Recent BUY/SELL confirmations and failures",
+    "Recent BUY/SELL confirmations and failures across all sports",
+    1,
+)
 if "s01807TaskbarV3" not in html:
     css = r'''
 /* s01807TaskbarV3 */
