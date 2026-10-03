@@ -29,6 +29,7 @@ from app import ufc_disabled_fast_action_v1 as _ufc_disabled_fast_action  # noqa
 from app import ufc_position_summary_v1 as _ufc_position_summary  # noqa: F401
 from app import executor_event_labels_v1 as _executor_event_labels  # noqa: F401
 from app import ufc_live_page_v1 as _ufc_live_page  # noqa: F401
+from app import ufc_live_sell_controls_v1 as _ufc_live_sell_controls  # noqa: F401
 from app import audit_core_sync
 from app import audit_core_sync_schema_patch
 from app import audit_research_store
