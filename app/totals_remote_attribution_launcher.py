@@ -4,14 +4,14 @@ import os
 
 import uvicorn
 
-# Install the universal attribution/reconciliation guard before importing the
-# dashboard chain. dashboard_attribution_v1 starts the SH01 background watcher
-# during import, so the guard must be loaded first.
+# Install attribution/reconciliation guards before importing the dashboard
+# chain. dashboard_attribution_v1 starts background services during import.
 from app import sh01_attribution_reconcile_guard_v5 as _sh01_guard  # noqa: F401
+from app import basketball_monitor_attribution_guard_v1 as _basketball_guard  # noqa: F401
 
-# Keep the full dashboard/executor chain, promote SH01 into the normal sport
-# capper cards, then install the WNBA totals remote bridge on the same app.
-from app import dashboard_sh01_capper_v2 as base
+# Keep the full dashboard/executor chain, promote SH01 into correctly scoped
+# sport cards, then install the WNBA totals remote bridge on the same app.
+from app import dashboard_sh01_capper_v3 as base
 from app import audit_core_sync
 from app import pw_totals_remote
 
