@@ -5,11 +5,12 @@ from typing import Any
 
 import uvicorn
 
-# Import the application first so its normal module graph is initialized in the
-# same order as the standard Railway start command. FastAPI lifespan/background
-# workers do not start until uvicorn starts serving, so the CFB patch below is
-# applied before the first capper poll.
-from app import main
+# Import the normal production composite application first. This preserves the
+# exact route/install chain used by /app/start.sh (NFL, CFB, basketball, stats,
+# research, dashboard, executor, etc.). FastAPI lifespan/background workers do
+# not start until uvicorn begins serving, so the CFB resolver can still be
+# patched safely before the first poll.
+from app import wnba_pw_research_v13 as composite
 from app import cfb_capper_preview as cfb
 
 
@@ -33,9 +34,8 @@ def _find_five_better_live_spread_options(
     Each returned row already contains the live quote/odds and alternative_id
     consumed by the existing manual-buy-alternate endpoint/button.
     """
-    # Ask the existing resolver for a wide enough set before filtering. This
-    # preserves all of its event/date/market fail-closed checks and live quote
-    # validation instead of duplicating market-resolution logic here.
+    # Ask the existing resolver for a wide set before filtering. This preserves
+    # its event/date/type fail-closed checks and current CLOB quote validation.
     alternatives = _ORIGINAL_FIND_SPREAD_ALTERNATIVES(pick, limit=50)
     if not alternatives:
         return []
@@ -53,7 +53,7 @@ def _find_five_better_live_spread_options(
         ]
         return better[:5]
 
-    # Pregame: keep the established nearest-line ordering, just expose five.
+    # Pregame: keep established nearest-line ordering, just expose up to five.
     return alternatives[: max(1, min(int(limit or 5), 5))]
 
 
@@ -62,7 +62,7 @@ cfb._find_spread_alternatives = _find_five_better_live_spread_options
 
 if __name__ == "__main__":
     uvicorn.run(
-        main.app,
+        composite.app,
         host="0.0.0.0",
-        port=int(os.getenv("PORT", "8000")),
+        port=int(os.getenv("PORT", "8080")),
     )
