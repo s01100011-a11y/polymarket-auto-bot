@@ -46,11 +46,68 @@ def _patch_immediate_signal_persistence() -> None:
     print(f"CFB_RUNTIME_IMMEDIATE_SAVE_PATCH applied replacements={count}", flush=True)
 
 
+def _patch_nfl_immediate_signal_persistence() -> None:
+    """Persist NFL signal mutations immediately instead of waiting for cycle end.
+
+    This mirrors the CFB durability fix.  Each mutation of the per-pick signal
+    dictionary is flushed before another bridge row can fail and abort the poll
+    cycle.  The patch is line-aware and idempotent so process restarts do not add
+    duplicate save calls.
+    """
+    path = Path(__file__).with_name("nfl_capper_ingest.py")
+    source = path.read_text(encoding="utf-8")
+    lines = source.splitlines(keepends=True)
+    patched: list[str] = []
+    replacements = 0
+    protected = 0
+    targets = {"signals[fp] = base_record", "signals[fp] = record"}
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        patched.append(line)
+        stripped = line.strip()
+        if stripped not in targets or i + 1 >= len(lines):
+            i += 1
+            continue
+
+        next_line = lines[i + 1]
+        if next_line.strip() != "changed = True":
+            i += 1
+            continue
+
+        patched.append(next_line)
+        indent = next_line[: len(next_line) - len(next_line.lstrip())]
+        following = lines[i + 2] if i + 2 < len(lines) else ""
+        if following.strip() == "_save_signals(signals)":
+            protected += 1
+        else:
+            patched.append(f"{indent}_save_signals(signals)\n")
+            replacements += 1
+        i += 2
+
+    if replacements == 0 and protected == 0:
+        raise RuntimeError("NFL immediate-save patch anchor not found")
+
+    if replacements:
+        path.write_text("".join(patched), encoding="utf-8")
+        print(
+            f"NFL_RUNTIME_IMMEDIATE_SAVE_PATCH applied replacements={replacements} protected={protected}",
+            flush=True,
+        )
+    else:
+        print(
+            f"NFL_RUNTIME_IMMEDIATE_SAVE_PATCH already_present protected={protected}",
+            flush=True,
+        )
+
+
 def main() -> None:
     _patch_poller_scope()
     _patch_immediate_signal_persistence()
+    _patch_nfl_immediate_signal_persistence()
 
-    # Import after the source repairs so the module compiles with the fixed poller.
+    # Import after the source repairs so the modules compile with the fixed pollers.
     from app import cfb_live_options_bootstrap as boot
 
     cfb = boot.cfb
@@ -63,6 +120,22 @@ def main() -> None:
     print(
         "CFB_RUNTIME_SIGNAL_STORE "
         + json.dumps({"path": str(signal_path), "exists": signal_path.exists(), "count": len(signals)}),
+        flush=True,
+    )
+
+    nfl_signal_path = core.DATA_DIR / "nfl_capper_signals.json"
+    nfl_signals = core._load(nfl_signal_path)
+    if not isinstance(nfl_signals, dict):
+        nfl_signals = {}
+    print(
+        "NFL_RUNTIME_SIGNAL_STORE "
+        + json.dumps(
+            {
+                "path": str(nfl_signal_path),
+                "exists": nfl_signal_path.exists(),
+                "count": len(nfl_signals),
+            }
+        ),
         flush=True,
     )
 
