@@ -2,6 +2,63 @@ from __future__ import annotations
 
 from app import ufc_live_betting_splits_v1 as splits
 
+# CLEATZ currently renders UFC fighter rows as compact moneyline rows such as
+# "Court McGee +190 +41 24% 65%" and keeps the Bets/Handle labels in the table
+# footer.  The original parser expected literal "Bets ... Handle ..." labels
+# after every fighter, which caused otherwise valid full-card rows to disappear.
+# Keep the labelled format for backwards compatibility and add the compact row
+# format used by the live page.  Iterate fighter-name occurrences backwards so
+# the actual moneyline row wins over the matchup heading; require an American
+# odds token for the compact fallback so "Moves since open" percentages cannot
+# be mistaken for current ticket/handle splits.
+splits._NAME_ALIASES["Wang Cong"] = ["Wang Cong", "Cong Wang"]
+
+
+def _fighter_row_full_card(window: str, name: str):
+    for alias in splits._aliases(name):
+        occurrences = list(splits.re.finditer(splits.re.escape(alias), window, flags=splits.re.I))
+        for occurrence in reversed(occurrences):
+            tail = window[occurrence.end() : occurrence.end() + 180]
+
+            labelled = splits.re.search(
+                r"(?P<between>.{0,110}?)\bBets\s*(?P<bets>\d{1,3})%\s*Handle\s*(?P<handle>\d{1,3})%",
+                tail,
+                flags=splits.re.I,
+            )
+            if labelled:
+                bets = int(labelled.group("bets"))
+                handle = int(labelled.group("handle"))
+                if 0 <= bets <= 100 and 0 <= handle <= 100:
+                    between = labelled.group("between") or ""
+                    odds_match = splits.re.search(r"(?<!\d)([+-]\d{2,4})(?!\d)", between)
+                    return {
+                        "bets_pct": f"{bets}%",
+                        "handle_pct": f"{handle}%",
+                        "odds": odds_match.group(1) if odds_match else None,
+                    }
+
+            percentages = list(splits.re.finditer(r"(?<!\d)(\d{1,3})%", tail))
+            if len(percentages) < 2:
+                continue
+            bets = int(percentages[0].group(1))
+            handle = int(percentages[1].group(1))
+            if not (0 <= bets <= 100 and 0 <= handle <= 100):
+                continue
+
+            before_bets = tail[: percentages[0].start()]
+            odds_match = splits.re.search(r"(?<!\d)([+-]\d{2,4})(?!\d)", before_bets)
+            if not odds_match:
+                continue
+            return {
+                "bets_pct": f"{bets}%",
+                "handle_pct": f"{handle}%",
+                "odds": odds_match.group(1),
+            }
+    return None
+
+
+splits._fighter_row = _fighter_row_full_card
+
 live = splits.live
 html = live.UFC_LIVE_HTML
 marker = "ufc-splits-main-row-fix-v1"
