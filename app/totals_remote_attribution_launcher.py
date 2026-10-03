@@ -30,6 +30,9 @@ from app import ufc_position_summary_v1 as _ufc_position_summary  # noqa: F401
 from app import executor_event_labels_v1 as _executor_event_labels  # noqa: F401
 from app import ufc_live_page_v1 as _ufc_live_page  # noqa: F401
 from app import ufc_live_sell_controls_v1 as _ufc_live_sell_controls  # noqa: F401
+from app import ufc_rebuy_approval_v1 as _ufc_rebuy_approval  # noqa: F401
+from app import ufc_live_overview_v1 as _ufc_live_overview  # noqa: F401
+from app import ufc_main_dashboard_cleanup_v1 as _ufc_main_cleanup  # noqa: F401
 from app import audit_core_sync
 from app import audit_core_sync_schema_patch
 from app import audit_research_store
